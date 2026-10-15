@@ -21,6 +21,7 @@
 - [OpenChamber SDK contract](sdk-contract.md): the host behavior the extension relies on.
 - [Screenshots](screenshots/): the panel in light and dark themes, from the dev preview with made-up data, plus two shots inside OpenChamber.
 - [Mockups](mockups/): the approved designs.
+- [Logo](logo/): the mark, the app tile, light and dark lockups, and the GitHub social preview. Built by `dev/logo/build.py`.
 
 ## Project files
 

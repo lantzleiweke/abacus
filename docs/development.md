@@ -99,6 +99,10 @@ python3 dev/demo/render.py <stills-dir>
 
 It writes both files to `docs/`. Pass `--out` for another folder, `--work` to keep the frames, or `--only-frames 0,60,240` to render single frames for a quick check. Timings, click targets, zoom levels and output sizes are in `dev/demo/storyboard.json`, in CSS pixels of the original stills. The script removes the top `crop_top_css` pixels of every still first, so the OpenChamber header with the folder name never shows. If you capture new stills, check that the header is still inside that strip.
 
+### Logo
+
+`icon.svg` (the rail icon) and everything in `docs/logo/` are written by `python3 dev/logo/build.py`, which needs only Python 3 and ImageMagick 7 (`magick`) for the PNGs. The geometry, colors and tagline live in that one file, so change them there and rerun rather than editing the outputs. The mark is drawn on an 18 px grid so it stays sharp at the rail's size. Pass `--font` with a TTF to change the social preview tagline font; it defaults to JetBrains Mono Medium when installed.
+
 ## Fixtures
 
 `test/fixtures/` is committed and synthetic:

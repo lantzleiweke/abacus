@@ -1,4 +1,4 @@
-# Abacus
+# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/lockup-dark.svg"><img src="docs/logo/lockup-light.svg" alt="Abacus" height="60"></picture>
 
 Abacus is an OpenChamber extension that shows a project's [Beads](https://github.com/steveyegge/beads) issues in the right-rail panel, next to your agent. You can browse, search, edit and create beads, see what your agent changed, and hand a bead to a chat or a new session. You do not need the `bd` command line to do any of it.
 

@@ -7,6 +7,7 @@ First version.
 ### Added
 
 - A right-rail panel, "Abacus", that shows the beads of the open project.
+- The Abacus logo: a rail icon drawn for 16 to 18 px, an app tile, light and dark lockups for the README, and a social preview.
 - Epic and Status views with one row style, search, filters (status, assignee, priority, "Only ready to start") and keyboard navigation.
 - A detail view with the bead's description, acceptance criteria, design, notes, relationships, comments and labels.
 - Editing in place: text fields, status, priority, assignee, labels, links and comments. Every edit is checked against the bead as it was last seen, and a change made in the meantime is shown before anything is overwritten.
