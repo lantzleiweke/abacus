@@ -95,6 +95,14 @@ describe('childEnv', () => {
     expect(names).toContain('BEADS_DOLT_PASSWORD');
   });
 
+  it('drops the switches that let bd migrate a store on its own', () => {
+    vi.stubEnv('BD_IGNORE_SCHEMA_SKEW', '1');
+    vi.stubEnv('BD_ALLOW_REMOTE_MIGRATE', '1');
+    const env = childEnv();
+    expect(env).not.toHaveProperty('BD_IGNORE_SCHEMA_SKEW');
+    expect(env).not.toHaveProperty('BD_ALLOW_REMOTE_MIGRATE');
+  });
+
   it('hands the augmented PATH to the child', async () => {
     await fake('bd', 'echo "$PATH"');
     pathWithTmp();
@@ -438,6 +446,9 @@ describe('isLockError', () => {
     'cannot open /code/smart-lock/.beads/embeddeddolt',
     'Fix locks in sync',
     'Error resolving nope: no issue found',
+    // bd's refusal to migrate a shared server database: "lock out" is the refusal's words, not a busy database.
+    'refusing to auto-apply 34 pending schema migrations to a shared server database (v32 -> v66): migrating would lock out every co-resident bd client still on the old schema (#5920)',
+    'this store is shared (dolt sql-server); the first-mover auto-migrate is disabled here because it would lock out co-resident clients (#5920)',
     '',
   ])('ignores %s', (text) => {
     expect(isLockError(text)).toBe(false);

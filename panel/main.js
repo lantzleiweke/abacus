@@ -1775,6 +1775,22 @@ ${GUEST_UI_LOOK_CSS}`;
       create: call("create"),
       comment: call("comment"),
       dependency: call("dependency"),
+      gateCreate: call("gateCreate"),
+      gateResolve: call("gateResolve"),
+      humanRespond: call("humanRespond"),
+      humanDismiss: call("humanDismiss"),
+      history: call("history"),
+      memories: call("memories"),
+      memoryRemember: call("memoryRemember"),
+      memoryForget: call("memoryForget"),
+      deferBead: call("deferBead"),
+      undeferBead: call("undeferBead"),
+      supersede: call("supersede"),
+      duplicate: call("duplicate"),
+      explain: call("explain"),
+      eventsStatus: call("eventsStatus"),
+      enableEvents: call("enableEvents"),
+      migrateSchema: call("migrateSchema"),
       seen: call("seen"),
       context: call("context"),
       syncPreview: call("sync-preview"),
@@ -2333,6 +2349,10 @@ ${GUEST_UI_LOOK_CSS}`;
   var dayText = (date, now) => (date.getFullYear() === new Date(now).getFullYear() ? MONTH_DAY : MONTH_DAY_YEAR).format(wallClock(date));
   var timeText = (date) => TIME.format(wallClock(date));
   var fullText = (date) => FULL.format(wallClock(date));
+  function personName(name, panel2) {
+    if (!name) return "unknown";
+    return panel2 !== null && name === panel2 ? "you (panel)" : name;
+  }
   var folderName = (directory2) => directory2.split(/[\\/]/).filter(Boolean).pop() ?? directory2;
   function initials(name) {
     const words = name.replace(/\(.*?\)/g, " ").trim().split(/[\s._@-]+/).filter(Boolean);
@@ -2428,6 +2448,11 @@ ${GUEST_UI_LOOK_CSS}`;
       return { bucket, look: look(b2.status), label: statusLabel(b2.status, statuses), marker: markerOf(b2.status), filterAs: b2.status };
     };
   }
+  function dueMatches(b2, filter, done, now) {
+    const due = typeof b2.extra.due_at === "string" ? Date.parse(b2.extra.due_at) : NaN;
+    if (done || !Number.isFinite(due)) return false;
+    return filter === "overdue" ? due < now : due >= now && due <= now + WEEK_MS;
+  }
   function prepare(input) {
     const classify = classifier(input);
     const ready = new Set(input.readyIds);
@@ -2438,6 +2463,7 @@ ${GUEST_UI_LOOK_CSS}`;
       if (assignee === "unassigned" ? !!b2.assignee : assignee !== "any" && b2.assignee !== assignee.name) return false;
       if (priorities.length > 0 && (b2.priority === null || !priorities.includes(b2.priority))) return false;
       if (input.filters.ready && !ready.has(b2.id)) return false;
+      if (input.filters.due !== "any" && !dueMatches(b2, input.filters.due, classify(b2).look === "done", input.now)) return false;
       return q4 === "" || b2.id.toLowerCase().includes(q4) || b2.title.toLowerCase().includes(q4);
     };
     const byId = new Map(input.beads.map((b2) => [b2.id, b2]));
@@ -2813,12 +2839,253 @@ ${GUEST_UI_LOOK_CSS}`;
     return { parent, children, deps };
   }
 
+  // src/shared/gates.ts
+  var PLAN_APPROVAL_REASON = "Approve the plan before work starts";
+  var REVIEW_REASON = "Review before closing";
+
+  // src/panel/dates.ts
+  var localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+  var WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  var formatters = /* @__PURE__ */ new Map();
+  function parts(zone) {
+    let f5 = formatters.get(zone);
+    if (!f5) {
+      f5 = new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", weekday: "short" });
+      formatters.set(zone, f5);
+    }
+    return f5;
+  }
+  function wallAt(ms, zone) {
+    const get = {};
+    for (const p3 of parts(zone).formatToParts(new Date(ms))) get[p3.type] = p3.value;
+    return {
+      year: Number(get.year),
+      month: Number(get.month),
+      day: Number(get.day),
+      hour: Number(get.hour) % 24,
+      minute: Number(get.minute),
+      second: Number(get.second),
+      weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get.weekday ?? "")
+    };
+  }
+  function offsetAt(ms, zone) {
+    const w4 = wallAt(ms, zone);
+    return Date.UTC(w4.year, w4.month - 1, w4.day, w4.hour, w4.minute, w4.second) - Math.floor(ms / 1e3) * 1e3;
+  }
+  function instantOf(y4, mo, d3, h4, mi, s3, zone) {
+    const asUtc = Date.UTC(y4, mo - 1, d3, h4, mi, s3);
+    return asUtc - offsetAt(asUtc - offsetAt(asUtc, zone), zone);
+  }
+  var DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(Z?)$/;
+  var RELATIVE_RE = /^\+(\d{1,4})([dwh])$/;
+  var NEXT_RE = /^next ([a-z]+)$/;
+  function realDay(y4, m3, d3) {
+    const t3 = new Date(Date.UTC(y4, m3 - 1, d3));
+    return t3.getUTCFullYear() === y4 && t3.getUTCMonth() === m3 - 1 && t3.getUTCDate() === d3;
+  }
+  function labelFor(ms, now, zone, dayOnly) {
+    const base = { timeZone: zone, weekday: "short", month: "short", day: "numeric" };
+    const sameYear = wallAt(ms, zone).year === wallAt(now, zone).year;
+    const options = { ...base, ...sameYear ? {} : { year: "numeric" }, ...dayOnly ? {} : { hour: "numeric", minute: "2-digit" } };
+    return new Intl.DateTimeFormat("en-US", options).format(new Date(ms));
+  }
+  function dateLabel(ms, now, zone = localZone()) {
+    try {
+      const w4 = wallAt(ms, zone);
+      return labelFor(ms, now, zone, w4.hour === 0 && w4.minute === 0 && w4.second === 0);
+    } catch {
+      return new Date(ms).toISOString();
+    }
+  }
+  function daysFromNow(now, days, zone) {
+    const w4 = wallAt(now, zone);
+    const moved = new Date(Date.UTC(w4.year, w4.month - 1, w4.day + days, w4.hour, w4.minute, w4.second));
+    return instantOf(moved.getUTCFullYear(), moved.getUTCMonth() + 1, moved.getUTCDate(), w4.hour, w4.minute, w4.second, zone);
+  }
+  function parseDateInput(text2, now, zone) {
+    const raw = text2.trim();
+    if (raw === "") return { kind: "unknown" };
+    try {
+      const ok = (at2, dayOnly = false) => ({ kind: "ok", at: new Date(at2), label: labelFor(at2, now, zone, dayOnly) });
+      const clock = Math.floor(now / 1e3) * 1e3;
+      const lower = raw.toLowerCase();
+      if (lower === "tomorrow") return ok(daysFromNow(clock, 1, zone));
+      const next = NEXT_RE.exec(lower);
+      if (next) {
+        const target = WEEKDAYS.indexOf(next[1]);
+        if (target < 0) return { kind: "unknown" };
+        const ahead = (target - wallAt(clock, zone).weekday + 7) % 7 || 7;
+        return ok(daysFromNow(clock, ahead, zone));
+      }
+      const relative = RELATIVE_RE.exec(raw);
+      if (relative) {
+        const n2 = Number(relative[1]);
+        if (relative[2] === "h") return ok(clock + n2 * 36e5);
+        return ok(daysFromNow(clock, relative[2] === "w" ? n2 * 7 : n2, zone));
+      }
+      const day = DAY_RE.exec(raw);
+      if (day) {
+        const [y4, m3, d3] = [Number(day[1]), Number(day[2]), Number(day[3])];
+        return realDay(y4, m3, d3) ? ok(instantOf(y4, m3, d3, 0, 0, 0, zone), true) : { kind: "unknown" };
+      }
+      const time = DATETIME_RE.exec(raw);
+      if (time) {
+        const [y4, m3, d3, h4, mi, s3] = time.slice(1, 7).map(Number);
+        if (!realDay(y4, m3, d3) || h4 > 23 || mi > 59 || s3 > 59) return { kind: "unknown" };
+        return ok(time[7] === "Z" ? Date.UTC(y4, m3 - 1, d3, h4, mi, s3) : instantOf(y4, m3, d3, h4, mi, s3, zone));
+      }
+    } catch {
+    }
+    return { kind: "unknown" };
+  }
+
+  // src/panel/gates.ts
+  function gateWord(gate, count = 1) {
+    const [one, many] = WORDS[gate.kind === "human" && gate.planApproval ? "plan" : gate.kind] ?? WORDS.other;
+    return count > 1 ? `${count} ${many}` : one;
+  }
+  var WORDS = {
+    human: ["a review", "reviews"],
+    // Counted like the rest: two plan-approval gates are two approvals someone has to give.
+    plan: ["plan approval", "plan approvals"],
+    timer: ["a timer", "timers"],
+    "gh:run": ["a GitHub check", "GitHub checks"],
+    "gh:pr": ["a GitHub PR", "GitHub PRs"],
+    bead: ["another bead", "other beads"],
+    other: ["an outside check", "outside checks"]
+  };
+  function gateLabel(gate) {
+    switch (gate.kind) {
+      case "human":
+        return gate.planApproval ? "Plan approval" : "Review";
+      case "timer":
+        return "Timer";
+      case "gh:run":
+        return "GitHub run";
+      case "gh:pr":
+        return "GitHub pull request";
+      case "bead":
+        return "Bead";
+      default:
+        return "Check";
+    }
+  }
+  function familyOf(kind, reason) {
+    if (kind === "human") return reason?.startsWith(PLAN_APPROVAL_REASON) ? "plan" : "review";
+    if (kind === "timer") return "timer";
+    if (kind === "gh:run" || kind === "gh:pr") return "github";
+    return "other";
+  }
+  var GATE_EVENTS = {
+    review: { requested: "Review requested", resolved: "Review resolved", deleted: "Review deleted", unlinked: "Review removed from this bead" },
+    plan: { requested: "Plan approval requested", resolved: "Plan approved", deleted: "Plan approval deleted", unlinked: "Plan approval removed from this bead" },
+    timer: { requested: "Timer set", resolved: "Timer ended", deleted: "Timer deleted", unlinked: "Timer removed from this bead" },
+    github: { requested: "GitHub check added", resolved: "GitHub check cleared", deleted: "GitHub check deleted", unlinked: "GitHub check removed from this bead" },
+    other: { requested: "Check added", resolved: "Check cleared", deleted: "Check deleted", unlinked: "Check removed from this bead" }
+  };
+  function gateEventWords(e3) {
+    const family = familyOf(e3.gateKind, e3.reason);
+    const head = GATE_EVENTS[family][e3.what];
+    if (e3.what !== "resolved" || e3.byPanel) return { head, by: null };
+    const people = family === "review" || family === "plan";
+    return { head, by: e3.actor ?? (people ? "someone else" : null) };
+  }
+  var gateEventOf = (e3) => ({
+    what: e3.kind === "gate_opened" ? "requested" : e3.ended ?? "resolved",
+    gateKind: e3.gateKind,
+    reason: e3.reason,
+    byPanel: e3.byPanel,
+    actor: e3.actor
+  });
+  var gatesOn = (bead, gates) => gates.filter((g3) => g3.blocks.includes(bead.id));
+  var LISTED = 3;
+  var SHOWN = 2;
+  function waitItems(waits) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const gate of waits.gates) {
+      const key = gateWord(gate);
+      const seen = counts.get(key);
+      if (seen) seen.n++;
+      else counts.set(key, { gate, n: 1 });
+    }
+    const all = [...[...counts.values()].map(({ gate, n: n2 }) => ({ kind: "gate", word: gateWord(gate, n2) })), ...waits.beads.map((b2) => ({ kind: "bead", id: b2.id, title: b2.title }))];
+    const shown = all.length > LISTED ? all.slice(0, SHOWN) : all;
+    const rest = all.length - shown.length;
+    const last = shown.length - 1;
+    return {
+      items: shown.map((item, i3) => ({ sep: i3 === 0 ? "" : i3 === last && rest === 0 ? " and " : ", ", item })),
+      more: rest > 0 ? ` and ${rest} more` : ""
+    };
+  }
+  var beadName = (b2) => `${shortId(b2.id)} ${b2.title}`.trim();
+  function waitsText(waits) {
+    const { items, more } = waitItems(waits);
+    if (items.length === 0) return "waiting on something that is not done";
+    return `waiting on ${items.map(({ sep, item }) => sep + (item.kind === "gate" ? item.word : beadName(item))).join("")}${more}`;
+  }
+  var blockedText = (bead, gates, blockers = []) => waitsText({ gates: gatesOn(bead, gates), beads: blockers });
+  function waitsOf(bead, explain, gates, gateIds = [], links = []) {
+    const isGate = (id) => gateIds.includes(id) || gates.some((g3) => g3.id === id);
+    const own = gatesOn(bead, gates);
+    const beads = explain?.state === "blocked" ? explain.blockers.filter((b2) => !isGate(b2.id) && b2.status !== "closed") : links.filter((b2) => !isGate(b2.id));
+    return own.length > 0 || beads.length > 0 ? { gates: own, beads } : null;
+  }
+  function dayIn(ms, zone) {
+    const parts2 = new Map(new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms)).map((p3) => [p3.type, p3.value]));
+    return `${parts2.get("year")}-${parts2.get("month")}-${parts2.get("day")}`;
+  }
+  function whyLine(bead, explain, gates, now = Date.now(), zone = localZone(), gateIds = []) {
+    if (explain?.state === "blocked") {
+      const waits = waitsOf(bead, explain, gates, gateIds);
+      if (waits) return sentence(waitsText(waits));
+      return explain.blockers.length === 0 ? "Waiting on something that is not done" : null;
+    }
+    if (explain === null && gatesOn(bead, gates).length > 0) return sentence(blockedText(bead, gates));
+    if (explain?.state === "ready") return "Ready to start";
+    if (typeof bead.extra.defer_until === "string") {
+      const until = Date.parse(bead.extra.defer_until);
+      if (Number.isFinite(until) && until > now) return `Snoozed until ${dayIn(until, zone)}`;
+    }
+    if (bead.status === "deferred") return "Snoozed with no date";
+    return null;
+  }
+  var sentence = (text2) => text2.charAt(0).toUpperCase() + text2.slice(1);
+  var COMMENT_ADDED = "Your comment was added, but the bead could not be closed. ";
+  var PART_SAVED = " Part of your change was saved.";
+  var WAITS = /still blocked by|still waiting on|is waiting on a review/;
+  function blockedMessage(message, bead, gates, blockers = []) {
+    const own = gatesOn(bead, gates);
+    if (own.length === 0 || !WAITS.test(message)) return message;
+    const prefix = message.startsWith(COMMENT_ADDED) ? COMMENT_ADDED : "";
+    const suffix = message.endsWith(PART_SAVED) ? PART_SAVED : "";
+    const what = message.slice(prefix.length).startsWith("This request") ? "request" : "bead";
+    const people = own.every((g3) => g3.kind === "human");
+    const advice = blockers.length > 0 || !people ? "" : own.every((g3) => g3.planApproval) ? " Approve the plan first." : own.length > 1 ? " Resolve them first." : " Resolve the review first.";
+    return `${prefix}This ${what} can't be closed yet. It is ${blockedText(bead, gates, blockers)}.${advice}${suffix}`;
+  }
+  function gateState(gate, now, panel2) {
+    const at2 = Date.parse(gate.createdAt);
+    const since = Number.isFinite(at2) ? `${shortAgo(now - at2)} ago` : "";
+    const who = gate.createdBy ? personName(gate.createdBy, panel2) : null;
+    const opened = (verb) => [who ? `${verb} by ${who}` : verb, since].filter(Boolean).join(who ? ", " : " ");
+    if (gate.kind === "human") return opened("Asked");
+    if (gate.kind === "timer" && gate.timeoutMs !== null && Number.isFinite(at2)) {
+      const left = at2 + gate.timeoutMs - now;
+      if (left <= 0) return "Time is up. Beads clears it on its next check";
+      return `Ends in ${shortAgo(left)}. ${opened("Set")}`;
+    }
+    if (gate.kind === "gh:run" || gate.kind === "gh:pr") return `Beads checks GitHub for it. ${opened("Set")}`;
+    return opened("Set");
+  }
+
   // src/panel/detail.ts
   var DAY_MS = 864e5;
+  var SKEW_MS = 12e4;
   function when(text2, now) {
     const at2 = Date.parse(text2);
     if (!Number.isFinite(at2)) return text2;
-    if (at2 <= now && now - at2 < DAY_MS) return ago(now - at2);
+    if (at2 - now < SKEW_MS && now - at2 < DAY_MS) return ago(now - at2);
     const date = new Date(at2);
     return `${dayText(date, now)}, ${timeText(date)}`;
   }
@@ -2829,10 +3096,6 @@ ${GUEST_UI_LOOK_CSS}`;
   function depTime(text2) {
     if (!text2) return null;
     return text2.replace("T", " ").replace(/(\.\d+)?Z$/, "");
-  }
-  function personName(name, panel2) {
-    if (!name) return "unknown";
-    return panel2 !== null && name === panel2 ? "you (panel)" : name;
   }
   var changeActor = (e3) => e3.byPanel ? "you (panel)" : e3.actor ?? "unknown";
   function latestUnseenChange(id, activity) {
@@ -2880,6 +3143,14 @@ ${GUEST_UI_LOOK_CSS}`;
         return { lead: `Link added ${by}`, what: `${kindLabel(e3.field ?? "", "out").toLowerCase()} ${String(e3.to ?? "")}`.trim() };
       case "dep_removed":
         return { lead: `Link removed ${by}`, what: `${kindLabel(e3.field ?? "", "out").toLowerCase()} ${String(e3.from ?? "")}`.trim() };
+      case "gate_opened":
+      case "gate_resolved": {
+        const { head, by: named } = gateEventWords(gateEventOf(e3));
+        const ended = e3.kind === "gate_resolved" && e3.ended === "deleted";
+        const who = named ?? (ended || !e3.actor && !e3.byPanel ? null : changeActor(e3));
+        const reason = e3.reason?.trim().split("\n")[0]?.trim();
+        return { lead: who ? `${head} ${time} by ${who}` : `${head} ${time}`, what: reason || null };
+      }
       case "field":
         break;
     }
@@ -2898,6 +3169,10 @@ ${GUEST_UI_LOOK_CSS}`;
       default:
         return { lead, what: e3.field ? `${humanize(e3.field).toLowerCase()} edited` : null };
     }
+  }
+  function changeText(line) {
+    if (line.to !== void 0) return `${line.lead}: ${line.from} \u2192 ${line.to}`;
+    return line.what ? `${line.lead}: ${line.what}` : line.lead;
   }
   var lastClose = (id, activity) => activity.find((e3) => e3.beadId === id && e3.kind === "closed");
   function closeReason(bead, activity, statuses) {
@@ -2991,10 +3266,52 @@ ${GUEST_UI_LOOK_CSS}`;
     }
     return items;
   }
+  var BOX = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\](?:\s|$))/;
+  var BULLET = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
+  var FENCE = /^\s*(```|~~~)/;
+  var RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+  function acceptanceLines(text2) {
+    let fence = null;
+    return text2.split("\n").map((raw, index) => {
+      const line = raw.replace(/\r$/, "");
+      const mark = FENCE.exec(line)?.[1];
+      if (mark && (fence === null || fence === mark)) {
+        fence = fence === null ? mark : null;
+        return { index, kind: "text", done: false, text: line, depth: 0 };
+      }
+      const bullet = fence !== null || RULE.test(line) ? null : BULLET.exec(line);
+      if (!bullet) return { index, kind: "text", done: false, text: line, depth: 0 };
+      const depth = bullet[1].replace(/\t/g, "  ").length >= 2 ? 1 : 0;
+      const box = BOX.exec(line);
+      if (box) return { index, kind: "box", done: box[2] !== " ", text: line.slice(box[0].length).trim(), depth };
+      return { index, kind: "bullet", done: false, text: bullet[2].trim(), depth };
+    });
+  }
+  function acceptanceBlocks(text2) {
+    const blocks = [];
+    for (const line of acceptanceLines(text2)) {
+      const last = blocks[blocks.length - 1];
+      if (line.kind !== "text") {
+        if (last?.kind === "list") last.lines.push(line);
+        else blocks.push({ kind: "list", lines: [line] });
+      } else if (last?.kind === "text") last.text += `
+${line.text}`;
+      else if (line.text.trim() !== "") blocks.push({ kind: "text", text: line.text });
+    }
+    return blocks;
+  }
+  function toggleLine(text2, index) {
+    const lines = text2.split("\n");
+    const line = lines[index];
+    if (line === void 0 || acceptanceLines(text2)[index]?.kind !== "box") return null;
+    lines[index] = line.replace(BOX, (_all, head, mark, tail) => `${head}${mark === " " ? "x" : " "}${tail}`);
+    return lines.join("\n");
+  }
 
   // src/panel/edit.ts
   function writesPaused(snapshot) {
     if (!snapshot) return null;
+    if (snapshot.freshness.schemaUpdate) return "Editing is paused until the project is updated.";
     if (snapshot.writesBlocked) return "Editing is paused until the sync problem is resolved.";
     if (snapshot.sync.kind === "running") return `Editing is paused while ${snapshot.sync.op === "publish" ? "Publish" : "Sync"} runs.`;
     return null;
@@ -3059,12 +3376,149 @@ ${GUEST_UI_LOOK_CSS}`;
   }
   var closes = (status, statuses) => looker(statuses)(status) === "done";
 
+  // src/shared/close.ts
+  var CLOSED = "closed";
+  var PINNED = "pinned";
+  var notClosedChildren = (rows, id) => rows.filter((b2) => b2.parentId === id && b2.status !== CLOSED).map((b2) => b2.id);
+  function closeBlockers(rows, id) {
+    const byId = new Map(rows.map((b2) => [b2.id, b2]));
+    const live = (s3) => s3 !== void 0 && s3 !== CLOSED && s3 !== PINNED;
+    const holdsLiveChild = (target) => rows.some((b2) => b2.parentId === target && live(b2.status));
+    const directTargets = (bead) => (bead?.dependencies ?? []).filter((d3) => d3.kind === "blocks" || d3.kind === "conditional-blocks" || d3.kind === "waits-for").map((d3) => d3.to);
+    const blockedState = (bead, seen) => {
+      if (bead === void 0 || !live(bead.status) || seen.has(bead.id)) return false;
+      seen.add(bead.id);
+      const links = bead.dependencies;
+      return links.some((d3) => (d3.kind === "blocks" || d3.kind === "conditional-blocks") && live(byId.get(d3.to)?.status)) || links.some((d3) => d3.kind === "waits-for" && byId.has(d3.to) && holdsLiveChild(d3.to)) || bead.parentId !== null && blockedState(byId.get(bead.parentId), seen);
+    };
+    const request = byId.get(id);
+    const waitingOn = blockedState(request, /* @__PURE__ */ new Set()) ? directTargets(request).filter((to) => live(byId.get(to)?.status)) : [];
+    const blockers = [...waitingOn, ...notClosedChildren(rows, id)];
+    return blockers.filter((blocker, index) => blockers.indexOf(blocker) === index);
+  }
+
+  // src/panel/needs.ts
+  var KEEP_MS = WEEK_MS;
+  var DAY_MS2 = 864e5;
+  var DEFAULT_STALE_DAYS = 3;
+  var needsOf = (state, now) => needsSections({ snapshot: state.snapshot, staleDays: state.settings.staleDays, keep: state.keep }, now);
+  var EMPTY_NEEDS = { waiting: [], asked: [], stuck: [], changed: [], count: 0 };
+  var WAITING_FALLBACK = "Waiting for your review";
+  var timeOf = (iso) => {
+    const at2 = Date.parse(iso);
+    return Number.isFinite(at2) ? at2 : NaN;
+  };
+  function span(ms) {
+    const days = Math.floor(ms / DAY_MS2);
+    if (days >= 1) return days === 1 ? "1 day" : `${days} days`;
+    const hours = Math.floor(ms / 36e5);
+    if (hours >= 1) return hours === 1 ? "1 hour" : `${hours} hours`;
+    const minutes = Math.floor(ms / 6e4);
+    return minutes >= 1 ? minutes === 1 ? "1 minute" : `${minutes} minutes` : "a moment";
+  }
+  var askedText = (bead) => bead.description.trim() ? bead.description.trim() : bead.title;
+  function waiting(beads, gates, done) {
+    const byId = new Map(beads.map((b2) => [b2.id, b2]));
+    const held = /* @__PURE__ */ new Map();
+    for (const gate of gates) {
+      if (gate.kind !== "human") continue;
+      for (const id of gate.blocks) held.set(id, [...held.get(id) ?? [], gate]);
+    }
+    const rows = [];
+    for (const [id, own] of held) {
+      const bead = byId.get(id);
+      if (!bead || done(bead)) continue;
+      rows.push({ bead, gates: own, reason: own.find((g3) => g3.reason)?.reason ?? WAITING_FALLBACK });
+    }
+    return rows.sort((a5, b2) => compareIds(a5.bead.id, b2.bead.id));
+  }
+  function stuck(beads, leases, keep, staleDays, now, look) {
+    const expired = /* @__PURE__ */ new Map();
+    for (const lease of leases) {
+      const until = timeOf(lease.expiresAt);
+      if (until <= now) expired.set(lease.beadId, lease);
+    }
+    const rows = [];
+    for (const bead of beads) {
+      if (look(bead.status) === "done") continue;
+      if ((keep[bead.id] ?? 0) > now) continue;
+      const touched = timeOf(bead.updatedAt);
+      const quiet = bead.status === "in_progress" && Number.isFinite(touched) && now - touched > staleDays * DAY_MS2;
+      const lease = bead.status === "in_progress" ? expired.get(bead.id) : void 0;
+      if (!quiet && !lease) continue;
+      const parts2 = [];
+      if (quiet) parts2.push(`No update in ${span(now - touched)}`);
+      if (lease) parts2.push(`${lease.holder}'s claim ran out ${span(now - timeOf(lease.expiresAt))} ago`);
+      rows.push({ bead, why: parts2.join(". "), kind: quiet ? "quiet" : "lease", at: Number.isFinite(touched) ? touched : 0 });
+    }
+    return rows.sort((a5, b2) => a5.at - b2.at || compareIds(a5.bead.id, b2.bead.id)).map(({ at: _at, ...row2 }) => row2);
+  }
+  var gateRow = (g3) => ({
+    id: g3.id,
+    title: g3.reason ?? "Gate",
+    status: "open",
+    priority: 2,
+    type: "gate",
+    assignee: null,
+    labels: [],
+    parentId: null,
+    description: "",
+    design: "",
+    acceptance: "",
+    notes: "",
+    createdAt: g3.createdAt,
+    createdBy: g3.createdBy,
+    updatedAt: g3.createdAt,
+    closedAt: null,
+    closeReason: null,
+    dependencies: [],
+    comments: [],
+    extra: {}
+  });
+  function changed(snapshot, now) {
+    const byId = new Map(snapshot.beads.map((b2) => [b2.id, b2]));
+    const rows = [];
+    for (const id of snapshot.unseenIds) {
+      const bead = byId.get(id);
+      if (!bead) continue;
+      const event = latestUnseenChange(id, snapshot.activity);
+      const order = event ? snapshot.activity.indexOf(event) : Number.MAX_SAFE_INTEGER;
+      rows.push({ bead, event, summary: event ? changeText(changeLine(event, snapshot.statuses, now)) : "Changed since you last looked", order });
+    }
+    return rows.sort((a5, b2) => a5.order - b2.order).map(({ order: _order, ...row2 }) => row2);
+  }
+  function needsSections(input, now) {
+    const { snapshot } = input;
+    if (!snapshot) return EMPTY_NEEDS;
+    const look = looker(snapshot.statuses);
+    const done = (b2) => look(b2.status) === "done";
+    const waitingRows = waiting(snapshot.beads, snapshot.gates, done);
+    const waitingIds = new Set(waitingRows.map((r3) => r3.bead.id));
+    const withGates = [...snapshot.beads, ...snapshot.gates.map(gateRow)];
+    const asked = snapshot.beads.filter((b2) => b2.labels.includes("human") && !done(b2) && !waitingIds.has(b2.id)).map((bead) => ({ bead, text: askedText(bead), blockers: closeBlockers(withGates, bead.id) }));
+    const stuckRows = stuck(snapshot.beads, snapshot.leases, input.keep, input.staleDays, now, look);
+    const changedRows = changed(snapshot, now);
+    return { waiting: waitingRows, asked, stuck: stuckRows, changed: changedRows, count: waitingRows.length + asked.length + stuckRows.length + changedRows.length };
+  }
+  function eligibleEpics(beads, statuses, gates = []) {
+    const look = looker(statuses);
+    const held = new Set(gates.flatMap((g3) => g3.blocks));
+    const children = /* @__PURE__ */ new Map();
+    for (const b2 of beads) if (b2.parentId !== null) children.set(b2.parentId, [...children.get(b2.parentId) ?? [], b2]);
+    return beads.filter((b2) => {
+      if (b2.type !== "epic" || look(b2.status) === "done" || held.has(b2.id)) return false;
+      const own = children.get(b2.id) ?? [];
+      return own.length > 0 && own.every((c3) => look(c3.status) === "done");
+    });
+  }
+
   // src/panel/store.ts
-  var VIEWS = ["epic", "status", "activity"];
-  var DEFAULT_FILTERS = { status: "open", assignee: "any", priorities: [], ready: false };
+  var VIEWS = ["needs", "epic", "status", "activity"];
+  var DEFAULT_FILTERS = { status: "open", assignee: "any", priorities: [], ready: false, due: "any" };
   var DEFAULT_COLLAPSED = ["status:deferred", "status:closed"];
-  var filtersActive = (f5) => f5.status !== "open" || f5.assignee !== "any" || f5.priorities.length > 0 || f5.ready;
+  var filtersActive = (f5) => f5.status !== "open" || f5.assignee !== "any" || f5.priorities.length > 0 || f5.ready || f5.due !== "any";
   var POLL_MS = 2e3;
+  var LIVE_POLL_MS = 500;
   var MAX_BACKOFF_MS = 3e4;
   var HIDDEN_POLL_MS = 6e4;
   function fnv(text2, seed) {
@@ -3076,16 +3530,30 @@ ${GUEST_UI_LOOK_CSS}`;
     return h4.toString(16).padStart(8, "0");
   }
   var uiKey = (directory2) => `ui:${fnv(directory2, 2166136261)}${fnv(directory2, 16777619)}`;
+  var projectKey = (directory2) => `project:${fnv(directory2, 2166136261)}${fnv(directory2, 16777619)}`;
+  var DEFAULT_SETTINGS = { staleDays: DEFAULT_STALE_DAYS };
+  var NO_CAPABILITIES = { eventsJournal: false, leases: false };
+  var MAX_STALE_DAYS = 30;
+  function readProject(value, now) {
+    const v5 = isObject2(value) ? value : {};
+    const days = v5.staleDays;
+    const keep = {};
+    if (isObject2(v5.keep)) {
+      for (const [id, until] of Object.entries(v5.keep)) if (typeof until === "number" && Number.isFinite(until) && until > now) keep[id] = until;
+    }
+    return { settings: { staleDays: typeof days === "number" && Number.isInteger(days) && days >= 1 && days <= MAX_STALE_DAYS ? days : DEFAULT_SETTINGS.staleDays }, keep };
+  }
   var isObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   var isStrings = (value) => Array.isArray(value) && value.every((v5) => typeof v5 === "string");
   function readFilters(value) {
     if (!isObject2(value)) return DEFAULT_FILTERS;
-    const { status, assignee, priorities, ready } = value;
+    const { status, assignee, priorities, ready, due } = value;
     return {
       status: status === "open" || status === "all" ? status : isObject2(status) && isStrings(status.only) ? { only: status.only } : "open",
       assignee: assignee === "any" || assignee === "unassigned" ? assignee : isObject2(assignee) && typeof assignee.name === "string" ? { name: assignee.name } : "any",
       priorities: Array.isArray(priorities) ? priorities.filter((p3) => Number.isInteger(p3) && p3 >= 0 && p3 <= 4) : [],
-      ready: ready === true
+      ready: ready === true,
+      due: due === "overdue" || due === "week" ? due : "any"
     };
   }
   function readUi(value) {
@@ -3135,7 +3603,15 @@ ${GUEST_UI_LOOK_CSS}`;
       generation: 0,
       workspace: null,
       snapshot: null,
+      capabilities: NO_CAPABILITIES,
+      gates: [],
+      leases: [],
+      unsupported: /* @__PURE__ */ new Set(),
+      sharedUpdates: {},
+      settings: DEFAULT_SETTINGS,
+      keep: {},
       view: "epic",
+      page: "list",
       filters: DEFAULT_FILTERS,
       collapsed: [...DEFAULT_COLLAPSED],
       query: "",
@@ -3152,7 +3628,12 @@ ${GUEST_UI_LOOK_CSS}`;
     let timer = null;
     let latest = 0;
     let failures = 0;
+    let following = false;
     let touched = false;
+    let projectTouched = false;
+    let storedLoaded = false;
+    let viewDecided = false;
+    let chosenView = null;
     let disposed = false;
     let inFlight = false;
     let wasVisible = visibility.isVisible();
@@ -3190,6 +3671,17 @@ ${field}`;
       if (visibility.isVisible()) timer = setTimeout(() => void poll(), ms);
       else if (!visibility.isDocumentHidden?.()) timer = setTimeout(() => void poll(), Math.max(ms, HIDDEN_POLL_MS));
     };
+    function rememberShared(directory2, freshness) {
+      const job = freshness.schemaUpdateJob;
+      if (job?.kind === "failed" && job.code === "update-blocked-shared") {
+        const kept = state.sharedUpdates[directory2];
+        if (kept?.message === job.message && kept.detail === job.detail) return;
+        set({ sharedUpdates: { ...state.sharedUpdates, [directory2]: { message: job.message, ...job.detail ? { detail: job.detail } : {} } } });
+      } else if (!freshness.schemaUpdate && directory2 in state.sharedUpdates) {
+        const { [directory2]: _gone, ...rest } = state.sharedUpdates;
+        set({ sharedUpdates: rest });
+      }
+    }
     async function poll(refreshWorkspace = false) {
       clearTimer();
       const { directory: directory2, generation } = state;
@@ -3206,16 +3698,26 @@ ${field}`;
         const answer = await client2.snapshot({ directory: directory2, ...cursor ? { cursor } : {}, ...refreshWorkspace ? { refreshWorkspace: true } : {} });
         if (!current()) return;
         failures = 0;
+        following = answer.following === true;
+        rememberShared(directory2, answer.freshness);
         if (!answer.unchanged) {
           listedBeads = answer.beads;
-          set({ snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) }, workspace: answer.workspace, error: null });
+          set({
+            snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) },
+            capabilities: answer.capabilities ?? NO_CAPABILITIES,
+            gates: answer.gates ?? [],
+            leases: answer.leases ?? [],
+            workspace: answer.workspace,
+            error: null
+          });
+          decideView();
           followDetail();
         } else if (state.snapshot) {
-          const held = answered.size;
+          const held = answered2.size;
           const beads = holding(listedBeads, answer.freshness);
-          set({ snapshot: { ...state.snapshot, cursor: answer.cursor, freshness: answer.freshness, sync: answer.sync, ...answered.size !== held ? { beads } : {} }, error: null });
+          set({ snapshot: { ...state.snapshot, cursor: answer.cursor, freshness: answer.freshness, sync: answer.sync, ...answered2.size !== held ? { beads } : {} }, error: null });
         }
-        schedule(POLL_MS);
+        schedule(following ? LIVE_POLL_MS : POLL_MS);
       } catch (thrown) {
         if (!current()) return;
         const error = asRequestError(thrown);
@@ -3228,21 +3730,34 @@ ${field}`;
         schedule(Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));
       }
     }
-    const answered = /* @__PURE__ */ new Map();
+    function decideView() {
+      if (viewDecided || !storedLoaded || state.snapshot === null || state.workspace?.kind !== "ok") return;
+      viewDecided = true;
+      if (touched) return;
+      if (needsOf(state, now()).count > 0 && state.view !== "needs") {
+        chosenView = state.view;
+        set({ view: "needs" });
+      }
+    }
+    function markUnsupported(feature) {
+      if (state.unsupported.has(feature)) return;
+      set({ unsupported: /* @__PURE__ */ new Set([...state.unsupported, feature]) });
+    }
+    const answered2 = /* @__PURE__ */ new Map();
     let listedBeads = [];
     function holding(beads, freshness) {
-      if (answered.size === 0) return beads;
+      if (answered2.size === 0) return beads;
       const read = freshness.localRefreshedAt === null ? NaN : Date.parse(freshness.localRefreshedAt);
-      for (const [id, copy] of [...answered]) if (read > copy.at) answered.delete(id);
-      if (answered.size === 0) return beads;
-      const out = beads.map((b2) => answered.get(b2.id)?.bead ?? b2);
-      for (const [id, copy] of answered) if (!beads.some((b2) => b2.id === id)) out.push(copy.bead);
+      for (const [id, copy] of [...answered2]) if (read > copy.at) answered2.delete(id);
+      if (answered2.size === 0) return beads;
+      const out = beads.map((b2) => answered2.get(b2.id)?.bead ?? b2);
+      for (const [id, copy] of answered2) if (!beads.some((b2) => b2.id === id)) out.push(copy.bead);
       return out;
     }
     function applyWritten(bead) {
       const snapshot = state.snapshot;
       if (!snapshot) return;
-      answered.set(bead.id, { bead, at: now() });
+      answered2.set(bead.id, { bead, at: now() });
       const listed2 = snapshot.beads.find((b2) => b2.id === bead.id);
       const beads = listed2 ? snapshot.beads.map((b2) => b2.id === bead.id ? bead : b2) : [...snapshot.beads, bead];
       set({ snapshot: { ...snapshot, beads } });
@@ -3344,8 +3859,9 @@ ${field}`;
       void poll();
       if (readBead && state.detail) void loadDetail();
     }
-    function refused(thrown) {
+    function refused(thrown, feature) {
       const error = asRequestError(thrown);
+      if (error.code === "unsupported" && feature) markUnsupported(feature);
       if (error.code === "uncertain" || ANSWER_LOST.has(error.code)) {
         refreshAfterWrite(true);
         return { kind: "uncertain", current: null, saved: error.saved === true };
@@ -3354,7 +3870,7 @@ ${field}`;
       else if (error.code === "writes-blocked" || error.code === "sync-running" || error.code === "merge-conflict" || error.workspace) void poll();
       return { kind: "error", error: toPanelError(error) };
     }
-    async function writing(send, done) {
+    async function writing(send, done, feature) {
       const { directory: directory2, generation } = state;
       if (directory2 === null || disposed) return { kind: "dropped" };
       const here = () => generation === state.generation && !disposed;
@@ -3362,16 +3878,61 @@ ${field}`;
         const answer = await send(directory2);
         return here() ? done(answer) : { kind: "dropped" };
       } catch (thrown) {
-        return here() ? refused(thrown) : { kind: "dropped" };
+        return here() ? refused(thrown, feature) : { kind: "dropped" };
       }
+    }
+    async function reading(send, feature) {
+      const { directory: directory2, generation } = state;
+      if (directory2 === null || disposed) return { kind: "dropped" };
+      const here = () => generation === state.generation && !disposed;
+      try {
+        const value = await send(directory2);
+        return here() ? { kind: "ok", value } : { kind: "dropped" };
+      } catch (thrown) {
+        if (!here()) return { kind: "dropped" };
+        const error = asRequestError(thrown);
+        if (error.code === "unsupported") markUnsupported(feature);
+        return { kind: "error", error: toPanelError(error) };
+      }
+    }
+    function humanDone(result) {
+      if (result.ok) applyWritten(result.bead);
+      else if (result.current) applyWritten(result.current);
+      void poll();
+      return { kind: "ok", value: result };
+    }
+    function writtenBead(result) {
+      if (result.ok) {
+        applyWritten(result.bead);
+        void poll();
+        if (result.detail) {
+          host2.toast({ kind: "info", message: "Saved. It may show as a change from someone else.", copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {
+          });
+        }
+        return { kind: "ok", value: result.bead };
+      }
+      if ("conflict" in result) {
+        applyWritten(result.current);
+        return { kind: "conflict", current: result.current };
+      }
+      if (result.current) applyWritten(result.current);
+      refreshAfterWrite(result.current === null);
+      return { kind: "uncertain", current: result.current, saved: result.saved === true };
     }
     const known = (id) => newerBead(state.detail?.data?.bead.id === id ? state.detail.data.bead : null, listed(id) ?? null);
     const persist = () => {
       const { directory: directory2, view, filters, collapsed } = state;
       if (directory2 === null) return;
       touched = true;
-      const value = { view, filters, collapsed };
+      const value = { view: chosenView ?? view, filters, collapsed };
       host2.storage.set(uiKey(directory2), value).catch(() => {
+      });
+    };
+    const persistProject = () => {
+      const { directory: directory2, settings, keep } = state;
+      if (directory2 === null) return;
+      projectTouched = true;
+      host2.storage.set(projectKey(directory2), { staleDays: settings.staleDays, keep }).catch(() => {
       });
     };
     const stopVisibility = visibility.onChange(() => {
@@ -3402,14 +3963,26 @@ ${field}`;
         detailSeq++;
         detailSig = null;
         bannered.clear();
-        answered.clear();
+        answered2.clear();
         listedBeads = [];
+        projectTouched = false;
+        storedLoaded = false;
+        viewDecided = false;
+        chosenView = null;
         const generation = state.generation + 1;
         set({
           directory: directory2,
           generation,
           workspace: null,
           snapshot: null,
+          capabilities: NO_CAPABILITIES,
+          gates: [],
+          leases: [],
+          unsupported: /* @__PURE__ */ new Set(),
+          // A different project never sees this one's kept rows or threshold, not even while its own load is in flight.
+          settings: DEFAULT_SETTINGS,
+          keep: {},
+          page: "list",
           error: null,
           selectedId: null,
           detail: null,
@@ -3421,9 +3994,16 @@ ${field}`;
           ...readUi(void 0)
         });
         if (directory2 === null) return;
-        host2.storage.get(uiKey(directory2)).then((stored) => {
-          if (!disposed && generation === state.generation && !touched && stored !== void 0) set(readUi(stored));
-        }).catch(() => {
+        const load = (key) => host2.storage.get(key).catch(() => void 0);
+        void Promise.all([load(uiKey(directory2)), load(projectKey(directory2))]).then(([ui, project]) => {
+          if (disposed || generation !== state.generation) return;
+          if (!touched && ui !== void 0) set(readUi(ui));
+          if (project !== void 0) {
+            const read = readProject(project, now());
+            set({ keep: { ...read.keep, ...state.keep }, settings: projectTouched ? state.settings : read.settings });
+          }
+          storedLoaded = true;
+          decideView();
         });
         void poll();
       },
@@ -3453,8 +4033,23 @@ ${field}`;
         }
       },
       setView(view) {
+        chosenView = null;
         set({ view });
         persist();
+      },
+      setPage(page) {
+        if (page !== state.page) set({ page });
+      },
+      markUnsupported,
+      keepStuck(id) {
+        set({ keep: { ...state.keep, [id]: now() + KEEP_MS } });
+        persistProject();
+      },
+      setStaleDays(days) {
+        const staleDays = Math.min(MAX_STALE_DAYS, Math.max(1, Math.round(days)));
+        if (!Number.isFinite(staleDays) || staleDays === state.settings.staleDays) return;
+        set({ settings: { ...state.settings, staleDays } });
+        persistProject();
       },
       setFilters(filters) {
         set({ filters });
@@ -3509,6 +4104,10 @@ ${field}`;
         const prefix = draftKey(id, "");
         for (const key of [...drafts.keys()]) if (key.startsWith(prefix)) drafts.delete(key);
       },
+      draftFields(id) {
+        const prefix = draftKey(id, "");
+        return [...drafts.keys()].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+      },
       reloadDetail() {
         void loadDetail();
       },
@@ -3551,27 +4150,108 @@ ${field}`;
         });
       },
       update(id, expectedUpdatedAt, patch, expected) {
+        return writing((directory2) => client2.update({ directory: directory2, id, expectedUpdatedAt, patch, ...expected ? { expected } : {} }), writtenBead);
+      },
+      defer(id, expectedUpdatedAt, until, reason) {
+        return writing((directory2) => client2.deferBead({ directory: directory2, id, expectedUpdatedAt, until, ...reason ? { reason } : {} }), writtenBead, "defer");
+      },
+      undefer(id, expectedUpdatedAt) {
+        return writing((directory2) => client2.undeferBead({ directory: directory2, id, expectedUpdatedAt }), writtenBead, "defer");
+      },
+      supersede(id, withId, expectedUpdatedAt) {
+        return writing((directory2) => client2.supersede({ directory: directory2, id, with: withId, expectedUpdatedAt }), writtenBead, "supersede");
+      },
+      duplicate(id, of, expectedUpdatedAt) {
+        return writing((directory2) => client2.duplicate({ directory: directory2, id, of, expectedUpdatedAt }), writtenBead, "supersede");
+      },
+      requestReview(id, reason) {
         return writing(
-          (directory2) => client2.update({ directory: directory2, id, expectedUpdatedAt, patch, ...expected ? { expected } : {} }),
-          (result) => {
-            if (result.ok) {
-              applyWritten(result.bead);
-              void poll();
-              if (result.detail) {
-                host2.toast({ kind: "info", message: "Saved. It may show as a change from someone else.", copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {
-                });
-              }
-              return { kind: "ok", value: result.bead };
-            }
-            if ("conflict" in result) {
-              applyWritten(result.current);
-              return { kind: "conflict", current: result.current };
-            }
-            if (result.current) applyWritten(result.current);
-            refreshAfterWrite(result.current === null);
-            return { kind: "uncertain", current: result.current, saved: result.saved === true };
-          }
+          (directory2) => client2.gateCreate({ directory: directory2, id, ...reason ? { reason } : {} }),
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "gates"
         );
+      },
+      resolveReview(gateId, reason) {
+        return writing(
+          (directory2) => client2.gateResolve({ directory: directory2, gateId, ...reason ? { reason } : {} }),
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "gates"
+        );
+      },
+      respond(id, response) {
+        return writing((directory2) => client2.humanRespond({ directory: directory2, id, response }), humanDone, "human");
+      },
+      dismissRequest(id, reason) {
+        return writing((directory2) => client2.humanDismiss({ directory: directory2, id, ...reason ? { reason } : {} }), humanDone, "human");
+      },
+      remember(request) {
+        return writing((directory2) => client2.memoryRemember({ directory: directory2, ...request }), (value) => ({ kind: "ok", value }), "memories");
+      },
+      forget(key, expectedText) {
+        return writing((directory2) => client2.memoryForget({ directory: directory2, key, expectedText }), (value) => ({ kind: "ok", value }), "memories");
+      },
+      async enableEvents() {
+        let message = "";
+        const outcome = await writing(
+          async (directory2) => {
+            try {
+              return await client2.enableEvents({ directory: directory2, confirm: true });
+            } catch (thrown) {
+              message = asRequestError(thrown).message;
+              throw thrown;
+            }
+          },
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "events"
+        );
+        if (outcome.kind !== "uncertain") return outcome;
+        const read = await reading((directory2) => client2.eventsStatus({ directory: directory2 }), "events");
+        if (read.kind === "dropped") return read;
+        return { ...outcome, message, status: read.kind === "ok" ? read.value : null };
+      },
+      async updateProject() {
+        let message = "";
+        const outcome = await writing(
+          async (directory2) => {
+            try {
+              return await client2.migrateSchema({ directory: directory2, confirm: true });
+            } catch (thrown) {
+              message = asRequestError(thrown).message;
+              throw thrown;
+            }
+          },
+          (value) => ({ kind: "ok", value })
+        );
+        if (outcome.kind === "ok") {
+          failures = 0;
+          await poll(true);
+        }
+        return outcome.kind === "uncertain" ? { ...outcome, message } : outcome;
+      },
+      checkProject() {
+        failures = 0;
+        return poll(true);
+      },
+      readHistory(request) {
+        return reading((directory2) => client2.history({ directory: directory2, ...request }), "history");
+      },
+      readMemories(query) {
+        return reading((directory2) => client2.memories({ directory: directory2, ...query ? { query } : {} }), "memories");
+      },
+      readExplain(id) {
+        return reading((directory2) => client2.explain({ directory: directory2, id }), "explain");
+      },
+      readEventsStatus() {
+        return reading((directory2) => client2.eventsStatus({ directory: directory2 }), "events");
       },
       create(input) {
         return writing(
@@ -3647,6 +4327,7 @@ ${field}`;
     if (f5.localRefreshedAt !== null || f5.localError === null) return null;
     return { code: "local", message: f5.localError, ...f5.localErrorDetail ? { detail: f5.localErrorDetail } : {} };
   }
+  var needsUpdate = (state) => state.snapshot?.workspace.kind === "ok" && !!state.snapshot.freshness.schemaUpdate;
   var StoreContext = X(null);
   function useStoreApi() {
     const store = x2(StoreContext);
@@ -3689,6 +4370,335 @@ ${field}`;
     var l3 = { type: e3, props: p3, key: n2, ref: a5, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f3, __i: -1, __u: 0, __source: i3, __self: u4 };
     if ("function" == typeof e3 && (a5 = e3.defaultProps)) for (c3 in a5) void 0 === p3[c3] && (p3[c3] = a5[c3]);
     return l.vnode && l.vnode(l3), l3;
+  }
+
+  // src/panel/ui/EmptyState.tsx
+  function Thread({ tone: tone2 }) {
+    return /* @__PURE__ */ u3("svg", { class: "bd-thread", "data-tone": tone2, width: "72", height: "20", viewBox: "0 0 72 20", "aria-hidden": "true", focusable: "false", children: [
+      /* @__PURE__ */ u3("path", { class: "bd-thread-line", d: "M2 10h68" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "16", cy: "10", r: "5" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-mid", cx: "36", cy: "10", r: "6" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "56", cy: "10", r: "5" })
+    ] });
+  }
+  function EmptyState({ tone: tone2, title, body, children }) {
+    return /* @__PURE__ */ u3("section", { class: "bd-empty", "data-tone": tone2, children: [
+      /* @__PURE__ */ u3(Thread, { tone: tone2 }),
+      /* @__PURE__ */ u3("h2", { class: "bd-empty-title", children: title }),
+      body !== void 0 && /* @__PURE__ */ u3("p", { class: "bd-empty-body", children: body }),
+      children !== void 0 && /* @__PURE__ */ u3("div", { class: "bd-empty-actions", children })
+    ] });
+  }
+  var MIN_BD = "1.2.2";
+  function workspaceCopy(workspace) {
+    switch (workspace.kind) {
+      case "no-bd":
+        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
+      case "bd-too-old":
+        return {
+          tone: "warning",
+          title: "This version of Beads is too old.",
+          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
+        };
+      case "no-workspace":
+        return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
+      case "pre-dolt":
+        return {
+          tone: "warning",
+          title: "This project uses an older Beads format.",
+          body: "The panel can't read this format. Ask your agent to upgrade the project's Beads data to the current format, then retry."
+        };
+      case "needs-first-contact":
+        return {
+          tone: "ask",
+          title: `Open this project with Beads ${workspace.bdVersion}?`,
+          // Opening updates nothing: a project on an older format is shown the update, which asks again before it runs.
+          body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it lets Beads check the project. If it is on an older format, Abacus will ask before updating it.`
+        };
+      case "server-down":
+        return {
+          tone: "error",
+          title: "This project's Beads server isn't running.",
+          body: "Start it the way you usually do, then retry. The panel never starts it for you.",
+          detail: `The Beads database server for ${workspace.root} is expected on port ${workspace.port} and did not answer.`
+        };
+      case "ok":
+        return { tone: "neutral", title: "This project is ready.", body: "" };
+      default:
+        return { tone: "neutral", title: "Beads can't open this project right now.", body: "Retry in a moment. If this keeps happening, update the Beads extension." };
+    }
+  }
+  function RetryButton({ primary: primary2 = false }) {
+    const store = useStoreApi();
+    const [checking, setChecking] = d2(false);
+    h2(() => {
+      if (!checking) return;
+      const id = setTimeout(() => setChecking(false), 900);
+      return () => clearTimeout(id);
+    }, [checking]);
+    return /* @__PURE__ */ u3(
+      "button",
+      {
+        type: "button",
+        class: primary2 ? "bd-btn bd-btn-primary" : "bd-btn",
+        "aria-busy": checking,
+        disabled: checking,
+        onClick: () => {
+          setChecking(true);
+          store.retry();
+        },
+        children: [
+          checking && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+          "Retry"
+        ]
+      }
+    );
+  }
+  function CopyDetails({ error, always = false }) {
+    const store = useStoreApi();
+    if (!error.detail && !always) return null;
+    return /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", onClick: () => store.copyDetails(error), children: "Copy details" });
+  }
+  function WorkspaceEmpty({ workspace }) {
+    const state = useStore();
+    const store = useStoreApi();
+    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
+    if (workspace.kind !== "needs-first-contact") {
+      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
+        /* @__PURE__ */ u3(RetryButton, { primary: true }),
+        detail && /* @__PURE__ */ u3(CopyDetails, { error: { code: "workspace", message: title, detail } })
+      ] });
+    }
+    return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", disabled: state.confirming, "aria-busy": state.confirming, onClick: () => void store.confirmFirstContact(), children: [
+        state.confirming && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+        "Open project"
+      ] }),
+      /* @__PURE__ */ u3("p", { class: "bd-empty-note", children: "You only need to confirm this once for this project." }),
+      state.confirmError && /* @__PURE__ */ u3("p", { class: "bd-empty-error", role: "alert", children: [
+        state.confirmError.message,
+        " ",
+        /* @__PURE__ */ u3(CopyDetails, { error: state.confirmError })
+      ] })
+    ] });
+  }
+  function LoadError() {
+    const error = firstLoadError(useStore());
+    if (!error) return null;
+    return /* @__PURE__ */ u3(EmptyState, { tone: "error", title: "Couldn't load this project's beads.", children: [
+      /* @__PURE__ */ u3(RetryButton, { primary: true }),
+      /* @__PURE__ */ u3(CopyDetails, { error, always: true })
+    ] });
+  }
+  function NoProject() {
+    return /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "Open a project to see its beads." });
+  }
+  function NoBeads() {
+    return /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "No beads in this project yet.", body: "When your agent creates beads, they show up here within a few seconds." });
+  }
+  function Loading() {
+    const widths = [72, 54, 88, 61, 79, 46, 67];
+    return /* @__PURE__ */ u3("div", { class: "bd-skeleton", "aria-busy": "true", "aria-label": "Loading beads", children: widths.map((w4, i3) => /* @__PURE__ */ u3("div", { class: "bd-skel-row", style: { "--w": `${w4}%`, "--d": `${i3 * 70}ms` }, children: [
+      /* @__PURE__ */ u3("i", { class: "bd-skel-dot" }),
+      /* @__PURE__ */ u3("i", { class: "bd-skel-id" }),
+      /* @__PURE__ */ u3("i", { class: "bd-skel-bar" })
+    ] }, i3)) });
+  }
+
+  // src/panel/ui/ProjectUpdate.tsx
+  var UPDATE_TITLE = "This project needs a one-time update for the newer Beads.";
+  var SYNC_WAIT = "Wait for the sync to finish, then try again.";
+  var REREAD = "Reading the project again.";
+  function UpdateConsent({ busy, onCancel, onConfirm }) {
+    return /* @__PURE__ */ u3(
+      "div",
+      {
+        class: "bd-pm-ask bd-upd-ask",
+        role: "alertdialog",
+        "aria-labelledby": "bd-upd-ask-t",
+        "aria-describedby": "bd-upd-ask-d",
+        onKeyDown: (e3) => {
+          if (e3.key !== "Escape") return;
+          e3.preventDefault();
+          e3.stopPropagation();
+          if (!busy) onCancel();
+        },
+        children: [
+          /* @__PURE__ */ u3("p", { class: "bd-pm-ask-t", id: "bd-upd-ask-t", children: "Update this project?" }),
+          /* @__PURE__ */ u3("div", { class: "bd-pm-ask-d", id: "bd-upd-ask-d", children: [
+            /* @__PURE__ */ u3("p", { children: "Beads updates this project's data to the new format. This happens once." }),
+            /* @__PURE__ */ u3("p", { children: "Your beads themselves don't change." }),
+            /* @__PURE__ */ u3("p", { children: "Tools that use an older Beads may not open this project afterwards." })
+          ] }),
+          /* @__PURE__ */ u3("div", { class: "bd-pm-ask-acts", children: [
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", "data-focus": "cancel", disabled: busy, onClick: onCancel, children: "Cancel" }),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", "data-focus": "go", "aria-busy": busy || void 0, "aria-disabled": busy || void 0, onClick: onConfirm, children: [
+              busy && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+              busy ? "Updating\u2026" : "Update"
+            ] })
+          ] })
+        ]
+      }
+    );
+  }
+  function focusList(attempts = 20) {
+    const active2 = document.activeElement;
+    if (active2 && active2 !== document.body) return;
+    const list = document.querySelector('.bd-body [role="listbox"]');
+    if (list) {
+      list.focus({ preventScroll: true });
+      return;
+    }
+    if (attempts > 0) setTimeout(() => focusList(attempts - 1), 150);
+  }
+  function failureNote(job) {
+    if (job.code === "uncertain" || job.saved) {
+      const said = job.saved ? "The update may have finished, but Beads didn't confirm it." : job.message || "Beads didn't say whether the update finished.";
+      return { note: { tone: "info", text: `${said} ${REREAD}` }, unsure: true };
+    }
+    return {
+      note: { tone: "error", text: job.code === "sync-running" ? SYNC_WAIT : job.message, ...job.detail ? { detail: job.detail } : {}, ...job.code === "busy" ? { again: true } : {} },
+      unsure: false
+    };
+  }
+  function ProjectUpdate() {
+    const store = useStoreApi();
+    const state = useStore();
+    const raw = state.snapshot?.freshness.localErrorDetail ?? null;
+    const job = state.snapshot?.freshness.schemaUpdateJob ?? null;
+    const kept = state.directory !== null ? state.sharedUpdates[state.directory] : void 0;
+    const [phase, setPhase] = d2("idle");
+    const [submitting, setSubmitting] = d2(false);
+    const [seen, setSeen] = d2(null);
+    const [note, setNote] = d2(null);
+    const [lost, setLost] = d2(false);
+    const alive = A2(true);
+    const box = A2(null);
+    const focusNext = A2(null);
+    const holds = A2(false);
+    const lastEnd = A2(job?.kind === "failed" ? job.at : null);
+    const running = submitting || job?.kind === "running";
+    const failure = job?.kind === "failed" && job.at !== seen ? job : null;
+    const said = failure ? failureNote(failure) : null;
+    const shared = kept ?? (failure?.code === "update-blocked-shared" ? { message: failure.message, ...failure.detail ? { detail: failure.detail } : {} } : null);
+    const unsure = !shared && !running && (lost || said?.unsure === true);
+    const shownNote = shared ? { tone: "error", text: shared.message, ...shared.detail ? { detail: shared.detail } : {} } : running ? null : note ?? said?.note ?? null;
+    _2(() => {
+      const end = job?.kind === "failed" ? job.at : null;
+      if (end === lastEnd.current) return;
+      lastEnd.current = end;
+      if (end !== null) focusNext.current = unsure || shared ? "note" : "go";
+    });
+    _2(() => {
+      const want = focusNext.current;
+      if (!want) return;
+      focusNext.current = null;
+      box.current?.querySelector(`[data-focus="${want}"]`)?.focus();
+    });
+    h2(
+      () => () => {
+        alive.current = false;
+        if (holds.current) setTimeout(focusList, 0);
+      },
+      []
+    );
+    const send = async () => {
+      if (running) return;
+      setSeen(job?.kind === "failed" ? job.at : seen);
+      setSubmitting(true);
+      setNote(null);
+      setLost(false);
+      const outcome = await store.updateProject();
+      if (!alive.current) return;
+      setSubmitting(false);
+      if (outcome.kind === "dropped") return;
+      setPhase("idle");
+      if (outcome.kind === "ok") {
+        return;
+      }
+      if (outcome.kind === "uncertain") {
+        const text2 = outcome.saved ? "The update may have finished, but Beads didn't confirm it." : outcome.message || "Beads didn't say whether the update finished.";
+        setLost(true);
+        setNote({ tone: "info", text: `${text2} ${REREAD}` });
+        focusNext.current = "note";
+      } else if (outcome.kind === "error") {
+        const { code, message, detail: detail2 } = outcome.error;
+        setNote({ tone: "error", text: code === "sync-running" ? SYNC_WAIT : message, ...detail2 ? { detail: detail2 } : {}, ...code === "busy" ? { again: true } : {} });
+        focusNext.current = "go";
+      }
+    };
+    const check = async () => {
+      setPhase("checking");
+      await store.checkProject();
+      if (!alive.current) return;
+      setPhase("idle");
+      const now = store.get().snapshot?.freshness.schemaUpdateJob ?? null;
+      if (now?.kind === "running") return;
+      setSeen(now?.kind === "failed" ? now.at : seen);
+      setLost(false);
+      setNote({ tone: "info", text: "This project still needs the update." });
+      focusNext.current = "go";
+    };
+    const asking = !shared && (running || phase === "asking");
+    const say = running ? "Updating this project. This can take a minute or two." : phase === "checking" ? "Reading the project again\u2026" : "";
+    const detail = shownNote?.detail ?? raw;
+    return /* @__PURE__ */ u3(
+      "section",
+      {
+        ref: box,
+        class: "bd-empty bd-upd",
+        "data-tone": "ask",
+        "aria-labelledby": "bd-upd-t",
+        onFocusIn: () => {
+          holds.current = true;
+        },
+        onFocusOut: (e3) => {
+          const to = e3.relatedTarget;
+          if (to && !box.current?.contains(to)) holds.current = false;
+        },
+        children: [
+          /* @__PURE__ */ u3(Thread, { tone: "ask" }),
+          /* @__PURE__ */ u3("h2", { class: "bd-empty-title", id: "bd-upd-t", children: UPDATE_TITLE }),
+          /* @__PURE__ */ u3("p", { class: "bd-empty-body", children: "It was made with an older version of Beads, and Abacus can't read its beads until it's updated." }),
+          /* @__PURE__ */ u3("div", { class: "bd-upd-acts", children: [
+            shownNote && /* @__PURE__ */ u3("p", { class: "bd-pm-note bd-upd-note", "data-tone": shownNote.tone, "data-focus": "note", tabIndex: -1, role: shownNote.tone === "error" ? "alert" : "status", children: shownNote.text }),
+            asking ? /* @__PURE__ */ u3(
+              UpdateConsent,
+              {
+                busy: running,
+                onCancel: () => {
+                  setPhase("idle");
+                  focusNext.current = "go";
+                },
+                onConfirm: () => void send()
+              }
+            ) : unsure || phase === "checking" ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", "data-focus": "go", "aria-busy": phase === "checking" || void 0, "aria-disabled": phase === "checking" || void 0, onClick: () => phase !== "checking" && void check(), children: [
+              phase === "checking" && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+              "Check again"
+            ] }) : shared ? null : shownNote?.again ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", "data-focus": "go", onClick: () => void send(), children: "Try again" }) : /* @__PURE__ */ u3(
+              "button",
+              {
+                type: "button",
+                class: "bd-btn bd-btn-primary",
+                "data-focus": "go",
+                onClick: () => {
+                  setNote(null);
+                  setSeen(job?.kind === "failed" ? job.at : seen);
+                  setPhase("asking");
+                  focusNext.current = "cancel";
+                },
+                children: "Update project"
+              }
+            ),
+            /* @__PURE__ */ u3("p", { class: "bd-upd-say", role: "status", children: say }),
+            detail && /* @__PURE__ */ u3("details", { class: "bd-upd-more", children: [
+              /* @__PURE__ */ u3("summary", { children: "Details" }),
+              /* @__PURE__ */ u3("pre", { class: "bd-upd-raw", children: detail })
+            ] })
+          ] })
+        ]
+      }
+    );
   }
 
   // src/panel/ui/icons.tsx
@@ -3773,6 +4783,10 @@ ${field}`;
     const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
     return /* @__PURE__ */ u3(Icon, { size, children: known ? TYPE_PATHS[type] : /* @__PURE__ */ u3("rect", { x: "3", y: "3", width: "10", height: "10", rx: "2.2", "stroke-dasharray": "2 1.8" }) });
   }
+  var IconRestore = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M3.5 6.5h6.2a3.3 3.3 0 0 1 0 6.6H6" }),
+    /* @__PURE__ */ u3("path", { d: "M6 3.8L3.3 6.5 6 9.2" })
+  ] });
 
   // src/panel/ui/AttachFooter.tsx
   function useRowActions() {
@@ -4002,6 +5016,16 @@ ${field}`;
   }
 
   // src/panel/sync.ts
+  var SUPERSEDED_NAMED_MAX = 3;
+  function supersededText(edits, beads) {
+    const named = edits.slice(0, SUPERSEDED_NAMED_MAX).map((edit) => {
+      const title = beads.find((bead) => bead.id === edit.beadId)?.title;
+      const who = title ? `"${title}"` : shortId(edit.beadId);
+      return edit.fields.length > 0 ? `${who} (${edit.fields.join(", ")})` : who;
+    });
+    const more = edits.length - named.length;
+    return `Both sides edited the same thing, so the newer edit was kept: ${named.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`;
+  }
   function syncProblem(snapshot) {
     if (!snapshot || snapshot.workspace.kind !== "ok") return null;
     const sync = snapshot.sync;
@@ -4040,8 +5064,11 @@ ${field}`;
       if (!sync || sync.kind === "running") return;
       const done = awaiting;
       awaiting = null;
-      if (sync.kind === "idle") toast("success", done.op === "pull" ? "Synced." : `Published ${changesText(done.count)}.`);
-      else if (done.op === "publish" && sync.kind === "error" && sync.code === "preview-stale") void openPreview(sync.message);
+      if (sync.kind === "idle") {
+        const lead = done.op === "pull" ? "Synced." : `Published ${changesText(done.count)}.`;
+        if (sync.superseded && sync.superseded.length > 0) toast("info", `${lead} ${supersededText(sync.superseded, state.snapshot?.beads ?? [])}`, sync.log);
+        else toast("success", lead);
+      } else if (done.op === "publish" && sync.kind === "error" && sync.code === "preview-stale") void openPreview(sync.message);
     });
     const running = () => ui.starting !== null || store.get().snapshot?.sync.kind === "running";
     const otherJob = (op) => toast("info", `${LABEL[op]} didn't start because a sync is running. Try again when it finishes.`);
@@ -4430,6 +5457,319 @@ ${field}`;
     ] });
   }
 
+  // src/panel/ui/popover.tsx
+  var EDGE = 12;
+  function Popover({ label, align = "start", onClose, children, role = "dialog" }) {
+    const ref = A2(null);
+    _2(() => {
+      const el2 = ref.current;
+      const panel2 = el2?.closest(".bd")?.getBoundingClientRect();
+      if (!el2 || !panel2 || panel2.width === 0) return;
+      const left = (el2.offsetParent?.getBoundingClientRect().left ?? 0) + el2.offsetLeft;
+      const right = left + el2.offsetWidth;
+      let dx = 0;
+      if (right > panel2.right - EDGE) dx = panel2.right - EDGE - right;
+      if (left + dx < panel2.left + EDGE) dx = panel2.left + EDGE - left;
+      if (dx !== 0) el2.style.translate = `${dx}px 0`;
+    }, []);
+    h2(() => {
+      const el2 = ref.current;
+      const first = ["[data-autofocus]", '[role="menuitemradio"][aria-checked="true"]', "input", '[role="menuitemradio"]', '[role="menuitem"]:not(:disabled)', "button"].map((s3) => el2?.querySelector(s3)).find(Boolean);
+      first?.focus();
+      const outside = (e3) => {
+        const wrap = el2?.parentElement;
+        if (wrap && !wrap.contains(e3.target)) onClose();
+      };
+      document.addEventListener("pointerdown", outside, true);
+      return () => document.removeEventListener("pointerdown", outside, true);
+    }, []);
+    const onKeyDown = (e3) => {
+      if (e3.key === "Escape") {
+        e3.preventDefault();
+        e3.stopPropagation();
+        (ref.current?.parentElement?.querySelector("[aria-haspopup]") ?? null)?.focus();
+        onClose();
+        return;
+      }
+      if (role !== "menu" || e3.key !== "ArrowDown" && e3.key !== "ArrowUp") return;
+      const items = Array.from(ref.current?.querySelectorAll('[role="menuitemradio"], [role="menuitem"]:not(:disabled)') ?? []);
+      const i3 = items.indexOf(document.activeElement);
+      items[(i3 + (e3.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+      e3.preventDefault();
+    };
+    return /* @__PURE__ */ u3("div", { ref, class: "bd-pop", "data-align": align, role, "aria-label": label, onKeyDown, children });
+  }
+  function usePopover(disabled) {
+    const [open, setOpen] = d2(false);
+    h2(() => {
+      if (disabled) setOpen(false);
+    }, [disabled]);
+    return { open, toggle: () => setOpen((o3) => !o3), close: () => setOpen(false) };
+  }
+  function useChoices(items, listId) {
+    const [active2, setActive] = d2(-1);
+    h2(() => setActive(-1), [items.length]);
+    const onKey = (e3, take) => {
+      if (e3.key === "ArrowDown" || e3.key === "ArrowUp") {
+        e3.preventDefault();
+        if (items.length === 0) return;
+        setActive((a5) => e3.key === "ArrowDown" ? (a5 + 1) % items.length : (a5 <= 0 ? items.length : a5) - 1);
+      } else if (e3.key === "Enter" && !composing(e3)) {
+        e3.preventDefault();
+        take(active2 >= 0 ? items[active2] ?? null : null);
+      }
+    };
+    const optionId = (i3) => `${listId}-o${i3}`;
+    const activeId = active2 >= 0 && active2 < items.length ? optionId(active2) : void 0;
+    return { active: active2, onKey, optionId, activeId };
+  }
+
+  // src/panel/ui/ProjectMenu.tsx
+  function readDays(text2) {
+    const t3 = text2.trim();
+    if (!/^\d{1,3}$/.test(t3)) return null;
+    const n2 = Number(t3);
+    return n2 >= 1 && n2 <= MAX_STALE_DAYS ? n2 : null;
+  }
+  function StuckDays() {
+    const store = useStoreApi();
+    const saved = useStore().settings.staleDays;
+    const [text2, setText2] = d2(String(saved));
+    const bad = readDays(text2) === null;
+    const take = (next) => {
+      setText2(next);
+      const days = readDays(next);
+      if (days !== null) store.setStaleDays(days);
+    };
+    return /* @__PURE__ */ u3("div", { class: "bd-pm-set", children: [
+      /* @__PURE__ */ u3("div", { class: "bd-pm-row", children: [
+        /* @__PURE__ */ u3("label", { class: "bd-pm-label", for: "bd-pm-days", children: "Stuck after" }),
+        /* @__PURE__ */ u3(
+          "input",
+          {
+            id: "bd-pm-days",
+            type: "text",
+            inputMode: "numeric",
+            role: "spinbutton",
+            "aria-valuemin": 1,
+            "aria-valuemax": MAX_STALE_DAYS,
+            "aria-valuenow": readDays(text2) ?? saved,
+            class: "bd-input bd-pm-days",
+            value: text2,
+            "aria-invalid": bad || void 0,
+            "aria-describedby": "bd-pm-days-hint",
+            onInput: (e3) => take(e3.currentTarget.value),
+            onKeyDown: (e3) => {
+              const days = readDays(text2) ?? saved;
+              if (e3.key === "ArrowUp" || e3.key === "ArrowDown") {
+                e3.preventDefault();
+                take(String(Math.min(MAX_STALE_DAYS, Math.max(1, days + (e3.key === "ArrowUp" ? 1 : -1)))));
+              } else if (isEnterInInput(e3) && bad) {
+                e3.preventDefault();
+                setText2(String(saved));
+              }
+            },
+            onBlur: () => {
+              if (bad) setText2(String(saved));
+            }
+          }
+        ),
+        /* @__PURE__ */ u3("span", { class: "bd-pm-unit", children: readDays(text2) === 1 ? "day" : "days" })
+      ] }),
+      bad ? /* @__PURE__ */ u3("p", { class: "bd-fieldmsg", id: "bd-pm-days-hint", role: "alert", children: `Enter a whole number of days from 1 to ${MAX_STALE_DAYS}.` }) : /* @__PURE__ */ u3("p", { class: "bd-fieldmsg", "data-tone": "quiet", id: "bd-pm-days-hint", children: "Work in progress with no update for this long shows under Stuck in Needs me. Kept on this computer, for this project." })
+    ] });
+  }
+  var SYNC_WAIT2 = "Wait for the sync to finish, then try again.";
+  var REGULAR = "the panel checks for changes every few seconds";
+  var readOf = (status) => status.journal === "unknown" ? { kind: "unknown", error: null } : { kind: "status", status };
+  function onLine(live) {
+    if (live === "following") return { tone: "ok", text: "Following changes as they happen." };
+    if (live === "backoff") return { tone: "warn", text: `Reconnecting. Until then, ${REGULAR}.` };
+    if (live === "failed") return { tone: "err", text: `Not working right now, so ${REGULAR}.` };
+    return { tone: "warn", text: `Starting. Until then, ${REGULAR}.` };
+  }
+  var carried = /* @__PURE__ */ new WeakMap();
+  function LiveConsent({ busy, onCancel, onConfirm }) {
+    return /* @__PURE__ */ u3(
+      "div",
+      {
+        class: "bd-pm-ask",
+        role: "alertdialog",
+        "aria-labelledby": "bd-pm-ask-t",
+        "aria-describedby": "bd-pm-ask-d",
+        onKeyDown: (e3) => {
+          if (e3.key !== "Escape") return;
+          e3.preventDefault();
+          e3.stopPropagation();
+          if (!busy) onCancel();
+        },
+        children: [
+          /* @__PURE__ */ u3("p", { class: "bd-pm-ask-t", id: "bd-pm-ask-t", children: "Turn on live updates?" }),
+          /* @__PURE__ */ u3("div", { class: "bd-pm-ask-d", id: "bd-pm-ask-d", children: [
+            /* @__PURE__ */ u3("p", { children: "Beads will keep a log of changes on this computer for 7 days." }),
+            /* @__PURE__ */ u3("p", { children: [
+              "This changes the project's settings file, ",
+              /* @__PURE__ */ u3("span", { class: "bd-pm-file", children: ".beads/config.yaml" }),
+              ", which is shared with your team if you commit it."
+            ] })
+          ] }),
+          /* @__PURE__ */ u3("div", { class: "bd-pm-ask-acts", children: [
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", "data-focus": "cancel", disabled: busy, onClick: onCancel, children: "Cancel" }),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", "aria-busy": busy || void 0, "aria-disabled": busy || void 0, onClick: onConfirm, children: busy ? "Turning on\u2026" : "Turn on" })
+          ] })
+        ]
+      }
+    );
+  }
+  function LiveUpdates() {
+    const store = useStoreApi();
+    const state = useStore();
+    const capable = state.capabilities.eventsJournal && !state.unsupported.has("events");
+    const [read, setRead] = d2({ kind: "reading" });
+    const [asking, setAsking] = d2(false);
+    const [busy, setBusy] = d2(false);
+    const [note, setNote] = d2(() => {
+      const held = carried.get(store);
+      if (!held || held.directory !== state.directory) return null;
+      carried.delete(store);
+      return held.note;
+    });
+    const alive = A2(true);
+    const focusNext = A2(null);
+    const box = A2(null);
+    h2(() => () => void (alive.current = false), []);
+    _2(() => {
+      const want = focusNext.current;
+      if (!want) return;
+      focusNext.current = null;
+      box.current?.querySelector(`[data-focus="${want}"]`)?.focus();
+    });
+    const load = async () => {
+      setRead({ kind: "reading" });
+      const outcome = await store.readEventsStatus();
+      if (!alive.current || outcome.kind === "dropped") return;
+      const next = outcome.kind === "ok" ? readOf(outcome.value) : { kind: "unknown", error: outcome.error };
+      if (next.kind === "status" && next.status.journal === "on") setNote((n2) => n2?.tone === "info" ? null : n2);
+      setRead(next);
+    };
+    h2(() => {
+      if (capable) void load();
+    }, [capable]);
+    const enable = async () => {
+      if (busy) return;
+      const directory2 = state.directory;
+      setBusy(true);
+      setNote(null);
+      const outcome = await store.enableEvents();
+      if (outcome.kind === "dropped") return;
+      const said = outcome.kind === "uncertain" ? { tone: "info", text: outcome.message || "Live updates may be on now, but Beads didn't confirm it." } : outcome.kind === "error" ? { tone: "error", text: outcome.error.code === "sync-running" ? SYNC_WAIT2 : outcome.error.message } : null;
+      if (!alive.current) {
+        if (said && directory2 !== null) carried.set(store, { directory: directory2, note: said });
+        return;
+      }
+      setBusy(false);
+      setAsking(false);
+      setNote(said);
+      if (outcome.kind === "ok") {
+        setRead(readOf(outcome.value.status));
+        focusNext.current = "state";
+      } else if (outcome.kind === "uncertain") {
+        setRead(outcome.status ? readOf(outcome.status) : { kind: "unknown", error: null });
+        focusNext.current = "note";
+      } else if (outcome.kind === "error") {
+        focusNext.current = "turn-on";
+      } else {
+        focusNext.current = "state";
+        void load();
+      }
+    };
+    const retry = () => {
+      focusNext.current = "state";
+      void load();
+    };
+    const status = read.kind === "status" ? read.status : null;
+    const unavailable = !capable || status?.available === false;
+    const on = !unavailable && status?.journal === "on";
+    const off = !unavailable && status?.journal === "off";
+    const line = on && status ? onLine(status.live) : null;
+    const reading = capable && read.kind === "reading";
+    const word = unavailable ? null : on ? "On" : off ? "Off" : reading ? "Checking" : null;
+    const say = unavailable ? `Needs a newer version of Beads (1.3 or later). Until then, ${REGULAR}.` : reading ? "Checking\u2026" : read.kind === "unknown" ? read.error?.code === "sync-running" ? SYNC_WAIT2 : "Couldn't read this setting for the project." : line ? line.text : `Off for this project, so ${REGULAR}. Turn it on to see changes as soon as they happen.`;
+    return /* @__PURE__ */ u3("div", { ref: box, class: "bd-pm-set bd-pm-live", role: "group", "aria-labelledby": "bd-pm-live-t", "aria-busy": reading || void 0, children: [
+      /* @__PURE__ */ u3("div", { class: "bd-pm-row", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-pm-label", id: "bd-pm-live-t", children: "Live updates" }),
+        word && /* @__PURE__ */ u3("span", { class: "bd-pm-state", "data-tone": line?.tone ?? (on ? "ok" : "off"), children: [
+          /* @__PURE__ */ u3("span", { class: "bd-pm-dot", "aria-hidden": "true" }),
+          word
+        ] })
+      ] }),
+      note && /* @__PURE__ */ u3("p", { class: "bd-pm-note", "data-tone": note.tone, "data-focus": "note", tabIndex: -1, role: note.tone === "error" ? "alert" : "status", children: note.text }),
+      /* @__PURE__ */ u3("p", { class: "bd-pm-say", "data-focus": "state", tabIndex: -1, role: "status", children: say }),
+      !reading && read.kind === "unknown" && !unavailable && /* @__PURE__ */ u3("div", { children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: retry, children: "Try again" }) }),
+      !reading && off && (asking ? /* @__PURE__ */ u3(
+        LiveConsent,
+        {
+          busy,
+          onCancel: () => {
+            setAsking(false);
+            focusNext.current = "turn-on";
+          },
+          onConfirm: () => void enable()
+        }
+      ) : /* @__PURE__ */ u3("div", { children: /* @__PURE__ */ u3(
+        "button",
+        {
+          type: "button",
+          class: "bd-btn bd-btn-sm",
+          "data-focus": "turn-on",
+          onClick: () => {
+            setNote(null);
+            setAsking(true);
+            focusNext.current = "cancel";
+          },
+          children: "Turn on live updates"
+        }
+      ) }))
+    ] });
+  }
+  function ProjectMenu({ name, title }) {
+    const popover = usePopover(false);
+    const store = useStoreApi();
+    const { unsupported, directory: directory2 } = useStore();
+    const memories = !unsupported.has("memories");
+    return /* @__PURE__ */ u3("div", { class: "bd-popwrap bd-pm", children: [
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-proj bd-projbtn", title, "aria-haspopup": "dialog", "aria-expanded": popover.open, onClick: popover.toggle, children: [
+        /* @__PURE__ */ u3(IconFolder, {}),
+        /* @__PURE__ */ u3("span", { class: "bd-proj-name", children: name }),
+        /* @__PURE__ */ u3(IconChevron, {})
+      ] }),
+      popover.open && /* @__PURE__ */ u3(Popover, { label: "Project menu", onClose: popover.close, children: /* @__PURE__ */ u3("div", { class: "bd-pm-body", children: [
+        memories && /* @__PURE__ */ u3(
+          "button",
+          {
+            type: "button",
+            class: "bd-pm-go",
+            "aria-labelledby": "bd-pm-mem-t",
+            "aria-describedby": "bd-pm-mem-d",
+            "data-autofocus": true,
+            onClick: () => {
+              popover.close();
+              store.setPage("memories");
+            },
+            children: [
+              /* @__PURE__ */ u3("span", { class: "bd-pm-go-t", id: "bd-pm-mem-t", children: "Memories" }),
+              /* @__PURE__ */ u3("span", { class: "bd-pm-go-d", id: "bd-pm-mem-d", children: "What every agent session here starts with" }),
+              /* @__PURE__ */ u3(IconChevron, {})
+            ]
+          }
+        ),
+        /* @__PURE__ */ u3("p", { class: "bd-pm-h", children: "Settings" }),
+        /* @__PURE__ */ u3(StuckDays, {}),
+        /* @__PURE__ */ u3(LiveUpdates, {}, directory2)
+      ] }) })
+    ] });
+  }
+
   // src/panel/ui/Row.tsx
   function StatusDot({ look, label, marker = "builtin" }) {
     const marks = { class: "bd-sd", "data-look": look, "data-marker": marker === "builtin" ? void 0 : marker };
@@ -4535,7 +5875,7 @@ ${field}`;
       dot
     }
   );
-  function RowMenu({ at: at2, actions, onClose }) {
+  function RowMenu({ at: at2, actions, extra = [], onClose }) {
     const ref = A2(null);
     const [place, setPlace] = d2(null);
     _2(() => {
@@ -4563,12 +5903,13 @@ ${field}`;
     }, [onClose]);
     const busy = actions.busy === true;
     const items = [
-      { label: "Add to current chat", icon: /* @__PURE__ */ u3(IconChat, {}), run: () => actions.addToChat(at2.id), off: actions.noChat ? "No open chat" : void 0 },
+      ...extra,
+      { label: "Add to current chat", ...extra.length ? { rule: true } : {}, icon: /* @__PURE__ */ u3(IconChat, {}), run: () => actions.addToChat(at2.id), off: actions.noChat ? "No open chat" : void 0 },
       { label: "Start session", icon: /* @__PURE__ */ u3(IconSession, {}), run: () => actions.startSession(at2.id) },
       { label: "Start in worktree\u2026", icon: /* @__PURE__ */ u3(IconBranch, {}), run: () => actions.startInWorktree(at2.id) },
       { label: "Copy ID", icon: /* @__PURE__ */ u3(IconCopy, {}), run: () => actions.copyId(at2.id) }
     ];
-    const agentItem = (label) => label !== "Copy ID";
+    const agentItem = (label) => label !== "Copy ID" && !extra.some((x4) => x4.label === label);
     const onKeyDown = (e3) => {
       const buttons = Array.from(ref.current?.querySelectorAll('[role="menuitem"]:not(:disabled)') ?? []);
       const i3 = buttons.indexOf(document.activeElement);
@@ -4592,26 +5933,29 @@ ${field}`;
         style: place ? { left: `${place.left}px`, top: `${place.top}px` } : { visibility: "hidden", left: "0px", top: "0px" },
         onKeyDown,
         children: [
-          items.map(({ label, icon: icon2, run, off }) => /* @__PURE__ */ u3(
-            "button",
-            {
-              type: "button",
-              role: "menuitem",
-              class: "bd-menu-item",
-              disabled: off !== void 0 || busy && agentItem(label),
-              title: off,
-              onClick: () => {
-                onClose("item");
-                run();
+          items.map(({ label, icon: icon2, run, off, rule }) => [
+            rule && /* @__PURE__ */ u3("div", { class: "bd-menu-rule", role: "separator" }, `${label}-rule`),
+            /* @__PURE__ */ u3(
+              "button",
+              {
+                type: "button",
+                role: "menuitem",
+                class: "bd-menu-item",
+                disabled: off !== void 0 || busy && agentItem(label),
+                title: off,
+                onClick: () => {
+                  onClose("item");
+                  run();
+                },
+                children: [
+                  icon2,
+                  /* @__PURE__ */ u3("span", { children: label }),
+                  off && /* @__PURE__ */ u3("span", { class: "bd-menu-off", children: off })
+                ]
               },
-              children: [
-                icon2,
-                /* @__PURE__ */ u3("span", { children: label }),
-                off && /* @__PURE__ */ u3("span", { class: "bd-menu-off", children: off })
-              ]
-            },
-            label
-          )),
+              label
+            )
+          ]),
           /* @__PURE__ */ u3("div", { class: "bd-menu-id", children: at2.id })
         ]
       }
@@ -4675,6 +6019,10 @@ ${field}`;
         assignees.map((name) => /* @__PURE__ */ u3(Chip, { pressed: named === name, onClick: () => set({ assignee: named === name ? "any" : { name } }), children: name }, name))
       ] }),
       /* @__PURE__ */ u3(Line, { label: "Priority", children: [0, 1, 2, 3, 4].map((p3) => /* @__PURE__ */ u3(Chip, { pressed: f5.priorities.includes(p3), onClick: () => set({ priorities: toggle(f5.priorities, p3).sort() }), children: /* @__PURE__ */ u3("span", { class: "bd-pr", "data-p": p3, children: `P${p3}` }) }, p3)) }),
+      /* @__PURE__ */ u3(Line, { label: "Due", children: [
+        /* @__PURE__ */ u3(Chip, { pressed: f5.due === "overdue", onClick: () => set({ due: f5.due === "overdue" ? "any" : "overdue" }), title: "Not done, and the due date has passed", children: "Overdue" }),
+        /* @__PURE__ */ u3(Chip, { pressed: f5.due === "week", onClick: () => set({ due: f5.due === "week" ? "any" : "week" }), title: "Not done, and due in the next 7 days", children: "Due this week" })
+      ] }),
       /* @__PURE__ */ u3(Line, { label: "Ready", children: [
         /* @__PURE__ */ u3(Chip, { pressed: f5.ready, onClick: () => set({ ready: !f5.ready }), title: "Open beads with nothing blocking them", children: "Only ready to start" }),
         filtersActive(f5) && /* @__PURE__ */ u3("button", { type: "button", class: "bd-link bd-freset", onClick: () => store.setFilters(DEFAULT_FILTERS), children: "Reset filters" })
@@ -4685,7 +6033,7 @@ ${field}`;
   // src/panel/ui/writes.tsx
   var UNCERTAIN = "This may have saved. Refreshing.";
   var SAVED_UNREAD = "Saved. Refreshing to show it.";
-  function WriteMessage({ feedback }) {
+  function WriteMessage({ feedback, reword }) {
     const store = useStoreApi();
     if (!feedback) return null;
     if (feedback.kind === "checked") {
@@ -4696,15 +6044,15 @@ ${field}`;
     }
     const { error } = feedback;
     return /* @__PURE__ */ u3("p", { class: "bd-wmsg", role: "alert", children: [
-      /* @__PURE__ */ u3("span", { children: error.message }),
+      /* @__PURE__ */ u3("span", { children: reword && error.code === "blocked" ? reword(error.message) : error.message }),
       error.detail && /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", onClick: () => store.copyDetails(error), children: "Copy details" })
     ] });
   }
   var readSince = (localRefreshedAt, since) => localRefreshedAt !== null && Date.parse(localRefreshedAt) > since;
   function shows(patch, b2) {
     for (const [key, value] of Object.entries(patch)) {
-      if (key === "closeReason" || value === void 0) continue;
-      const now = b2[key];
+      if (key === "closeReason" || key === "closeComment" || key === "due" || value === void 0) continue;
+      const now = key === "parent" ? b2.parentId : b2[key];
       if (key === "labels") {
         const want = new Set(value);
         if (want.size !== new Set(now).size || !now.every((l3) => want.has(l3))) return false;
@@ -4720,8 +6068,10 @@ ${field}`;
   function shownFor(patch, on) {
     const shown = {};
     for (const key of Object.keys(patch)) {
-      if (key === "closeReason") continue;
-      shown[key] = on[key];
+      if (key === "closeReason" || key === "closeComment") continue;
+      if (key === "parent") shown.parentId = on.parentId;
+      else if (key === "due") shown.due = typeof on.extra.due_at === "string" ? on.extra.due_at : null;
+      else shown[key] = on[key];
     }
     return shown;
   }
@@ -4743,10 +6093,10 @@ ${field}`;
       const patch = make(on);
       const outcome = await store.update(id, on.updatedAt, patch, shownFor(patch, on));
       setBusyIds((ids) => ids.filter((x4) => x4 !== id));
-      if (outcome.kind === "dropped") return false;
+      if (outcome.kind === "dropped") return outcome;
       const pending = outcome.kind === "uncertain" && !outcome.saved ? { make, since: Date.now() } : void 0;
       setNote({ id, conflict: outcome.kind === "conflict" ? { make, current: outcome.current } : null, feedback: feedbackOf(outcome), ...pending ? { pending } : {} });
-      return outcome.kind === "ok";
+      return outcome;
     };
     h2(() => {
       const p3 = here?.pending;
@@ -4755,7 +6105,8 @@ ${field}`;
       else if (listed && readSince(refreshed, p3.since)) setNote({ id: bead.id, conflict: null, feedback: { kind: "checked", saved: false }, pending: p3 });
     }, [bead, listed, refreshed, here?.pending]);
     return {
-      send: (make) => bead ? write(make, bead) : Promise.resolve(false),
+      send: async (make) => bead ? (await write(make, bead)).kind === "ok" : false,
+      sendFor: (make) => bead ? write(make, bead) : Promise.resolve({ kind: "dropped" }),
       report,
       conflict: here?.conflict ?? null,
       feedback: here?.feedback ?? null,
@@ -4769,20 +6120,22 @@ ${field}`;
       discard: () => setNote(null)
     };
   }
-  function nowText(patch, current, statuses) {
-    const parts = [];
-    if (patch.status !== void 0) parts.push(`status ${statusLabel(current.status, statuses)}`);
-    if (patch.priority !== void 0) parts.push(`priority ${current.priority === null ? "none" : `P${current.priority}`}`);
-    if (patch.assignee !== void 0) parts.push(current.assignee ? `assigned to ${current.assignee}` : "unassigned");
-    if (patch.labels !== void 0) parts.push(current.labels.length ? `labels ${current.labels.join(", ")}` : "no labels");
-    if (patch.title !== void 0) parts.push(`title "${current.title}"`);
-    return parts.length ? `Now ${parts.join(", ")}.` : "";
+  function nowText(patch, current, statuses, titleOf = shortId) {
+    const parts2 = [];
+    if (patch.status !== void 0) parts2.push(`status ${statusLabel(current.status, statuses)}`);
+    if (patch.priority !== void 0) parts2.push(`priority ${current.priority === null ? "none" : `P${current.priority}`}`);
+    if (patch.assignee !== void 0) parts2.push(current.assignee ? `assigned to ${current.assignee}` : "unassigned");
+    if (patch.labels !== void 0) parts2.push(current.labels.length ? `labels ${current.labels.join(", ")}` : "no labels");
+    if (patch.title !== void 0) parts2.push(`title "${current.title}"`);
+    if (patch.type !== void 0) parts2.push(`type ${humanize(current.type)}`);
+    if (patch.parent !== void 0) parts2.push(current.parentId ? `in ${titleOf(current.parentId)}` : "no parent");
+    return parts2.length ? `Now ${parts2.join(", ")}.` : "";
   }
-  function InlineNotice({ writes, statuses, paused }) {
+  function InlineNotice({ writes, statuses, paused, reword, titleOf }) {
     if (writes.conflict) {
       return /* @__PURE__ */ u3("div", { class: "bd-wnote", role: "alert", children: [
         /* @__PURE__ */ u3("b", { children: "Changed while you were editing" }),
-        /* @__PURE__ */ u3("span", { children: nowText(writes.conflict.make(writes.conflict.current), writes.conflict.current, statuses) }),
+        /* @__PURE__ */ u3("span", { children: nowText(writes.conflict.make(writes.conflict.current), writes.conflict.current, statuses, titleOf) }),
         /* @__PURE__ */ u3("span", { class: "bd-wnote-acts", children: [
           /* @__PURE__ */ u3(
             "button",
@@ -4804,7 +6157,7 @@ ${field}`;
     if (!writes.feedback) return null;
     const notSaved = writes.feedback.kind === "checked" && !writes.feedback.saved;
     return /* @__PURE__ */ u3("div", { class: "bd-wnote", "data-tone": writes.feedback.kind === "error" ? "error" : "note", children: [
-      /* @__PURE__ */ u3(WriteMessage, { feedback: writes.feedback }),
+      /* @__PURE__ */ u3(WriteMessage, { feedback: writes.feedback, reword }),
       notSaved && /* @__PURE__ */ u3("span", { class: "bd-wnote-acts", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: writes.busy || paused !== null, title: paused ?? void 0, onClick: writes.retry, children: "Try again" }) })
     ] });
   }
@@ -4982,6 +6335,7 @@ ${field}`;
     const snapshot = state.snapshot;
     if (!snapshot || snapshot.workspace.kind !== "ok") return null;
     const f5 = snapshot.freshness;
+    if (f5.schemaUpdate) return null;
     const parsed = f5.localRefreshedAt === null ? NaN : Date.parse(f5.localRefreshedAt);
     const refreshedAt = Number.isFinite(parsed) ? parsed : null;
     const quietFor = now - Math.max(refreshedAt ?? -Infinity, state.watchedSince);
@@ -5003,6 +6357,7 @@ ${field}`;
     };
   }
   var VIEW_LABELS = [
+    ["needs", "Needs me"],
     ["epic", "Epic"],
     ["status", "Status"],
     ["activity", "Activity"]
@@ -5028,8 +6383,10 @@ ${field}`;
       /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => store.retry(), children: "Retry" })
     ] });
   }
-  function Tools({ state, loading, filtersOpen, toggleFilters }) {
+  function Tools({ state, now, loading, filtersOpen, toggleFilters }) {
     const store = useStoreApi();
+    const minute = Math.floor(now / 6e4) * 6e4;
+    const needs = T2(() => needsOf(state, minute).count, [state.snapshot, state.settings, state.keep, minute]);
     const count = state.snapshot?.beads.length ?? 0;
     const unseen = state.snapshot?.unseenIds.length ?? 0;
     const counted = count === 1 ? "Search 1 bead" : `Search ${count} beads`;
@@ -5049,7 +6406,13 @@ ${field}`;
           }
         )
       ] }),
-      /* @__PURE__ */ u3("div", { class: "bd-seg", role: "group", "aria-label": "View", children: VIEW_LABELS.map(([id, text2]) => /* @__PURE__ */ u3("button", { type: "button", "aria-pressed": state.view === id, disabled: loading, onClick: () => store.setView(id), children: text2 }, id)) }),
+      /* @__PURE__ */ u3("div", { class: "bd-seg", role: "group", "aria-label": "View", children: VIEW_LABELS.map(([id, text2]) => /* @__PURE__ */ u3("button", { type: "button", "aria-pressed": state.view === id, disabled: loading, onClick: () => store.setView(id), "data-view": id, children: [
+        text2,
+        id === "needs" && needs > 0 && /* @__PURE__ */ u3(S, { children: [
+          " ",
+          /* @__PURE__ */ u3("span", { class: "bd-seg-n", children: needs > 99 ? "99+" : needs })
+        ] })
+      ] }, id)) }),
       /* @__PURE__ */ u3(
         "button",
         {
@@ -5058,7 +6421,7 @@ ${field}`;
           "aria-label": "Filters",
           "aria-expanded": filtersOpen,
           disabled: loading,
-          "data-active": filtersActive(state.filters) && state.view !== "activity" || void 0,
+          "data-active": filtersActive(state.filters) && (state.view === "epic" || state.view === "status") || void 0,
           onClick: toggleFilters,
           children: /* @__PURE__ */ u3(IconFilter, {})
         }
@@ -5078,7 +6441,7 @@ ${field}`;
     const name = workspace?.kind === "ok" ? workspace.projectName : state.directory ? folderName(state.directory) : "Abacus";
     return /* @__PURE__ */ u3("header", { class: "bd-head", inert: state.overlays.length > 0, children: [
       /* @__PURE__ */ u3("div", { class: "bd-top", children: [
-        /* @__PURE__ */ u3("div", { class: "bd-proj", title: state.directory ?? void 0, children: [
+        workspace?.kind === "ok" && state.directory !== null ? /* @__PURE__ */ u3(ProjectMenu, { name, title: state.directory }, state.directory) : /* @__PURE__ */ u3("div", { class: "bd-proj", title: state.directory ?? void 0, children: [
           /* @__PURE__ */ u3(IconFolder, {}),
           /* @__PURE__ */ u3("span", { class: "bd-proj-name", children: name })
         ] }),
@@ -5087,8 +6450,8 @@ ${field}`;
       ] }),
       fresh?.team != null && /* @__PURE__ */ u3(TeamBar, { team: fresh.team, unpublished: fresh.unpublished }),
       fresh?.problem && /* @__PURE__ */ u3(StaleBanner, { problem: fresh.problem }),
-      (fresh || loading) && !state.detail && /* @__PURE__ */ u3(Tools, { state, loading, filtersOpen: filtersOpen && !loading, toggleFilters: () => setFiltersOpen((open) => !open) }),
-      fresh && filtersOpen && !state.detail && /* @__PURE__ */ u3(Filters, {})
+      (fresh || loading) && !state.detail && state.page === "list" && /* @__PURE__ */ u3(Tools, { state, now, loading, filtersOpen: filtersOpen && !loading, toggleFilters: () => setFiltersOpen((open) => !open) }),
+      fresh && filtersOpen && !state.detail && state.page === "list" && /* @__PURE__ */ u3(Filters, {})
     ] });
   }
 
@@ -6678,8 +8041,8 @@ ${field}`;
       let leadingWhitespace = null;
       if (FORCE_BODY) dirty = "<remove></remove>" + dirty;
       else {
-        const matches = stringMatch(dirty, /^[\r\n\t ]+/);
-        leadingWhitespace = matches && matches[0];
+        const matches2 = stringMatch(dirty, /^[\r\n\t ]+/);
+        leadingWhitespace = matches2 && matches2[0];
       }
       if (PARSER_MEDIA_TYPE === "application/xhtml+xml" && NAMESPACE === HTML_NAMESPACE) dirty = '<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>' + dirty + "</body></html>";
       const dirtyPayload = trustedTypesPolicy ? _createTrustedHTML(dirty) : dirty;
@@ -8553,71 +9916,691 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     ] });
   }
 
-  // src/panel/ui/popover.tsx
-  var EDGE = 12;
-  function Popover({ label, align = "start", onClose, children, role = "dialog" }) {
-    const ref = A2(null);
+  // src/panel/history.ts
+  var RESTORABLE_FIELDS = ["title", "status", "priority", "assignee", "labels", "description", "design", "acceptance", "notes"];
+  var isRestorable = (field) => RESTORABLE_FIELDS.includes(field);
+  var isStrings2 = (value) => Array.isArray(value) && value.every((v5) => typeof v5 === "string");
+  function typed(field, value) {
+    switch (field) {
+      case "priority":
+        return typeof value === "number" ? value : void 0;
+      case "assignee":
+        return value === null || typeof value === "string" ? value : void 0;
+      case "labels":
+        return isStrings2(value) ? value : void 0;
+      default:
+        return typeof value === "string" ? value : void 0;
+    }
+  }
+  function restoreRequest(bead, change) {
+    if (change.truncated || !isRestorable(change.field)) return null;
+    const from = typed(change.field, change.from);
+    const to = typed(change.field, change.to);
+    if (from === void 0 || to === void 0) return null;
+    return { id: bead.id, expectedUpdatedAt: bead.updatedAt, patch: { [change.field]: from }, expected: { [change.field]: to } };
+  }
+  var same = (field, a5, b2) => {
+    if (field === "labels") return Array.isArray(a5) && isStrings2(b2) && [...a5].sort().join("\n") === [...b2].sort().join("\n") && a5.length === b2.length;
+    return a5 === b2;
+  };
+  function restoreState(bead, change) {
+    if (restoreRequest(bead, change) === null) return "never";
+    const field = change.field;
+    const current = bead[field];
+    if (same(field, current, change.from)) return "unchanged";
+    return same(field, current, change.to) ? "ready" : "changed";
+  }
+  function freshChange(current, change) {
+    const value = current[change.field];
+    return value === void 0 ? change : { ...change, to: value };
+  }
+  var DIFF_CELLS = 4e4;
+  function lineDiff(from, to, context = 1) {
+    const a5 = from === "" ? [] : from.split("\n");
+    const b2 = to === "" ? [] : to.split("\n");
+    let head = 0;
+    while (head < a5.length && head < b2.length && a5[head] === b2[head]) head++;
+    let tail = 0;
+    while (tail < a5.length - head && tail < b2.length - head && a5[a5.length - 1 - tail] === b2[b2.length - 1 - tail]) tail++;
+    const midA = a5.slice(head, a5.length - tail);
+    const midB = b2.slice(head, b2.length - tail);
+    const rows = a5.slice(0, head).map((text2) => ({ kind: "same", text: text2 }));
+    if (midA.length * midB.length > DIFF_CELLS) {
+      rows.push(...midA.map((text2) => ({ kind: "del", text: text2 })), ...midB.map((text2) => ({ kind: "add", text: text2 })));
+    } else {
+      const n2 = midA.length;
+      const m3 = midB.length;
+      const lcs = Array.from({ length: n2 + 1 }, () => new Array(m3 + 1).fill(0));
+      for (let i4 = n2 - 1; i4 >= 0; i4--) for (let j5 = m3 - 1; j5 >= 0; j5--) lcs[i4][j5] = midA[i4] === midB[j5] ? lcs[i4 + 1][j5 + 1] + 1 : Math.max(lcs[i4 + 1][j5], lcs[i4][j5 + 1]);
+      let i3 = 0;
+      let j4 = 0;
+      while (i3 < n2 || j4 < m3) {
+        if (i3 < n2 && j4 < m3 && midA[i3] === midB[j4]) {
+          rows.push({ kind: "same", text: midA[i3] });
+          i3++;
+          j4++;
+        } else if (i3 < n2 && (j4 >= m3 || lcs[i3 + 1][j4] >= lcs[i3][j4 + 1])) rows.push({ kind: "del", text: midA[i3++] });
+        else rows.push({ kind: "add", text: midB[j4++] });
+      }
+    }
+    rows.push(...a5.slice(a5.length - tail).map((text2) => ({ kind: "same", text: text2 })));
+    const out = [];
+    let k3 = 0;
+    while (k3 < rows.length) {
+      if (rows[k3].kind !== "same") {
+        out.push(rows[k3++]);
+        continue;
+      }
+      let end = k3;
+      while (end < rows.length && rows[end].kind === "same") end++;
+      const keepBefore = k3 === 0 ? 0 : context;
+      const keepAfter = end === rows.length ? 0 : context;
+      if (end - k3 <= keepBefore + keepAfter + 1) out.push(...rows.slice(k3, end));
+      else out.push(...rows.slice(k3, k3 + keepBefore), { kind: "skip", count: end - k3 - keepBefore - keepAfter }, ...rows.slice(end - keepAfter, end));
+      k3 = end;
+    }
+    return out;
+  }
+  var DAY_MS3 = 864e5;
+  var startOfDay = (d3) => new Date(d3.getFullYear(), d3.getMonth(), d3.getDate()).getTime();
+  function groupByDay(entries2, now) {
+    const groups = [];
+    const today = startOfDay(new Date(now));
+    for (const entry of entries2) {
+      const at2 = new Date(entry.at);
+      const valid = Number.isFinite(at2.getTime());
+      const last = groups[groups.length - 1];
+      if (!valid && last) {
+        last.entries.push(entry);
+        continue;
+      }
+      const day = valid ? startOfDay(at2) : NaN;
+      const key = valid ? `${at2.getFullYear()}-${at2.getMonth() + 1}-${at2.getDate()}` : "unknown";
+      if (last && last.key === key) {
+        last.entries.push(entry);
+        continue;
+      }
+      const label = !valid ? "Earlier" : day === today ? "Today" : day === today - DAY_MS3 ? "Yesterday" : dayText(at2, now);
+      groups.push({ key, label, entries: [entry] });
+    }
+    return groups;
+  }
+
+  // src/panel/ui/History.tsx
+  var FIELD_NAMES = {
+    title: "Title",
+    status: "Status",
+    priority: "Priority",
+    type: "Type",
+    assignee: "Assignee",
+    labels: "Labels",
+    description: "Description",
+    design: "Design",
+    acceptance: "Acceptance",
+    notes: "Notes",
+    closeReason: "Close reason"
+  };
+  var fieldName = (field) => FIELD_NAMES[field] ?? humanize(field);
+  var fieldWord = (field) => field === "acceptance" ? "acceptance criteria" : fieldName(field).toLowerCase();
+  var EXCERPT = 80;
+  var firstLine = (text2) => {
+    const line = text2.trim().split("\n")[0].trim();
+    return line.length > EXCERPT ? `${line.slice(0, EXCERPT).trimEnd()}\u2026` : line;
+  };
+  function valueWords(field, value, statuses) {
+    if (value === void 0) return "not recorded";
+    switch (field) {
+      case "status":
+        return typeof value === "string" && value ? statusLabel(value, statuses) : "none";
+      case "priority":
+        return typeof value === "number" ? `P${value}` : "none";
+      case "assignee":
+        return typeof value === "string" && value ? value : "nobody";
+      case "labels":
+        return Array.isArray(value) ? value.length ? value.join(", ") : "no labels" : "not recorded";
+      case "type":
+        return typeof value === "string" && value ? humanize(value) : "none";
+    }
+    if (typeof value === "string") return value.trim() ? firstLine(value) : "empty";
+    return value === null ? "none" : JSON.stringify(value);
+  }
+  var valueNow = (bead, field) => Object.hasOwn(bead, field) ? bead[field] : void 0;
+  var UNKNOWN_WHO = "someone else or another computer";
+  var UNKNOWN_WHY = "Beads keeps who made a change only on the computer where it was made.";
+  var restoreDomId = (scope, key) => `bd-rs-${scope}-${key.replace(/[^\w-]/g, "_")}`;
+  function useRestore(scope, options = {}) {
+    const store = useStoreApi();
+    const inflight = A2(/* @__PURE__ */ new Set());
+    const [busy, setBusy] = d2(/* @__PURE__ */ new Set());
+    const [outcomes, setOutcomes] = d2({});
+    const live = A2(true);
+    const refocus = A2(null);
+    const toChoice = A2(false);
+    h2(() => () => void (live.current = false), []);
     _2(() => {
-      const el2 = ref.current;
-      const panel2 = el2?.closest(".bd")?.getBoundingClientRect();
-      if (!el2 || !panel2 || panel2.width === 0) return;
-      const left = (el2.offsetParent?.getBoundingClientRect().left ?? 0) + el2.offsetLeft;
-      const right = left + el2.offsetWidth;
-      let dx = 0;
-      if (right > panel2.right - EDGE) dx = panel2.right - EDGE - right;
-      if (left + dx < panel2.left + EDGE) dx = panel2.left + EDGE - left;
-      if (dx !== 0) el2.style.translate = `${dx}px 0`;
-    }, []);
-    h2(() => {
-      const el2 = ref.current;
-      const first = ["[data-autofocus]", '[role="menuitemradio"][aria-checked="true"]', "input", '[role="menuitemradio"]', "button"].map((s3) => el2?.querySelector(s3)).find(Boolean);
-      first?.focus();
-      const outside = (e3) => {
-        const wrap = el2?.parentElement;
-        if (wrap && !wrap.contains(e3.target)) onClose();
-      };
-      document.addEventListener("pointerdown", outside, true);
-      return () => document.removeEventListener("pointerdown", outside, true);
-    }, []);
-    const onKeyDown = (e3) => {
-      if (e3.key === "Escape") {
-        e3.preventDefault();
-        e3.stopPropagation();
-        (ref.current?.parentElement?.querySelector("[aria-haspopup]") ?? null)?.focus();
-        onClose();
+      const key = refocus.current;
+      if (key === null) return;
+      refocus.current = null;
+      const force = toChoice.current;
+      toChoice.current = false;
+      const active2 = document.activeElement;
+      if (!force && active2 && active2 !== document.body) return;
+      const box = document.getElementById(restoreDomId(scope, key));
+      if (box?.hasAttribute("data-refused")) box.focus({ preventScroll: true });
+      else (box?.querySelector("button:not(:disabled)") ?? box)?.focus({ preventScroll: true });
+    });
+    const settle = (key, outcome) => {
+      setOutcomes((all) => {
+        const next = { ...all };
+        if (outcome) next[key] = outcome;
+        else delete next[key];
+        return next;
+      });
+    };
+    return {
+      busy: (key) => busy.has(key),
+      outcome: (key) => outcomes[key] ?? null,
+      restore: (key, on, change) => {
+        const request = restoreRequest(on, change);
+        if (!request || inflight.current.has(key)) return;
+        inflight.current.add(key);
+        setBusy(new Set(inflight.current));
+        settle(key, null);
+        void store.update(request.id, request.expectedUpdatedAt, request.patch, request.expected).then((outcome) => {
+          inflight.current.delete(key);
+          if (!live.current) return;
+          setBusy(new Set(inflight.current));
+          if (outcome.kind === "dropped") return;
+          settle(key, outcome.kind === "ok" ? { kind: "done" } : outcome.kind === "conflict" ? { kind: "refused", current: outcome.current } : { kind: "note", feedback: feedbackOf(outcome) });
+          refocus.current = key;
+          toChoice.current = options.focusChoice === true && outcome.kind === "conflict";
+        });
+      },
+      hold: (key, current) => {
+        settle(key, { kind: "refused", current });
+        refocus.current = key;
+        toChoice.current = options.focusChoice === true;
+      },
+      dismiss: (key) => {
+        settle(key, null);
+        refocus.current = key;
+      }
+    };
+  }
+  function RestoreControl({ kit, scope, rkey, bead, change, statuses, paused, reword, grouped = false, onKeep }) {
+    const outcome = kit.outcome(rkey);
+    const busy = kit.busy(rkey);
+    const id = restoreDomId(scope, rkey);
+    const word = fieldWord(change.field);
+    const off = paused !== null || busy;
+    const button2 = (label, run, primary2 = false) => /* @__PURE__ */ u3("button", { type: "button", class: primary2 ? "bd-btn bd-btn-sm bd-btn-primary" : "bd-btn bd-btn-sm", disabled: off, "aria-busy": busy || void 0, title: paused ?? void 0, onClick: run, children: label });
+    if (outcome?.kind === "done") {
+      return /* @__PURE__ */ u3("div", { id, class: "bd-rs", tabIndex: -1, children: /* @__PURE__ */ u3("p", { class: "bd-rs-msg", "data-tone": "done", role: "status", children: `Restored the earlier ${word}.` }) });
+    }
+    if (outcome?.kind === "refused") {
+      const current = outcome.current;
+      const state2 = restoreState(current, change);
+      const held = valueNow(current, change.field);
+      const now = valueWords(change.field, held, statuses);
+      const text2 = change.text && typeof held === "string" && typeof change.from === "string";
+      const preview = text2 && /* @__PURE__ */ u3("div", { class: "bd-rs-diff", children: [
+        /* @__PURE__ */ u3("p", { class: "bd-rs-msg", children: "Restoring would change it like this:" }),
+        /* @__PURE__ */ u3(TextDiff, { from: held, to: change.from })
+      ] });
+      const again = freshChange(current, change);
+      const sendable = restoreRequest(current, state2 === "ready" ? change : again) !== null;
+      const acts = (run) => sendable ? /* @__PURE__ */ u3("div", { class: "bd-rs-acts", children: [
+        button2("Restore anyway", run, true),
+        button2("Keep current", () => onKeep ? onKeep() : kit.dismiss(rkey))
+      ] }) : /* @__PURE__ */ u3("p", { class: "bd-rs-msg", children: `The ${word} it holds now cannot be put back from here.` });
+      return /* @__PURE__ */ u3("div", { id, class: "bd-rs", "data-refused": true, tabIndex: -1, ...grouped ? {} : { role: "group", "aria-label": `Restore ${word}` }, children: state2 === "unchanged" ? /* @__PURE__ */ u3("p", { class: "bd-rs-msg", role: "status", children: `The ${word} is already the earlier value.` }) : state2 === "ready" ? /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("p", { class: "bd-rs-msg", role: "alert", children: text2 ? `This bead changed since it was shown. The ${word} has not. Nothing was changed.` : `This bead changed since it was shown. The ${word} is still ${now}. Nothing was changed.` }),
+        preview,
+        acts(() => kit.restore(rkey, current, change))
+      ] }) : /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("p", { class: "bd-rs-msg", role: "alert", children: [
+          /* @__PURE__ */ u3("b", { children: `The ${word} was changed again since.` }),
+          " ",
+          !text2 && /* @__PURE__ */ u3("span", { children: `Now: ${now}.` }),
+          " ",
+          /* @__PURE__ */ u3("span", { children: "Nothing was changed." })
+        ] }),
+        preview,
+        acts(() => kit.restore(rkey, current, again))
+      ] }) });
+    }
+    const state = restoreState(bead, change);
+    if (state === "never") {
+      return change.truncated ? /* @__PURE__ */ u3("span", { id, class: "bd-rs-tag", title: "Only the start of this text is shown here, so it cannot be put back from here.", children: "Too long to restore here" }) : null;
+    }
+    if (state === "unchanged") {
+      return /* @__PURE__ */ u3("span", { id, class: "bd-rs-tag", children: "Already the earlier value" });
+    }
+    return /* @__PURE__ */ u3("div", { id, class: "bd-rs", "data-state": state, children: [
+      /* @__PURE__ */ u3(
+        "button",
+        {
+          type: "button",
+          class: "bd-rs-btn",
+          "aria-label": `Restore previous ${word}`,
+          title: paused ?? (state === "changed" ? `The ${word} was changed again since. You choose before anything is written.` : `Put the earlier ${word} back`),
+          disabled: off,
+          "aria-busy": busy || void 0,
+          onClick: () => state === "changed" ? kit.hold(rkey, bead) : kit.restore(rkey, bead, change),
+          children: [
+            /* @__PURE__ */ u3(IconRestore, { size: 12 }),
+            /* @__PURE__ */ u3("span", { children: busy ? "Restoring\u2026" : "Restore" })
+          ]
+        }
+      ),
+      outcome?.kind === "note" && /* @__PURE__ */ u3(WriteMessage, { feedback: outcome.feedback, reword })
+    ] });
+  }
+  var MAX_DIFF_ROWS = 14;
+  function TextDiff({ from, to }) {
+    const rows = T2(() => lineDiff(from, to), [from, to]);
+    const [all, setAll] = d2(false);
+    const shown = all ? rows : rows.slice(0, MAX_DIFF_ROWS);
+    const hidden = rows.length - shown.length;
+    const line = (row2, i3) => row2.kind === "skip" ? /* @__PURE__ */ u3("li", { class: "bd-diff-skip", children: row2.count === 1 ? "1 unchanged line" : `${row2.count} unchanged lines` }, i3) : /* @__PURE__ */ u3("li", { class: "bd-diff-line", "data-kind": row2.kind, children: [
+      /* @__PURE__ */ u3("span", { class: "bd-vh", children: row2.kind === "add" ? "Added: " : row2.kind === "del" ? "Removed: " : "" }),
+      /* @__PURE__ */ u3("span", { "aria-hidden": "true", class: "bd-diff-mark", children: row2.kind === "add" ? "+" : row2.kind === "del" ? "\u2212" : " " }),
+      /* @__PURE__ */ u3("span", { class: "bd-diff-t", children: row2.text || " " })
+    ] }, i3);
+    return /* @__PURE__ */ u3("div", { class: "bd-diff", children: [
+      /* @__PURE__ */ u3("ul", { role: "list", class: "bd-diff-rows", children: shown.map(line) }),
+      hidden > 0 && /* @__PURE__ */ u3("button", { type: "button", class: "bd-link bd-diff-more", onClick: () => setAll(true), children: `Show ${hidden} more ${hidden === 1 ? "line" : "lines"}` })
+    ] });
+  }
+  function Values({ change, statuses }) {
+    const { field, from, to } = change;
+    if (field === "status" && typeof from === "string" && typeof to === "string") {
+      const look = looker(statuses);
+      return /* @__PURE__ */ u3("span", { class: "bd-hv", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-hv-old", "data-look": look(from), children: statusLabel(from, statuses) }),
+        /* @__PURE__ */ u3("span", { class: "bd-hv-to", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-hv-arrow", "aria-hidden": "true", children: "\u2192" }),
+          /* @__PURE__ */ u3("span", { class: "bd-vh", children: "to" }),
+          /* @__PURE__ */ u3("span", { class: "bd-hv-new", "data-look": look(to), children: statusLabel(to, statuses) })
+        ] })
+      ] });
+    }
+    if (field === "labels" && Array.isArray(from) && Array.isArray(to)) {
+      const added = to.filter((l3) => !from.includes(l3));
+      const removed = from.filter((l3) => !to.includes(l3));
+      return /* @__PURE__ */ u3("span", { class: "bd-hv bd-hv-labels", children: [
+        added.map((l3) => /* @__PURE__ */ u3("span", { class: "bd-lb", "data-diff": "add", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-vh", children: "Added " }),
+          String(l3)
+        ] }, `+${l3}`)),
+        removed.map((l3) => /* @__PURE__ */ u3("span", { class: "bd-lb", "data-diff": "del", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-vh", children: "Removed " }),
+          String(l3)
+        ] }, `-${l3}`))
+      ] });
+    }
+    const stacked = field === "title" || field === "closeReason" || typeof from === "string" && from.length > 24 || typeof to === "string" && to.length > 24;
+    return /* @__PURE__ */ u3("span", { class: "bd-hv", "data-stacked": stacked || void 0, children: [
+      /* @__PURE__ */ u3("span", { class: "bd-hv-old", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-vh", children: "From " }),
+        valueWords(field, from, statuses)
+      ] }),
+      /* @__PURE__ */ u3("span", { class: "bd-hv-to", children: [
+        !stacked && /* @__PURE__ */ u3("span", { class: "bd-hv-arrow", "aria-hidden": "true", children: "\u2192" }),
+        /* @__PURE__ */ u3("span", { class: "bd-hv-new", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-vh", children: "to " }),
+          valueWords(field, to, statuses)
+        ] })
+      ] })
+    ] });
+  }
+  function ChangeRow({ entry, change, bead, kit, statuses, paused, reword }) {
+    const key = `${entry.id}:${change.field}`;
+    const restorable = entry.restorable.includes(change.field);
+    const control = restorable || change.truncated ? /* @__PURE__ */ u3(RestoreControl, { kit, scope: "h", rkey: key, bead, change, statuses, paused, reword }) : null;
+    const text2 = change.text && typeof change.from === "string" && typeof change.to === "string";
+    return /* @__PURE__ */ u3("li", { class: "bd-hc", "data-field": change.field, "data-text": text2 || void 0, children: [
+      /* @__PURE__ */ u3("span", { class: "bd-hc-f", children: fieldName(change.field) }),
+      text2 ? /* @__PURE__ */ u3("span", { class: "bd-hc-what", children: change.to === "" ? "Cleared" : change.from === "" ? "Added" : "Edited" }) : /* @__PURE__ */ u3(Values, { change, statuses }),
+      control && /* @__PURE__ */ u3("span", { class: "bd-hc-act", children: control }),
+      text2 && /* @__PURE__ */ u3("div", { class: "bd-hc-diff", children: [
+        /* @__PURE__ */ u3(TextDiff, { from: change.from, to: change.to }),
+        change.truncated && /* @__PURE__ */ u3("p", { class: "bd-hc-cut", children: "Only the start of this text is shown." })
+      ] })
+    ] });
+  }
+  var closes2 = (entry, statuses) => {
+    const look = looker(statuses);
+    return entry.changes.some((c3) => c3.field === "status" && [c3.from, c3.to].some((v5) => typeof v5 === "string" && look(v5) === "done"));
+  };
+  function Who2({ actor, panel: panel2 }) {
+    if (actor) return /* @__PURE__ */ u3("span", { class: "bd-he-who", children: personName(actor, panel2) });
+    return /* @__PURE__ */ u3("span", { class: "bd-he-who", "data-unknown": true, title: UNKNOWN_WHY, children: UNKNOWN_WHO });
+  }
+  function Entry({ entry, bead, kit, statuses, panel: panel2, paused, reword }) {
+    const date = recordedDate(entry.at);
+    const time = /* @__PURE__ */ u3("time", { class: "bd-he-time", dateTime: entry.at, title: date ? fullText(date) : void 0, children: date ? timeText(date) : entry.at });
+    if (entry.gate) {
+      const g3 = entry.gate;
+      const { head, by } = gateEventWords({ ...g3, actor: entry.actor });
+      const who = by === null && g3.what !== "deleted" && (entry.actor || g3.byPanel) ? personName(entry.actor, panel2) : null;
+      const reason = g3.reason ? g3.reason.trim().split("\n")[0] : "";
+      return /* @__PURE__ */ u3("li", { class: "bd-he", "data-kind": "gate", "data-what": g3.what, children: [
+        /* @__PURE__ */ u3("div", { class: "bd-he-top", children: [
+          time,
+          who && /* @__PURE__ */ u3("span", { class: "bd-he-who", children: who })
+        ] }),
+        /* @__PURE__ */ u3("p", { class: "bd-he-gate", children: [
+          /* @__PURE__ */ u3(IconWait, { size: 12 }),
+          /* @__PURE__ */ u3("span", { children: by ? `${head} by ${by}` : head })
+        ] }),
+        reason && /* @__PURE__ */ u3("p", { class: "bd-he-reason", children: reason })
+      ] });
+    }
+    if (entry.created) {
+      return /* @__PURE__ */ u3("li", { class: "bd-he", "data-kind": "created", children: [
+        /* @__PURE__ */ u3("div", { class: "bd-he-top", children: [
+          time,
+          /* @__PURE__ */ u3(Who2, { actor: entry.actor, panel: panel2 })
+        ] }),
+        /* @__PURE__ */ u3("p", { class: "bd-he-gate", children: /* @__PURE__ */ u3("span", { children: "Created" }) })
+      ] });
+    }
+    const quiet = !entry.actor && closes2(entry, statuses);
+    return /* @__PURE__ */ u3("li", { class: "bd-he", "data-kind": "change", children: [
+      /* @__PURE__ */ u3("div", { class: "bd-he-top", children: [
+        time,
+        !quiet && /* @__PURE__ */ u3(Who2, { actor: entry.actor, panel: panel2 })
+      ] }),
+      /* @__PURE__ */ u3("ul", { role: "list", class: "bd-hcs", children: entry.changes.map((change) => /* @__PURE__ */ u3(ChangeRow, { entry, change, bead, kit, statuses, paused, reword }, change.field)) })
+    ] });
+  }
+  function History({ bead, open, statuses, panel: panel2, paused, now, reword }) {
+    const store = useStoreApi();
+    const kit = useRestore("h");
+    const [loaded, setLoaded] = d2(null);
+    const [reading, setReading] = d2(null);
+    const [error, setError] = d2(null);
+    const live = A2(true);
+    h2(() => () => void (live.current = false), []);
+    const read = async (older) => {
+      if (reading) return;
+      const before = older ? loaded?.entries.at(-1)?.id : void 0;
+      setReading(older ? "older" : "first");
+      setError(null);
+      const shownAt = bead.updatedAt;
+      const outcome = await store.readHistory({ id: bead.id, ...before ? { before } : {} });
+      if (!live.current) return;
+      setReading(null);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "error") {
+        setError({ error: outcome.error, older });
         return;
       }
-      if (role !== "menu" || e3.key !== "ArrowDown" && e3.key !== "ArrowUp") return;
-      const items = Array.from(ref.current?.querySelectorAll('[role="menuitemradio"]') ?? []);
-      const i3 = items.indexOf(document.activeElement);
-      items[(i3 + (e3.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
-      e3.preventDefault();
+      const page = outcome.value;
+      setLoaded((prev) => {
+        if (!older || !prev) return { entries: page.entries, more: page.more, labelsKnown: page.labelsKnown, at: shownAt };
+        const seen = new Set(prev.entries.map((e3) => e3.id));
+        return { ...prev, entries: [...prev.entries, ...page.entries.filter((e3) => !seen.has(e3.id))], more: page.more, labelsKnown: prev.labelsKnown && page.labelsKnown };
+      });
     };
-    return /* @__PURE__ */ u3("div", { ref, class: "bd-pop", "data-align": align, role, "aria-label": label, onKeyDown, children });
-  }
-  function usePopover(disabled) {
-    const [open, setOpen] = d2(false);
     h2(() => {
-      if (disabled) setOpen(false);
-    }, [disabled]);
-    return { open, toggle: () => setOpen((o3) => !o3), close: () => setOpen(false) };
+      if (open && !loaded && !reading && !error) void read(false);
+    }, [open]);
+    if (!loaded) {
+      if (error) {
+        return /* @__PURE__ */ u3("div", { class: "bd-hist-err", role: "alert", children: [
+          /* @__PURE__ */ u3("span", { children: error.error.message }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => void read(false), children: "Try again" })
+        ] });
+      }
+      return /* @__PURE__ */ u3("p", { class: "bd-hist-load", role: "status", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+        "Reading history\u2026"
+      ] });
+    }
+    const groups = groupByDay(loaded.entries, now);
+    const newer = bead.updatedAt !== loaded.at;
+    return /* @__PURE__ */ u3("div", { class: "bd-hist", "aria-busy": reading !== null || void 0, children: [
+      newer && /* @__PURE__ */ u3("p", { class: "bd-hist-newer", role: "status", children: [
+        /* @__PURE__ */ u3("span", { children: "This bead changed since its history was read." }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", disabled: reading !== null, onClick: () => void read(false), children: "Refresh" })
+      ] }),
+      loaded.entries.length === 0 && /* @__PURE__ */ u3("p", { class: "bd-hist-none", children: "No earlier versions." }),
+      groups.map((group) => {
+        const head = `bd-hday-${shortId(bead.id)}-${group.key}`;
+        return /* @__PURE__ */ u3("div", { class: "bd-hday", children: [
+          /* @__PURE__ */ u3("h4", { class: "bd-hday-h", id: head, children: group.label }),
+          /* @__PURE__ */ u3("ul", { role: "list", class: "bd-hes", "aria-labelledby": head, children: group.entries.map((entry) => /* @__PURE__ */ u3(Entry, { entry, bead, kit, statuses, panel: panel2, paused, reword }, entry.id)) })
+        ] }, group.key);
+      }),
+      !loaded.labelsKnown && /* @__PURE__ */ u3("p", { class: "bd-hist-note", children: "Label changes are not listed: Beads has no record of them on this computer." }),
+      error?.older && /* @__PURE__ */ u3("div", { class: "bd-hist-err", role: "alert", children: /* @__PURE__ */ u3("span", { children: error.error.message }) }),
+      loaded.more && /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-hist-older", disabled: reading !== null, "aria-busy": reading === "older" || void 0, onClick: () => void read(true), children: reading === "older" ? "Loading\u2026" : "Load older" })
+    ] });
   }
-  function useChoices(items, listId) {
-    const [active2, setActive] = d2(-1);
-    h2(() => setActive(-1), [items.length]);
-    const onKey = (e3, take) => {
-      if (e3.key === "ArrowDown" || e3.key === "ArrowUp") {
-        e3.preventDefault();
-        if (items.length === 0) return;
-        setActive((a5) => e3.key === "ArrowDown" ? (a5 + 1) % items.length : (a5 <= 0 ? items.length : a5) - 1);
-      } else if (e3.key === "Enter" && !composing(e3)) {
-        e3.preventDefault();
-        take(active2 >= 0 ? items[active2] ?? null : null);
+
+  // src/panel/ui/CloseDialog.tsx
+  var CLOSE_DRAFTS = ["closeReason", "closeComment"];
+  var CHECKING_COMMENT = "Checking whether your comment went in.";
+  var panelCount = (b2, text2, actor) => b2 ? b2.comments.filter((c3) => c3.text === text2 && (!actor || c3.author === actor)).length : 0;
+  function useCloseDrafts(bead) {
+    const store = useStoreApi();
+    const snapshot = useStore().snapshot;
+    const id = bead.id;
+    const read = () => ({ reason: store.draft(id, "closeReason")?.text ?? "", comment: store.draft(id, "closeComment")?.text ?? "" });
+    const [text2, setText2] = d2(read);
+    const set = (field, value) => {
+      setText2((t3) => ({ ...t3, [field]: value }));
+      const key = field === "reason" ? "closeReason" : "closeComment";
+      const was = store.draft(id, key);
+      const same2 = field === "comment" && was !== null && was.text.trim() === value.trim();
+      store.setDraft(id, key, value.trim() ? same2 ? { ...was, text: value } : { text: value } : null);
+    };
+    const drop = (which = "all") => {
+      for (const field of which === "comment" ? ["closeComment"] : CLOSE_DRAFTS) store.setDraft(id, field, null);
+      setText2((t3) => which === "comment" ? { ...t3, comment: "" } : { reason: "", comment: "" });
+    };
+    const posted = (body, also = null) => {
+      const snap = store.get().snapshot;
+      const actor = snap?.panelActor ?? "";
+      const listed = snap?.beads.find((b2) => b2.id === id) ?? null;
+      return Math.max(panelCount(bead, body, actor), panelCount(listed, body, actor), panelCount(also, body, actor));
+    };
+    const sent = () => {
+      const d3 = store.draft(id, "closeComment");
+      return d3?.base === void 0 ? null : { body: d3.text.trim(), before: Number(d3.base), at: d3.original === void 0 ? null : Number(d3.original) };
+    };
+    const listedComments = snapshot?.beads.find((b2) => b2.id === id)?.comments;
+    h2(() => {
+      const s4 = sent();
+      if (s4 && posted(s4.body) > s4.before) drop("comment");
+    }, [id, bead.comments, listedComments]);
+    const s3 = sent();
+    return {
+      ...text2,
+      setReason: (value) => set("reason", value),
+      setComment: (value) => set("comment", value),
+      /** Reads them again (another bead, or the dialog opening again). */
+      load: () => setText2(read()),
+      /** Lets go of `which`, or both. */
+      drop,
+      /** A close that may have added the comment has not been checked yet: nothing is sent until the project is read again. */
+      checking: s3?.at != null && !readSince(snapshot?.freshness.localRefreshedAt ?? null, s3.at),
+      /** Before a close is sent: notes how many such comments the bead has, the first time this comment goes. */
+      sending: () => {
+        const d3 = store.draft(id, "closeComment");
+        if (!d3 || !d3.text.trim()) return;
+        store.setDraft(id, "closeComment", { text: d3.text, base: d3.base ?? String(posted(d3.text.trim())) });
+      },
+      /** The close came back without saying whether it went in. */
+      uncertain: () => {
+        const d3 = store.draft(id, "closeComment");
+        if (d3?.base !== void 0) store.setDraft(id, "closeComment", { ...d3, original: String(Date.now()) });
+      },
+      /** The comment to send with a close on `b`: none once it is on the bead. Read at send time, so a retry sees what is there now. */
+      commentFor: (b2) => {
+        const d3 = store.draft(id, "closeComment");
+        const body = d3?.text.trim() ?? "";
+        if (!body) return "";
+        return d3?.base !== void 0 && posted(body, b2) > Number(d3.base) ? "" : body;
       }
     };
-    const optionId = (i3) => `${listId}-o${i3}`;
-    const activeId = active2 >= 0 && active2 < items.length ? optionId(active2) : void 0;
-    return { active: active2, onKey, optionId, activeId };
+  }
+  var closePatch = (status, reason, comment) => ({
+    status,
+    ...reason.trim() ? { closeReason: reason.trim() } : {},
+    ...comment.trim() ? { closeComment: comment.trim() } : {}
+  });
+  var commentWentIn = (outcome) => outcome.kind === "error" && outcome.error.message.startsWith(COMMENT_ADDED);
+  function CloseFields({ question, action, reason, comment, setReason, setComment, busy, disabled, send, cancel, variant = "pop", onEscape, autofocus, message }) {
+    const id = g2();
+    const [asking, setAsking] = d2(false);
+    const typed2 = reason.trim() !== "" || comment.trim() !== "";
+    const go = () => {
+      if (!busy && disabled === null) send();
+    };
+    const box = A2(null);
+    const keep = A2(null);
+    const why = A2(null);
+    h2(() => {
+      if (autofocus) why.current?.focus({ preventScroll: true });
+    }, []);
+    _2(() => {
+      const el2 = box.current;
+      if (!el2) return;
+      el2.style.height = "auto";
+      if (el2.scrollHeight > 0) el2.style.height = `${Math.min(el2.scrollHeight + 2, 160)}px`;
+    }, [comment]);
+    const asked = A2(false);
+    h2(() => {
+      if (asking) keep.current?.focus({ preventScroll: true });
+      else if (asked.current) box.current?.focus({ preventScroll: true });
+      asked.current = asking;
+    }, [asking]);
+    return /* @__PURE__ */ u3(
+      "div",
+      {
+        class: variant === "step" ? "bd-nstep bd-closeform" : "bd-popform bd-closeform",
+        role: "group",
+        "aria-label": question,
+        onKeyDown: (e3) => {
+          if (e3.key !== "Escape" || composing(e3)) return;
+          if (asking) {
+            e3.preventDefault();
+            e3.stopPropagation();
+            setAsking(false);
+          } else if (onEscape) {
+            e3.preventDefault();
+            e3.stopPropagation();
+            onEscape();
+          }
+        },
+        children: [
+          /* @__PURE__ */ u3("p", { class: "bd-closeq", children: question }),
+          /* @__PURE__ */ u3("label", { class: "bd-flab", for: `${id}-why`, children: "Reason (optional)" }),
+          /* @__PURE__ */ u3(
+            "input",
+            {
+              ref: why,
+              id: `${id}-why`,
+              class: "bd-input",
+              "aria-label": "Close reason (optional)",
+              placeholder: "For example the commit",
+              "data-autofocus": true,
+              value: reason,
+              readOnly: busy,
+              onInput: (e3) => setReason(e3.currentTarget.value),
+              onKeyDown: (e3) => {
+                if (e3.key !== "Enter" || composing(e3) || e3.shiftKey || e3.altKey || e3.metaKey || e3.ctrlKey) return;
+                e3.preventDefault();
+                go();
+              }
+            }
+          ),
+          /* @__PURE__ */ u3("label", { class: "bd-flab", for: `${id}-note`, children: "Comment (optional)" }),
+          /* @__PURE__ */ u3(
+            "textarea",
+            {
+              ref: box,
+              id: `${id}-note`,
+              class: "bd-input bd-ntext bd-closenote",
+              placeholder: "Added to the comments before it closes",
+              rows: 2,
+              value: comment,
+              readOnly: busy,
+              onInput: (e3) => setComment(e3.currentTarget.value),
+              onKeyDown: (e3) => {
+                if (!isSubmitKey(e3)) return;
+                e3.preventDefault();
+                go();
+              }
+            }
+          ),
+          asking ? /* @__PURE__ */ u3("div", { class: "bd-confirm", role: "alertdialog", "aria-label": "Discard what you typed?", children: [
+            /* @__PURE__ */ u3("span", { children: "Discard what you typed?" }),
+            /* @__PURE__ */ u3("button", { ref: keep, type: "button", class: "bd-btn bd-btn-sm", onClick: () => setAsking(false), children: "Keep editing" }),
+            /* @__PURE__ */ u3(
+              "button",
+              {
+                type: "button",
+                class: "bd-btn bd-btn-sm",
+                "data-tone": "danger",
+                onClick: () => {
+                  setAsking(false);
+                  cancel();
+                },
+                children: "Discard"
+              }
+            )
+          ] }) : /* @__PURE__ */ u3("div", { class: "bd-popacts", children: [
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: () => typed2 ? setAsking(true) : cancel(), children: "Cancel" }),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", "aria-disabled": busy || disabled !== null || void 0, "aria-busy": busy || void 0, title: disabled ?? void 0, onClick: go, children: busy ? "Closing\u2026" : action })
+          ] }),
+          message
+        ]
+      }
+    );
+  }
+
+  // src/panel/ui/DateInput.tsx
+  var BEADS_READS = "Beads will read this when you save.";
+  var DATE_HINT = "For example tomorrow, next monday, +3d or 2026-10-20.";
+  function DateInput({ value, onInput, onEnter, label, lead, disabled, readOnly, autoFocus, now, zone }) {
+    const hintId = A2(`bd-date-${Math.random().toString(36).slice(2, 9)}`).current;
+    const box = A2(null);
+    h2(() => {
+      if (autoFocus) box.current?.focus();
+    }, []);
+    const text2 = value.trim();
+    const parsed = text2 === "" ? null : parseDateInput(text2, now ?? Date.now(), zone ?? localZone());
+    const preview = parsed === null ? DATE_HINT : parsed.kind === "ok" ? lead ? `${lead} ${parsed.label}` : parsed.label : BEADS_READS;
+    return /* @__PURE__ */ u3("div", { class: "bd-date", children: [
+      /* @__PURE__ */ u3(
+        "input",
+        {
+          type: "text",
+          class: "bd-input",
+          "aria-label": label,
+          "aria-describedby": hintId,
+          autoComplete: "off",
+          spellcheck: false,
+          placeholder: "tomorrow, +3d, 2026-10-20",
+          value,
+          disabled,
+          readOnly,
+          ref: box,
+          onInput: (e3) => onInput(e3.currentTarget.value),
+          onKeyDown: (e3) => {
+            if (onEnter && isEnterInInput(e3)) {
+              e3.preventDefault();
+              onEnter();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u3("p", { class: "bd-date-preview", id: hintId, "data-kind": parsed === null ? "hint" : parsed.kind, children: preview })
+    ] });
   }
 
   // src/panel/ui/Editors.tsx
@@ -8695,14 +10678,14 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       if (el2.scrollHeight > 0) el2.style.height = `${el2.scrollHeight + 2}px`;
     }, [draft]);
     const value = title ? draft.trim() : draft;
-    const changed = draft !== original;
+    const changed2 = draft !== original;
     const maybeIn = feedback?.kind === "uncertain";
-    h2(() => onDirty?.(changed), [changed]);
+    h2(() => onDirty?.(changed2), [changed2]);
     h2(() => () => onDirty?.(false), []);
-    h2(() => store.setDraft(bead.id, field, changed ? { text: draft, original, base } : null), [draft, original, base]);
+    h2(() => store.setDraft(bead.id, field, changed2 ? { text: draft, original, base } : null), [draft, original, base]);
     const save = async (expected, shown = original) => {
       if (busy || disabled || title && value === "") return;
-      if (!changed && !conflict) return onClose();
+      if (!changed2 && !conflict) return onClose();
       setBusy(true);
       setFeedback(null);
       setConfirming(false);
@@ -8728,7 +10711,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       void save(now.updatedAt, now[field]);
     };
     const cancel = () => {
-      if (changed && !confirming) setConfirming(true);
+      if (changed2 && !confirming) setConfirming(true);
       else onClose();
     };
     const onKeyDown = (e3) => {
@@ -8895,49 +10878,74 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     ] });
   }
   var asksReason = (from, to, statuses) => closes(to, statuses) && (!closes(from, statuses) || to === "closed" && from !== "closed");
+  var answered = /* @__PURE__ */ new WeakSet();
   function StatusMenu({ bead, writes, disabled, statuses }) {
     const store = useStoreApi();
     const pop = usePopover(disabled !== null);
-    const move = async (to, closeReason2) => {
-      if (await writes.send(() => ({ status: to, ...closeReason2 ? { closeReason: closeReason2 } : {} }))) store.notify(`Status set to ${statusLabel(to, statuses)}.`);
+    const trigger = A2(null);
+    const said = (to) => store.notify(`Status set to ${statusLabel(to, statuses)}.`);
+    const move = async (to) => {
+      if (await writes.send(() => ({ status: to }))) said(to);
     };
     const [closing, setClosing] = d2(null);
-    const [reason, setReason] = d2("");
+    const drafts = useCloseDrafts(bead);
     const look = looker(statuses);
+    h2(() => drafts.load(), [bead.id]);
+    const done = look(bead.status) === "done";
+    h2(() => {
+      if (done && !closing) drafts.drop();
+    }, [done, bead.id, closing]);
+    const fb = writes.feedback;
+    h2(() => {
+      if (!fb || answered.has(fb)) return;
+      answered.add(fb);
+      if (fb?.kind === "uncertain" && !fb.saved) drafts.uncertain();
+      else if (fb?.kind === "error" && fb.error.message.startsWith(COMMENT_ADDED)) drafts.drop("comment");
+    }, [fb]);
     const names = statuses.map((s3) => s3.name);
     if (!names.includes(bead.status)) names.push(bead.status);
     const label = statusLabel(bead.status, statuses);
     const close = () => {
       pop.close();
       setClosing(null);
-      setReason("");
     };
     const choose = (name) => {
       if (name === bead.status) return close();
       if (asksReason(bead.status, name, statuses)) {
+        drafts.load();
         setClosing(name);
         return;
       }
       close();
       void move(name);
     };
-    const confirm = () => {
-      if (!closing) return;
-      const why = reason.trim();
+    const confirmClose = async () => {
+      if (!closing || writes.busy || drafts.checking) return;
+      const to = closing;
+      const reason = drafts.reason;
+      drafts.sending();
+      const outcome = await writes.sendFor((b2) => closePatch(to, reason, drafts.commentFor(b2)));
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        drafts.drop();
+        said(to);
+      } else if (commentWentIn(outcome)) drafts.drop("comment");
+      else if (outcome.kind === "uncertain" && !outcome.saved) drafts.uncertain();
       close();
-      void move(closing, why || void 0);
+      refocusSoon(trigger.current);
     };
     return /* @__PURE__ */ u3("span", { class: "bd-popwrap", children: [
       /* @__PURE__ */ u3(
         "button",
         {
+          ref: trigger,
           type: "button",
           class: "bd-statbtn",
           "aria-label": `Status: ${label}`,
           "aria-haspopup": "menu",
           "aria-expanded": pop.open,
           title: disabled ?? bead.status,
-          disabled: disabled !== null || writes.busy,
+          disabled: disabled !== null || writes.busy && !pop.open,
           onClick: () => pop.open ? close() : pop.toggle(),
           children: [
             /* @__PURE__ */ u3(StatusDot, { look: look(bead.status), marker: markerOf(bead.status) }),
@@ -8950,29 +10958,26 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
         /* @__PURE__ */ u3(StatusDot, { look: look(name), marker: markerOf(name) }),
         /* @__PURE__ */ u3("span", { children: statusLabel(name, statuses) })
       ] }, name)) }),
-      pop.open && closing && /* @__PURE__ */ u3(Popover, { label: "Close reason", align: "end", onClose: close, children: /* @__PURE__ */ u3("div", { class: "bd-popform", role: "group", "aria-label": "Close reason", children: [
-        /* @__PURE__ */ u3("label", { class: "bd-flab", for: "bd-close-why", children: `Why is it ${statusLabel(closing, statuses).toLowerCase()}?` }),
-        /* @__PURE__ */ u3(
-          "input",
-          {
-            id: "bd-close-why",
-            class: "bd-input",
-            "aria-label": "Close reason (optional)",
-            placeholder: "Optional, for example the commit",
-            value: reason,
-            onInput: (e3) => setReason(e3.currentTarget.value),
-            onKeyDown: (e3) => {
-              if (e3.key !== "Enter" || composing(e3) || e3.shiftKey || e3.altKey || e3.metaKey || e3.ctrlKey) return;
-              e3.preventDefault();
-              confirm();
-            }
+      pop.open && closing && /* @__PURE__ */ u3(Popover, { label: "Close", align: "end", onClose: close, children: /* @__PURE__ */ u3(
+        CloseFields,
+        {
+          question: `Why is it ${statusLabel(closing, statuses).toLowerCase()}?`,
+          action: `Mark ${statusLabel(closing, statuses).toLowerCase()}`,
+          reason: drafts.reason,
+          comment: drafts.comment,
+          setReason: drafts.setReason,
+          setComment: drafts.setComment,
+          busy: writes.busy,
+          disabled: disabled ?? (drafts.checking ? CHECKING_COMMENT : null),
+          message: drafts.checking && /* @__PURE__ */ u3("p", { class: "bd-wmsg", "data-tone": "note", role: "status", children: CHECKING_COMMENT }),
+          send: () => void confirmClose(),
+          cancel: () => {
+            drafts.drop();
+            close();
+            refocusSoon(trigger.current);
           }
-        ),
-        /* @__PURE__ */ u3("div", { class: "bd-popacts", children: [
-          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: close, children: "Cancel" }),
-          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", onClick: confirm, children: `Mark ${statusLabel(closing, statuses).toLowerCase()}` })
-        ] })
-      ] }) })
+        }
+      ) })
     ] });
   }
   function PriorityMenu({ bead, writes, disabled }) {
@@ -9010,6 +11015,316 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
         },
         p3
       )) })
+    ] });
+  }
+  var FALLBACK_TYPES2 = ["task", "bug", "feature", "epic", "chore"];
+  var refocusSoon = (el2) => requestAnimationFrame(() => el2?.isConnected && el2.focus({ preventScroll: true }));
+  function TypeMenu({ bead, writes, disabled, types }) {
+    const store = useStoreApi();
+    const pop = usePopover(disabled !== null);
+    const trigger = A2(null);
+    const names = (types.length ? types : FALLBACK_TYPES2).filter((t3) => t3 !== "gate");
+    if (bead.type && !names.includes(bead.type)) names.push(bead.type);
+    const choose = async (type) => {
+      pop.close();
+      refocusSoon(trigger.current);
+      if (type === bead.type) return;
+      if (await writes.send(() => ({ type }))) store.notify(`Type set to ${humanize(type)}.`);
+      refocusSoon(trigger.current);
+    };
+    return /* @__PURE__ */ u3("span", { class: "bd-popwrap", children: [
+      /* @__PURE__ */ u3(
+        "button",
+        {
+          ref: trigger,
+          type: "button",
+          class: "bd-chipbtn bd-dtype",
+          "aria-label": `Type: ${humanize(bead.type || "bead")}`,
+          "aria-haspopup": "menu",
+          "aria-expanded": pop.open,
+          title: disabled ?? "Change the type",
+          disabled: disabled !== null || writes.busy,
+          onClick: pop.toggle,
+          children: [
+            humanize(bead.type || "bead"),
+            /* @__PURE__ */ u3(IconChevron, {})
+          ]
+        }
+      ),
+      pop.open && /* @__PURE__ */ u3(Popover, { label: "Type", role: "menu", onClose: pop.close, children: names.map((name) => /* @__PURE__ */ u3("button", { type: "button", role: "menuitemradio", "aria-checked": name === bead.type, class: "bd-menu-item", title: name, onClick: () => void choose(name), children: [
+        /* @__PURE__ */ u3(TypeIcon, { type: name, size: 13 }),
+        /* @__PURE__ */ u3("span", { children: humanize(name) })
+      ] }, name)) })
+    ] });
+  }
+  function inside(candidate, id, byId) {
+    const seen = /* @__PURE__ */ new Set();
+    for (let at2 = candidate.parentId; at2 !== null && !seen.has(at2); at2 = byId.get(at2)?.parentId ?? null) {
+      if (at2 === id) return true;
+      seen.add(at2);
+    }
+    return false;
+  }
+  function ParentMenu({ bead, writes, disabled, beads, byId, statuses }) {
+    const store = useStoreApi();
+    const pop = usePopover(disabled !== null);
+    const trigger = A2(null);
+    const parent = bead.parentId ? byId.get(bead.parentId) ?? null : null;
+    const named = (id) => byId.get(id)?.title || shortId(id);
+    const options = pop.open ? parentOptions(beads, statuses, bead.parentId).filter((b2) => b2.id !== bead.id && !inside(b2, bead.id, byId)) : [];
+    const choose = async (to) => {
+      pop.close();
+      refocusSoon(trigger.current);
+      if (to === bead.parentId) return;
+      const from = bead.parentId;
+      if (await writes.send(() => ({ parent: to }))) store.notify(to ? `Moved under ${named(to)}.` : `Moved out of ${from ? named(from) : "its parent"}.`);
+      refocusSoon(trigger.current);
+    };
+    const shown = bead.parentId ? parent?.title || shortId(bead.parentId) : null;
+    const epicParent = parent?.type === "epic";
+    return /* @__PURE__ */ u3("span", { class: "bd-popwrap bd-parentwrap", children: [
+      /* @__PURE__ */ u3(
+        "button",
+        {
+          ref: trigger,
+          type: "button",
+          class: "bd-chipbtn bd-parent",
+          "data-none": shown === null || void 0,
+          "aria-label": `Parent: ${shown ?? "No parent"}`,
+          "aria-haspopup": "menu",
+          "aria-expanded": pop.open,
+          title: disabled ?? (epicParent ? "Move to another epic" : "Move to an epic"),
+          disabled: disabled !== null || writes.busy,
+          onClick: pop.toggle,
+          children: [
+            epicParent && /* @__PURE__ */ u3(IconEpic, { size: 12 }),
+            /* @__PURE__ */ u3("span", { class: "bd-parent-t", children: shown ?? "No parent" }),
+            /* @__PURE__ */ u3(IconChevron, {})
+          ]
+        }
+      ),
+      pop.open && /* @__PURE__ */ u3(Popover, { label: "Move to", role: "menu", onClose: pop.close, children: [
+        /* @__PURE__ */ u3("button", { type: "button", role: "menuitemradio", "aria-checked": bead.parentId === null, class: "bd-menu-item", onClick: () => void choose(null), children: /* @__PURE__ */ u3("span", { children: "No parent" }) }),
+        options.length > 0 && /* @__PURE__ */ u3("div", { class: "bd-menu-rule", role: "separator" }),
+        /* @__PURE__ */ u3("div", { class: "bd-menu-scroll", role: "none", children: options.map((epic) => /* @__PURE__ */ u3("button", { type: "button", role: "menuitemradio", "aria-checked": epic.id === bead.parentId, class: "bd-menu-item bd-menu-epic", title: epic.title, onClick: () => void choose(epic.id), children: [
+          /* @__PURE__ */ u3(IconEpic, { size: 12 }),
+          /* @__PURE__ */ u3("span", { class: "bd-menu-t", children: epic.title }),
+          /* @__PURE__ */ u3("span", { class: "bd-menu-sub", children: shortId(epic.id) })
+        ] }, epic.id)) }),
+        options.length === 0 && /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item bd-menu-note", disabled: true, children: "No other open epics in this project." })
+      ] })
+    ] });
+  }
+  var dueOf = (b2) => typeof b2.extra.due_at === "string" ? b2.extra.due_at : null;
+  var deferOf = (b2) => typeof b2.extra.defer_until === "string" ? b2.extra.defer_until : null;
+  var storedLabel = (text2, now) => {
+    const ms = Date.parse(text2);
+    return Number.isFinite(ms) ? dateLabel(ms, now) : text2;
+  };
+  function snoozed(b2, now) {
+    const until = deferOf(b2);
+    if (b2.status === "deferred") return { until };
+    const at2 = until === null ? NaN : Date.parse(until);
+    return Number.isFinite(at2) && at2 > now ? { until } : null;
+  }
+  var shownKey = (kind, b2) => kind === "due" ? dueOf(b2) ?? "" : `${b2.status === "deferred"}|${deferOf(b2) ?? ""}`;
+  function dateNow(kind, b2, now) {
+    if (kind === "due") {
+      const due = dueOf(b2);
+      return due === null ? "Now no due date." : `Now due ${storedLabel(due, now)}.`;
+    }
+    const s3 = snoozed(b2, now);
+    return s3 === null ? "Now not deferred." : s3.until === null ? "Now deferred until someone brings it back." : `Now deferred until ${storedLabel(s3.until, now)}.`;
+  }
+  function DateRow({ kind, bead, disabled, done, now, reword, onDirty }) {
+    const store = useStoreApi();
+    const due = kind === "due";
+    const [editing, setEditing] = d2(false);
+    const [text2, setText2] = d2("");
+    const [base, setBase] = d2(null);
+    const [busy, setBusy] = d2(false);
+    const sending = A2(false);
+    const [feedback, setFeedback] = d2(null);
+    const [conflict, setConflict] = d2(null);
+    const [confirming, setConfirming] = d2(false);
+    const row2 = A2(null);
+    const typed2 = text2.trim();
+    const dirty = editing && typed2 !== "";
+    h2(() => onDirty(dirty), [dirty]);
+    h2(() => () => onDirty(false), []);
+    const home = () => requestAnimationFrame(() => (row2.current?.querySelector("[data-date-open]:not(:disabled)") ?? row2.current?.querySelector("button:not(:disabled)"))?.focus({ preventScroll: true }));
+    const close = () => {
+      setEditing(false);
+      setText2("");
+      setBase(null);
+      setConfirming(false);
+      setConflict(null);
+      home();
+    };
+    h2(() => {
+      if (!editing || busy || conflict || base === null) return;
+      if (shownKey(kind, bead) === shownKey(kind, base)) {
+        if (bead.updatedAt !== base.updatedAt) setBase(bead);
+      } else if (typed2 === "") setBase(bead);
+      else setConflict({ current: bead, again: (current) => void save(current), same: false });
+    }, [bead]);
+    const settle = (outcome, on, again, said, keepOpen) => {
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        store.notify(said(outcome.value));
+        return close();
+      }
+      if (outcome.kind === "conflict") {
+        setConflict({ current: outcome.current, again, same: shownKey(kind, outcome.current) === shownKey(kind, on) });
+        requestAnimationFrame(() => row2.current?.querySelector(".bd-wnote-date")?.focus({ preventScroll: true }));
+        return;
+      }
+      if (outcome.kind === "uncertain" && outcome.saved && keepOpen) close();
+      else if (!editing) home();
+      setFeedback(feedbackOf(outcome));
+    };
+    const run = async (on, send, again, said, keepOpen = false) => {
+      if (sending.current || disabled !== null) return;
+      sending.current = true;
+      setBusy(true);
+      setFeedback(null);
+      setConflict(null);
+      setConfirming(false);
+      const outcome = await send();
+      sending.current = false;
+      setBusy(false);
+      settle(outcome, on, again, said, keepOpen);
+    };
+    const save = (on) => {
+      if (typed2 === "") return;
+      setBase(on);
+      const sent = typed2;
+      void run(
+        on,
+        () => due ? store.update(bead.id, on.updatedAt, { due: sent }, { due: dueOf(on) }) : store.defer(bead.id, on.updatedAt, sent),
+        (current) => save(current),
+        (b2) => {
+          const stored2 = due ? dueOf(b2) : deferOf(b2);
+          return stored2 === null ? due ? "Due date saved." : "Deferred." : due ? `Due ${storedLabel(stored2, now)}.` : `Deferred until ${storedLabel(stored2, now)}.`;
+        },
+        true
+      );
+    };
+    const clearDue = (on) => void run(on, () => store.update(bead.id, on.updatedAt, { due: null }, { due: dueOf(on) }), clearDue, () => "Due date cleared.");
+    const indefinitely = (on) => void run(on, () => store.defer(bead.id, on.updatedAt, null), indefinitely, () => "Deferred until someone brings it back.");
+    const undefer = (on) => void run(on, () => store.undefer(bead.id, on.updatedAt), undefer, () => "No longer deferred.");
+    const open = () => {
+      setEditing(true);
+      setText2("");
+      setBase(bead);
+      setFeedback(null);
+      setConflict(null);
+    };
+    const cancel = () => {
+      if (busy) return;
+      if (typed2 !== "" && !confirming) setConfirming(true);
+      else close();
+    };
+    const onKeyDown = (e3) => {
+      if (e3.key !== "Escape" || e3.defaultPrevented || !(editing || confirming)) return;
+      e3.preventDefault();
+      e3.stopPropagation();
+      if (confirming) {
+        setConfirming(false);
+        row2.current?.querySelector("input")?.focus({ preventScroll: true });
+      } else cancel();
+    };
+    const off = disabled !== null || busy;
+    const title = disabled ?? void 0;
+    const stored = due ? dueOf(bead) : null;
+    const snooze = due ? null : snoozed(bead, now);
+    const storedAt = stored === null ? NaN : Date.parse(stored);
+    const overdue = due && !done && Number.isFinite(storedAt) && storedAt < now;
+    const value = due ? stored === null ? "No due date" : storedLabel(stored, now) : snooze === null ? "Not deferred" : snooze.until === null ? "Until someone brings it back" : `Until ${storedLabel(snooze.until, now)}`;
+    const empty = due ? stored === null : snooze === null;
+    const actions = due ? stored === null ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", "data-date-open": true, title, disabled: off, onClick: open, children: "Set due date" }) : /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", "data-date-open": true, "aria-label": "Change due date", title, disabled: off, onClick: open, children: "Change" }),
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", "aria-label": "Clear due date", title, disabled: off, onClick: () => clearDue(bead), children: "Clear" })
+    ] }) : /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", "data-date-open": true, "aria-label": snooze === null ? "Defer until a date" : snooze.until ? "Change defer date" : "Set a date to defer until", title, disabled: off, onClick: open, children: snooze === null ? "Defer until\u2026" : snooze.until ? "Change" : "Set a date" }),
+      (snooze === null || snooze.until !== null) && /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", title: title ?? "Set aside with no date, until someone brings it back", disabled: off, onClick: () => indefinitely(bead), children: "Defer indefinitely" }),
+      snooze !== null && /* @__PURE__ */ u3("button", { type: "button", class: "bd-datebtn", title: title ?? "Back to open", disabled: off, onClick: () => undefer(bead), children: "Undefer" })
+    ] });
+    return /* @__PURE__ */ u3("div", { ref: row2, class: "bd-daterow", "data-date": kind, "data-editing": editing || void 0, "data-busy": busy || void 0, role: "group", "aria-label": due ? "Due date" : "Deferred", onKeyDown, children: [
+      /* @__PURE__ */ u3("span", { class: "bd-datelab", "aria-hidden": "true", children: due ? "Due" : "Deferred" }),
+      /* @__PURE__ */ u3("div", { class: "bd-dateval", children: [
+        !editing && /* @__PURE__ */ u3("div", { class: "bd-dateline", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-datetext", "data-none": empty || void 0, children: [
+            value,
+            overdue && /* @__PURE__ */ u3("span", { class: "bd-overdue", children: "Overdue" })
+          ] }),
+          /* @__PURE__ */ u3("span", { class: "bd-dateacts", children: actions })
+        ] }),
+        editing && /* @__PURE__ */ u3("div", { class: "bd-dateedit", children: [
+          /* @__PURE__ */ u3(
+            DateInput,
+            {
+              label: due ? "Due date" : "Defer until",
+              lead: due ? "Due" : "Until",
+              value: text2,
+              onInput: setText2,
+              onEnter: () => confirming ? close() : conflict ? void 0 : save(base ?? bead),
+              readOnly: busy || conflict !== null,
+              disabled: disabled !== null,
+              autoFocus: true
+            }
+          ),
+          confirming ? /* @__PURE__ */ u3("div", { class: "bd-confirm", role: "alertdialog", "aria-label": "Discard your changes?", children: [
+            /* @__PURE__ */ u3("span", { children: "Discard your changes?" }),
+            /* @__PURE__ */ u3(
+              "button",
+              {
+                type: "button",
+                class: "bd-btn bd-btn-sm",
+                onClick: () => {
+                  setConfirming(false);
+                  row2.current?.querySelector("input")?.focus({ preventScroll: true });
+                },
+                children: "Keep editing"
+              }
+            ),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", "data-tone": "danger", onClick: close, children: "Discard" })
+          ] }) : !conflict && /* @__PURE__ */ u3("div", { class: "bd-edacts", children: [
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: cancel, children: "Cancel" }),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off || typed2 === "", title, onClick: () => save(base ?? bead), children: busy ? "Saving\u2026" : due ? "Save" : "Defer" })
+          ] })
+        ] }),
+        conflict && /* @__PURE__ */ u3("div", { class: "bd-wnote bd-wnote-date", role: "alert", tabIndex: -1, children: [
+          /* @__PURE__ */ u3("b", { children: "Changed while you were editing" }),
+          /* @__PURE__ */ u3("span", { children: conflict.same ? "Something else on this bead changed; this date did not. Re-apply to make your change." : dateNow(kind, conflict.current, now) }),
+          /* @__PURE__ */ u3("span", { class: "bd-wnote-acts", children: [
+            /* @__PURE__ */ u3(
+              "button",
+              {
+                type: "button",
+                class: "bd-btn bd-btn-sm",
+                onClick: () => {
+                  setConflict(null);
+                  if (editing) close();
+                  else home();
+                },
+                children: "Discard"
+              }
+            ),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, title: disabled ?? "Make your change over it", onClick: () => conflict.again(conflict.current), children: "Re-apply" })
+          ] })
+        ] }),
+        /* @__PURE__ */ u3(WriteMessage, { feedback, reword })
+      ] })
+    ] });
+  }
+  function DateFields({ canDefer, onDirty, ...props }) {
+    const [dirty, setDirty] = d2({ due: false, defer: false });
+    const any = dirty.due || dirty.defer;
+    h2(() => onDirty?.(any), [any]);
+    return /* @__PURE__ */ u3("div", { class: "bd-dates", children: [
+      /* @__PURE__ */ u3(DateRow, { kind: "due", ...props, onDirty: (d3) => setDirty((x4) => x4.due === d3 ? x4 : { ...x4, due: d3 }) }),
+      canDefer && !props.done && /* @__PURE__ */ u3(DateRow, { kind: "defer", ...props, onDirty: (d3) => setDirty((x4) => x4.defer === d3 ? x4 : { ...x4, defer: d3 }) })
     ] });
   }
   function AssigneePicker({ bead, writes, disabled, beads, panelActor }) {
@@ -9139,6 +11454,135 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       ] })
     ] });
   }
+  var REPLACE = {
+    supersede: { title: "Superseded by", ask: "Which bead replaces this one?", as: "superseded by", action: "Close as superseded", done: "superseded by" },
+    duplicate: { title: "Duplicate of", ask: "Which bead does this one repeat?", as: "a duplicate of", action: "Close as duplicate", done: "a duplicate of" }
+  };
+  function ReplaceStep({ kind, bead, beads, statuses, disabled, reword, onClose }) {
+    const store = useStoreApi();
+    const words = REPLACE[kind];
+    const [text2, setText2] = d2("");
+    const [chosen, setChosen] = d2(null);
+    const [busy, setBusy] = d2(false);
+    const sending = A2(false);
+    const [feedback, setFeedback] = d2(null);
+    const [changed2, setChanged] = d2(false);
+    const listId = g2();
+    const input = A2(null);
+    const confirm = A2(null);
+    const look = looker(statuses);
+    const found = chosen ? [] : linkTargets(text2, beads, bead.id, statuses);
+    const choices = useChoices(found, listId);
+    h2(() => (chosen ? confirm.current : input.current)?.focus({ preventScroll: true }), [chosen === null]);
+    const pick = (target) => {
+      if (!target) return;
+      setFeedback(null);
+      setChanged(false);
+      setChosen(target);
+    };
+    const send = async () => {
+      if (!chosen || sending.current || disabled !== null) return;
+      sending.current = true;
+      setBusy(true);
+      setFeedback(null);
+      setChanged(false);
+      const outcome = kind === "supersede" ? await store.supersede(bead.id, chosen.id, bead.updatedAt) : await store.duplicate(bead.id, chosen.id, bead.updatedAt);
+      sending.current = false;
+      setBusy(false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        store.notify(`Closed ${shortId(bead.id)} as ${words.done} ${shortId(chosen.id)}.`);
+        return onClose(true);
+      }
+      if (outcome.kind === "conflict") setChanged(true);
+      else setFeedback(feedbackOf(outcome));
+    };
+    const back = () => {
+      if (busy) return;
+      setChosen(null);
+      setFeedback(null);
+      setChanged(false);
+    };
+    const named = (b2) => `${shortId(b2.id)} ${b2.title}`.trim();
+    return /* @__PURE__ */ u3(
+      "div",
+      {
+        class: "bd-nstep bd-replace",
+        "data-stage": chosen ? "confirm" : "pick",
+        role: "group",
+        "aria-label": words.title,
+        onKeyDown: (e3) => {
+          if (e3.key !== "Escape" || composing(e3)) return;
+          e3.preventDefault();
+          e3.stopPropagation();
+          if (busy) return;
+          if (!chosen && text2) setText2("");
+          else onClose(false);
+        },
+        children: chosen ? /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("p", { class: "bd-replace-q", children: [
+            /* @__PURE__ */ u3("span", { class: "bd-replace-lab", children: words.title }),
+            /* @__PURE__ */ u3("span", { class: "bd-replace-pick", children: [
+              /* @__PURE__ */ u3(StatusDot, { look: look(chosen.status), marker: markerOf(chosen.status) }),
+              /* @__PURE__ */ u3("span", { class: "bd-id", children: shortId(chosen.id) }),
+              /* @__PURE__ */ u3("span", { class: "bd-title", children: chosen.title })
+            ] })
+          ] }),
+          /* @__PURE__ */ u3("p", { class: "bd-replace-says", children: [
+            /* @__PURE__ */ u3("b", { children: `This closes ${bead.id}.` }),
+            " ",
+            `It will show as ${words.as} ${named(chosen)}.`
+          ] }),
+          changed2 && /* @__PURE__ */ u3("p", { class: "bd-wmsg", "data-tone": "note", role: "status", children: "This bead changed while you were choosing. Nothing was saved. Look it over, then close it again." }),
+          feedback && /* @__PURE__ */ u3(WriteMessage, { feedback, reword }),
+          /* @__PURE__ */ u3("div", { class: "bd-nstep-acts", children: [
+            /* @__PURE__ */ u3(
+              "button",
+              {
+                ref: confirm,
+                type: "button",
+                class: "bd-btn bd-btn-sm bd-btn-primary",
+                "aria-disabled": busy || disabled !== null || void 0,
+                "aria-busy": busy || void 0,
+                title: disabled ?? void 0,
+                onClick: () => void send(),
+                children: busy ? "Closing\u2026" : words.action
+              }
+            ),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: back, children: "Choose another" }),
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: () => onClose(false), children: "Cancel" })
+          ] })
+        ] }) : /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("label", { class: "bd-flab", for: `${listId}-in`, children: words.ask }),
+          /* @__PURE__ */ u3(
+            "input",
+            {
+              ref: input,
+              id: `${listId}-in`,
+              class: "bd-input",
+              role: "combobox",
+              "aria-expanded": found.length > 0,
+              "aria-controls": listId,
+              "aria-activedescendant": choices.activeId,
+              "aria-autocomplete": "list",
+              placeholder: "Bead id or title",
+              value: text2,
+              onInput: (e3) => setText2(e3.currentTarget.value),
+              onKeyDown: (e3) => choices.onKey(e3, (b2) => pick(b2 ?? found[0] ?? null))
+            }
+          ),
+          found.length > 0 && /* @__PURE__ */ u3("ul", { id: listId, class: "bd-opts bd-opts-in", role: "listbox", "aria-label": "Beads", children: found.map((b2, i3) => /* @__PURE__ */ u3("li", { id: choices.optionId(i3), role: "option", "aria-selected": i3 === choices.active, class: "bd-opt bd-opt-bead", onClick: () => pick(b2), children: [
+            /* @__PURE__ */ u3(StatusDot, { look: look(b2.status), marker: markerOf(b2.status) }),
+            /* @__PURE__ */ u3("span", { class: "bd-id", children: shortId(b2.id) }),
+            /* @__PURE__ */ u3("span", { class: "bd-title", children: b2.title })
+          ] }, b2.id)) }),
+          text2.trim() !== "" && found.length === 0 && /* @__PURE__ */ u3("p", { class: "bd-fieldmsg", "data-tone": "quiet", children: "No bead matches." }),
+          /* @__PURE__ */ u3("p", { class: "bd-nstep-hint", children: `Closes ${bead.id} and links it to the bead you pick. You confirm first.` }),
+          /* @__PURE__ */ u3("div", { class: "bd-nstep-acts", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => onClose(false), children: "Cancel" }) })
+        ] })
+      }
+    );
+  }
   function LinkAdder({ bead, beads, statuses, disabled, onDone }) {
     const store = useStoreApi();
     const [kind, setKind] = d2(LINK_KINDS[0].value);
@@ -9216,6 +11660,328 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
         ]
       }
     );
+  }
+
+  // src/panel/ui/Gates.tsx
+  var DEFAULT_REASON = { review: REVIEW_REASON, plan: PLAN_APPROVAL_REASON };
+  var MAX_REASON = 500;
+  function askReason(kind, text2) {
+    const typed2 = text2.replace(/\s+/g, " ").trim();
+    if (!typed2) return DEFAULT_REASON[kind];
+    if (kind === "review" || typed2.startsWith(PLAN_APPROVAL_REASON)) return typed2.slice(0, MAX_REASON);
+    return `${PLAN_APPROVAL_REASON}: ${typed2}`.slice(0, MAX_REASON);
+  }
+  var gateDomId = (id) => `bd-gate-${id.replace(/[^\w.-]/g, "_")}`;
+  var askKey = (beadId) => `ask:${beadId}`;
+  var gateKey = (id) => `gate:${id}`;
+  var ASK_FIELD = "bd-ask-field";
+  var goId = (gateId) => `${gateDomId(gateId)}-go`;
+  var fieldId = (gateId) => `${gateDomId(gateId)}-field`;
+  function useGates(bead) {
+    const state = useStore();
+    const store = useStoreApi();
+    const id = bead?.id ?? null;
+    const current = A2(id);
+    current.current = id;
+    const seen = A2(/* @__PURE__ */ new Set());
+    for (const g3 of state.gates) seen.current.add(g3.id);
+    const inflight = A2(/* @__PURE__ */ new Set());
+    const [busy, setBusy] = d2(/* @__PURE__ */ new Set());
+    const [step, setStep] = d2(null);
+    const [feedback, setFeedback] = d2({});
+    const [settled, setSettled] = d2({});
+    const [made, setMade] = d2([]);
+    const [found, setFound] = d2(null);
+    const follow = A2(null);
+    const refocus = A2(null);
+    h2(() => {
+      setStep(null);
+      setFeedback({});
+      setSettled({});
+      setMade([]);
+      setFound(null);
+      follow.current = null;
+    }, [id]);
+    const listed = bead ? gatesOn(bead, state.gates) : [];
+    const gates = [...listed, ...made.filter((g3) => id !== null && g3.blocks.includes(id) && !seen.current.has(g3.id) && !settled[g3.id])];
+    _2(() => {
+      const target = refocus.current;
+      if (target) {
+        refocus.current = null;
+        document.getElementById(target)?.focus({ preventScroll: true });
+      }
+      const f5 = follow.current;
+      if (!f5 || document.getElementById(gateDomId(f5.id))) return;
+      follow.current = null;
+      const active2 = document.activeElement;
+      if (active2 && active2 !== document.body) return;
+      const next = f5.next && document.getElementById(gateDomId(f5.next)) || document.querySelector(".bd-detail");
+      next?.focus({ preventScroll: true });
+    });
+    async function run(at2, key, feedbackKey, send, done, back) {
+      if (inflight.current.has(key)) return;
+      inflight.current.add(key);
+      setBusy(new Set(inflight.current));
+      setFeedback((f5) => ({ ...f5, [feedbackKey]: null }));
+      const outcome = await send();
+      inflight.current.delete(key);
+      setBusy(new Set(inflight.current));
+      if (outcome.kind === "dropped" || current.current !== at2) return;
+      if (outcome.kind === "ok") {
+        done(outcome.value);
+        return;
+      }
+      setFeedback((f5) => ({ ...f5, [feedbackKey]: feedbackOf(outcome) }));
+      const active2 = document.activeElement;
+      if (!active2 || active2 === document.body) refocus.current = back();
+    }
+    const ask = (kind, reason) => {
+      if (!bead) return;
+      const at2 = bead.id;
+      const why = askReason(kind, reason ?? "");
+      const send = () => store.requestReview(at2, why === REVIEW_REASON ? void 0 : why);
+      const back = () => document.getElementById(ASK_FIELD) ? ASK_FIELD : MENU_ID;
+      void run(at2, askKey(at2), "ask", send, (result) => {
+        setStep((s3) => s3?.mode === "ask" ? null : s3);
+        if (!seen.current.has(result.gate.id)) setMade((list) => [...list.filter((g3) => g3.id !== result.gate.id), result.gate]);
+        refocus.current = gateDomId(result.gate.id);
+        if (result.ok) {
+          setFound(null);
+          store.notify(kind === "plan" ? `Plan approval asked for on ${shortId(at2)}.` : `Review asked for on ${shortId(at2)}.`);
+        } else {
+          setFound(result.gate.id);
+        }
+      }, back);
+    };
+    const resolve = (gate, reason) => {
+      if (!bead) return;
+      const at2 = bead.id;
+      const shown = gates.map((g3) => g3.id);
+      const next = shown[shown.indexOf(gate.id) + 1] ?? shown[shown.indexOf(gate.id) - 1] ?? null;
+      const back = () => document.getElementById(fieldId(gate.id)) ? fieldId(gate.id) : goId(gate.id);
+      void run(at2, gateKey(gate.id), gate.id, () => store.resolveReview(gate.id, reason.trim() || void 0), (result) => {
+        const li = document.getElementById(gateDomId(gate.id));
+        const held = !!li && (li.contains(document.activeElement) || document.activeElement === document.body);
+        setStep((s3) => s3?.mode === "resolve" && s3.gateId === gate.id ? null : s3);
+        if (result.ok) {
+          setSettled((s3) => ({ ...s3, [gate.id]: { text: gate.planApproval ? "Approved. Updating." : "Resolved. Updating.", tone: "done" } }));
+          store.notify(gate.planApproval ? `Plan approved for ${shortId(at2)}.` : `Review resolved for ${shortId(at2)}.`);
+        } else {
+          const when2 = result.at === null ? NaN : Date.parse(result.at);
+          const what = gate.planApproval ? "This plan was already approved" : "This review was already resolved";
+          const who = result.resolvedBy ? ` by ${result.resolvedBy}` : "";
+          setSettled((s3) => ({ ...s3, [gate.id]: { text: `${what}${who}${Number.isFinite(when2) ? ` ${ago(Date.now() - when2)}` : ""}. Updating.`, tone: "note" } }));
+        }
+        if (held) {
+          refocus.current = gateDomId(gate.id);
+          follow.current = { id: gate.id, next };
+        }
+      }, back);
+    };
+    return {
+      gates,
+      asking: id !== null && busy.has(askKey(id)),
+      resolving: (gateId) => busy.has(gateKey(gateId)),
+      ask,
+      resolve,
+      step,
+      openStep: (s3) => setStep(s3),
+      closeStep: (focus2) => {
+        if (focus2) refocus.current = focus2;
+        setStep(null);
+      },
+      feedback,
+      settled,
+      found,
+      supported: !state.unsupported.has("gates")
+    };
+  }
+  var MENU_ID = "bd-bead-menu";
+  var BEAD_MENU_ID = MENU_ID;
+  function BeadMenu({ kit, disabled, done, replace }) {
+    const pop = usePopover(disabled !== null);
+    if (!kit.supported && !replace || done) return null;
+    const off = kit.asking;
+    const pick = (go) => () => {
+      pop.close();
+      go();
+    };
+    return /* @__PURE__ */ u3("span", { class: "bd-popwrap", children: [
+      /* @__PURE__ */ u3("button", { type: "button", id: MENU_ID, class: "bd-iconbtn", "aria-label": "Bead actions", "aria-haspopup": "menu", "aria-expanded": pop.open, title: disabled ?? "Bead actions", disabled: disabled !== null, onClick: pop.toggle, children: /* @__PURE__ */ u3(IconMore, {}) }),
+      pop.open && /* @__PURE__ */ u3(Popover, { label: "Bead actions", align: "end", role: "menu", onClose: pop.close, children: [
+        kit.supported && /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item", disabled: off, onClick: pick(() => kit.ask("review")), children: /* @__PURE__ */ u3("span", { children: "Ask for a review" }) }),
+          /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item", disabled: off, onClick: pick(() => kit.ask("plan")), children: /* @__PURE__ */ u3("span", { children: "Ask for plan approval" }) }),
+          /* @__PURE__ */ u3("div", { class: "bd-menu-rule", role: "separator" }),
+          /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item", onClick: pick(() => kit.openStep({ mode: "ask", kind: "review", text: REVIEW_REASON })), children: /* @__PURE__ */ u3("span", { children: "Ask with a reason\u2026" }) })
+        ] }),
+        replace && /* @__PURE__ */ u3(S, { children: [
+          kit.supported && /* @__PURE__ */ u3("div", { class: "bd-menu-rule", role: "separator" }),
+          /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item", onClick: pick(() => replace("supersede")), children: /* @__PURE__ */ u3("span", { children: "Superseded by\u2026" }) }),
+          /* @__PURE__ */ u3("button", { type: "button", role: "menuitem", class: "bd-menu-item", onClick: pick(() => replace("duplicate")), children: /* @__PURE__ */ u3("span", { children: "Duplicate of\u2026" }) })
+        ] })
+      ] })
+    ] });
+  }
+  function PlanAsk({ kit, disabled }) {
+    if (!kit.supported || kit.gates.some((g3) => g3.planApproval)) return null;
+    const busy = kit.asking;
+    return /* @__PURE__ */ u3(
+      "button",
+      {
+        type: "button",
+        class: "bd-edit bd-planask",
+        title: disabled ?? "Ask for approval of this plan before work starts",
+        disabled: disabled !== null || busy,
+        "aria-busy": busy || void 0,
+        onClick: () => kit.ask("plan"),
+        children: "Ask for plan approval"
+      }
+    );
+  }
+  var escapeCloses = (cancel) => (e3) => {
+    if (e3.key !== "Escape" || composing(e3)) return;
+    e3.preventDefault();
+    e3.stopPropagation();
+    cancel();
+  };
+  function useFirstFocus() {
+    const ref = A2(null);
+    h2(() => {
+      ref.current?.focus({ preventScroll: true });
+      ref.current?.select();
+    }, []);
+    return ref;
+  }
+  function ReasonStep({ id, label, text: text2, set, send, cancel, action, hint, busy, paused, message, children }) {
+    const field = useFirstFocus();
+    const go = () => {
+      if (!busy && paused === null) send();
+    };
+    return /* @__PURE__ */ u3("div", { class: "bd-nstep bd-gstep", role: "group", "aria-label": label, children: [
+      children,
+      /* @__PURE__ */ u3(
+        "input",
+        {
+          ref: field,
+          id,
+          type: "text",
+          class: "bd-input",
+          "aria-label": label,
+          placeholder: "Reason (optional)",
+          maxLength: MAX_REASON,
+          value: text2,
+          disabled: busy,
+          onInput: (e3) => set(e3.currentTarget.value),
+          onKeyDown: (e3) => {
+            escapeCloses(() => !busy && cancel())(e3);
+            if (isEnterInInput(e3)) {
+              e3.preventDefault();
+              go();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u3("p", { class: "bd-nstep-hint", children: hint }),
+      /* @__PURE__ */ u3("div", { class: "bd-nstep-acts", children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: busy || paused !== null, "aria-busy": busy || void 0, title: paused ?? void 0, onClick: go, children: action }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: cancel, children: "Cancel" })
+      ] }),
+      message
+    ] });
+  }
+  var ASK_HINT = {
+    review: "The bead cannot close until someone resolves the review. Agents see it too.",
+    plan: "Work waits until someone approves the plan in Design. Agents see it too."
+  };
+  function AskStep({ kit, step, paused }) {
+    const busy = kit.asking;
+    const choose = (kind) => {
+      const text2 = step.text === DEFAULT_REASON[step.kind] || !step.text.trim() ? DEFAULT_REASON[kind] : step.text;
+      kit.openStep({ ...step, kind, text: text2 });
+    };
+    const fb = kit.feedback.ask ?? null;
+    return /* @__PURE__ */ u3(
+      ReasonStep,
+      {
+        id: ASK_FIELD,
+        label: step.kind === "plan" ? "Reason for the plan approval" : "Reason for the review",
+        text: step.text,
+        set: (text2) => kit.openStep({ ...step, text: text2 }),
+        send: () => kit.ask(step.kind, step.text),
+        cancel: () => kit.closeStep(MENU_ID),
+        action: step.kind === "plan" ? "Ask for plan approval" : "Ask for a review",
+        hint: ASK_HINT[step.kind],
+        busy,
+        paused,
+        message: fb && /* @__PURE__ */ u3(WriteMessage, { feedback: fb }),
+        children: /* @__PURE__ */ u3("div", { class: "bd-gkind", role: "group", "aria-label": "Ask for", children: ["review", "plan"].map((kind) => /* @__PURE__ */ u3("button", { type: "button", class: "bd-gkind-opt", "aria-pressed": step.kind === kind, disabled: busy, onClick: () => choose(kind), children: kind === "plan" ? "Plan approval" : "Review" }, kind)) })
+      }
+    );
+  }
+  function resolveHint(gate, others) {
+    if (others) return gate.planApproval ? "Approving clears this plan approval. The bead still waits on the rest." : "Resolving clears this review. The bead still waits on the rest.";
+    return gate.planApproval ? "Approving lets work on the plan start." : "Resolving lets the bead close.";
+  }
+  var kindOf = (gate) => gate.kind === "human" ? gate.planApproval ? "plan" : "review" : gate.kind === "gh:run" || gate.kind === "gh:pr" ? "github" : gate.kind === "timer" || gate.kind === "bead" ? gate.kind : "other";
+  var firstLine2 = (text2) => text2.trim().split("\n")[0].trim();
+  function WaitingOn({ kit, now, panel: panel2, paused }) {
+    const step = kit.step;
+    const askFeedback = step?.mode === "ask" ? null : kit.feedback.ask ?? null;
+    if (kit.gates.length === 0 && step?.mode !== "ask" && !askFeedback) return null;
+    return /* @__PURE__ */ u3("div", { class: "bd-gates-wrap", children: [
+      step?.mode === "ask" && /* @__PURE__ */ u3(AskStep, { kit, step, paused }),
+      askFeedback && /* @__PURE__ */ u3("div", { class: "bd-gnote", children: /* @__PURE__ */ u3(WriteMessage, { feedback: askFeedback }) }),
+      kit.gates.length > 0 && /* @__PURE__ */ u3("section", { class: "bd-gates", "aria-labelledby": "bd-gates-h", children: [
+        /* @__PURE__ */ u3("h3", { class: "bd-gates-h", id: "bd-gates-h", children: [
+          /* @__PURE__ */ u3(IconWait, { size: 12 }),
+          /* @__PURE__ */ u3("span", { children: "Waiting on" }),
+          kit.gates.length > 1 && /* @__PURE__ */ u3("span", { class: "bd-n", children: kit.gates.length })
+        ] }),
+        /* @__PURE__ */ u3("ul", { class: "bd-glist", role: "list", children: kit.gates.map((gate) => /* @__PURE__ */ u3(GateItem, { kit, gate, now, panel: panel2, paused }, gate.id)) })
+      ] })
+    ] });
+  }
+  function GateItem({ kit, gate, now, panel: panel2, paused }) {
+    const id = gateDomId(gate.id);
+    const human = gate.kind === "human";
+    const busy = kit.resolving(gate.id);
+    const settled = kit.settled[gate.id] ?? null;
+    const step = kit.step?.mode === "resolve" && kit.step.gateId === gate.id ? kit.step : null;
+    const fb = kit.feedback[gate.id] ?? null;
+    const off = paused !== null || busy;
+    const reason = gate.reason ? firstLine2(gate.reason) : null;
+    const closeStep = () => kit.closeStep(`${id}-why`);
+    return /* @__PURE__ */ u3("li", { id, class: "bd-gate", "data-kind": kindOf(gate), "data-found": kit.found === gate.id || void 0, tabIndex: -1, "aria-labelledby": `${id}-k ${id}-r`, "aria-describedby": `${id}-m`, children: [
+      /* @__PURE__ */ u3("div", { class: "bd-gate-top", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-tag", id: `${id}-k`, "data-kind": kindOf(gate), children: gateLabel(gate) }),
+        /* @__PURE__ */ u3("span", { class: "bd-gate-reason", id: `${id}-r`, title: gate.reason ?? void 0, "data-none": reason ? void 0 : true, children: reason ?? "No reason given" })
+      ] }),
+      /* @__PURE__ */ u3("p", { class: "bd-gate-meta", id: `${id}-m`, children: gateState(gate, now, panel2) }),
+      kit.found === gate.id && !settled && /* @__PURE__ */ u3("p", { class: "bd-why", "data-tone": "hold", role: "status", children: gate.planApproval ? "This bead already waits on a plan approval." : "This bead already waits on a review." }),
+      settled ? /* @__PURE__ */ u3("p", { class: "bd-why bd-gate-settled", "data-tone": settled.tone, role: "status", children: settled.text }) : step ? /* @__PURE__ */ u3(
+        ReasonStep,
+        {
+          id: fieldId(gate.id),
+          label: gate.planApproval ? "Reason for approving" : "Reason for resolving",
+          text: step.text,
+          set: (text2) => kit.openStep({ ...step, text: text2 }),
+          send: () => kit.resolve(gate, step.text),
+          cancel: closeStep,
+          action: gate.planApproval ? "Approve plan" : "Resolve review",
+          hint: resolveHint(gate, kit.gates.length > 1),
+          busy,
+          paused,
+          message: fb && /* @__PURE__ */ u3(WriteMessage, { feedback: fb })
+        }
+      ) : human && kit.supported && /* @__PURE__ */ u3("div", { class: "bd-gate-acts", children: [
+        /* @__PURE__ */ u3("div", { class: "bd-nacts-row", children: [
+          /* @__PURE__ */ u3("button", { type: "button", id: goId(gate.id), class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, "aria-busy": busy || void 0, title: paused ?? void 0, onClick: () => kit.resolve(gate, ""), children: gate.planApproval ? "Approve" : "Resolve" }),
+          /* @__PURE__ */ u3("button", { type: "button", id: `${id}-why`, class: "bd-link bd-nreason", disabled: off, title: paused ?? void 0, onClick: () => kit.openStep({ mode: "resolve", gateId: gate.id, text: "" }), children: "Add a reason" })
+        ] }),
+        fb && /* @__PURE__ */ u3(WriteMessage, { feedback: fb })
+      ] })
+    ] });
   }
 
   // src/panel/ui/Relationships.tsx
@@ -9297,6 +12063,190 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     ] });
   }
 
+  // src/panel/ui/EpicView.tsx
+  function EpicReady({ epic, where, paused }) {
+    const store = useStoreApi();
+    const gates = useStore().gates;
+    const drafts = useCloseDrafts(epic);
+    const refreshed = useStore().snapshot?.freshness.localRefreshedAt ?? null;
+    const [unsure, setUnsure] = d2(null);
+    h2(() => {
+      if (unsure === null || !readSince(refreshed, unsure)) return;
+      setUnsure(null);
+      setFeedback({ kind: "checked", saved: false });
+    }, [refreshed, unsure]);
+    const [step, setStep] = d2(false);
+    const [busy, setBusy] = d2(false);
+    const sending = A2(false);
+    const [feedback, setFeedback] = d2(null);
+    const [changed2, setChanged] = d2(false);
+    const root2 = A2(null);
+    const opener = A2(null);
+    const send = async (withText) => {
+      if (sending.current || paused !== null || withText && drafts.checking) return;
+      sending.current = true;
+      setBusy(true);
+      setFeedback(null);
+      setChanged(false);
+      setUnsure(null);
+      if (withText) drafts.sending();
+      const patch = closePatch("closed", withText ? drafts.reason : "", withText ? drafts.commentFor(epic) : "");
+      const outcome = await store.update(epic.id, epic.updatedAt, patch, { status: epic.status });
+      sending.current = false;
+      setBusy(false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        drafts.drop();
+        store.notify(`Closed ${epic.title || shortId(epic.id)}.`);
+        const next = where === "row" ? document.getElementById(rowDomId(epic.id))?.closest('[role="listbox"]') : document.querySelector(".bd-detail .bd-statbtn");
+        next?.focus({ preventScroll: true });
+        return;
+      }
+      if (commentWentIn(outcome)) drafts.drop("comment");
+      if (outcome.kind === "uncertain" && !outcome.saved) {
+        if (withText) drafts.uncertain();
+        setUnsure(Date.now());
+      }
+      if (outcome.kind === "conflict") setChanged(true);
+      else setFeedback(feedbackOf(outcome));
+    };
+    const leave = () => {
+      setStep(false);
+      requestAnimationFrame(() => opener.current?.focus({ preventScroll: true }));
+    };
+    return /* @__PURE__ */ u3("div", { ref: root2, class: "bd-epic-ready", "data-where": where, children: [
+      /* @__PURE__ */ u3("div", { class: "bd-epic-ready-row", children: [
+        /* @__PURE__ */ u3("span", { class: "bd-epic-ready-t", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-epic-ready-mark", "aria-hidden": "true" }),
+          "All children done"
+        ] }),
+        !step && /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3(
+            "button",
+            {
+              type: "button",
+              class: where === "detail" ? "bd-btn bd-btn-sm bd-btn-primary" : "bd-btn bd-btn-sm",
+              "aria-disabled": busy || paused !== null || void 0,
+              "aria-busy": busy || void 0,
+              title: paused ?? void 0,
+              onClick: () => void send(false),
+              children: busy ? "Closing\u2026" : "Close epic"
+            }
+          ),
+          /* @__PURE__ */ u3(
+            "button",
+            {
+              ref: opener,
+              type: "button",
+              class: "bd-link bd-nreason",
+              disabled: busy || paused !== null,
+              title: paused ?? void 0,
+              onClick: () => {
+                drafts.load();
+                setFeedback(null);
+                setChanged(false);
+                setStep(true);
+              },
+              children: "Add a reason"
+            }
+          )
+        ] })
+      ] }),
+      step && /* @__PURE__ */ u3(
+        CloseFields,
+        {
+          variant: "step",
+          question: "Why is it closed?",
+          action: "Close epic",
+          reason: drafts.reason,
+          comment: drafts.comment,
+          setReason: drafts.setReason,
+          setComment: drafts.setComment,
+          busy,
+          disabled: paused ?? (drafts.checking ? CHECKING_COMMENT : null),
+          message: drafts.checking && /* @__PURE__ */ u3("p", { class: "bd-wmsg", "data-tone": "note", role: "status", children: CHECKING_COMMENT }),
+          send: () => void send(true),
+          cancel: () => {
+            drafts.drop();
+            leave();
+          },
+          onEscape: leave,
+          autofocus: true
+        }
+      ),
+      changed2 && /* @__PURE__ */ u3("p", { class: "bd-wmsg", "data-tone": "note", role: "status", children: "This epic changed since it was shown. Nothing was saved. Look it over, then close it again." }),
+      feedback && /* @__PURE__ */ u3(WriteMessage, { feedback, reword: (message) => blockedMessage(message, epic, gates) })
+    ] });
+  }
+  function Bar({ progress }) {
+    const share = (n2) => `${progress.total ? n2 / progress.total * 100 : 0}%`;
+    return /* @__PURE__ */ u3("span", { class: "bd-bar", "aria-hidden": "true", children: [
+      /* @__PURE__ */ u3("i", { "data-look": "done", style: { width: share(progress.done) } }),
+      /* @__PURE__ */ u3("i", { "data-look": "progress", style: { width: share(progress.inProgress) } }),
+      /* @__PURE__ */ u3("i", { "data-look": "blocked", style: { width: share(progress.blocked) } })
+    ] });
+  }
+  function ProgressLine({ progress, changed: changed2 }) {
+    return /* @__PURE__ */ u3("div", { class: "bd-prog", children: [
+      /* @__PURE__ */ u3(Bar, { progress }),
+      progress.total === 0 ? /* @__PURE__ */ u3("span", { children: "Nothing in it yet" }) : /* @__PURE__ */ u3("span", { title: `${progress.done} of ${progress.total} beads in this epic done`, children: `${progress.done}/${progress.total} done` }),
+      progress.blocked > 0 && /* @__PURE__ */ u3("span", { class: "bd-prog-blk", children: `${progress.blocked} blocked` }),
+      changed2 > 0 && /* @__PURE__ */ u3("span", { class: "bd-prog-new", children: `${changed2} changed` })
+    ] });
+  }
+  var headerId = (key) => `bd-h-${key}`;
+  function EpicView({ groups, toggle: toggle2, box, ready, paused = null, ...events }) {
+    return /* @__PURE__ */ u3(S, { children: groups.map((group) => {
+      const { epic } = group;
+      const rows = group.rows.map((row2) => /* @__PURE__ */ u3(Row, { row: row2, dot: true, ...events }, row2.bead.id));
+      if (!epic) {
+        return /* @__PURE__ */ u3("section", { class: "bd-orphans", "data-collapsed": group.collapsed || void 0, children: [
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-sect", "aria-expanded": !group.collapsed, onClick: () => toggle2(group.key), children: [
+            /* @__PURE__ */ u3("span", { class: "bd-chev", children: /* @__PURE__ */ u3(IconChevron, {}) }),
+            /* @__PURE__ */ u3("span", { id: headerId(group.key), children: "Not in an epic" }),
+            /* @__PURE__ */ u3("span", { class: "bd-n", children: group.count }),
+            group.changed > 0 && /* @__PURE__ */ u3("span", { class: "bd-ux", children: `${group.changed} changed` })
+          ] }),
+          rows.length > 0 && /* @__PURE__ */ u3("div", { role: "listbox", "aria-labelledby": headerId(group.key), ...box(group.key), children: rows })
+        ] }, group.key);
+      }
+      return /* @__PURE__ */ u3("section", { class: "bd-epic", "data-collapsed": group.collapsed || void 0, children: [
+        /* @__PURE__ */ u3(
+          "button",
+          {
+            type: "button",
+            class: "bd-chev bd-epic-chev",
+            "aria-expanded": !group.collapsed,
+            "aria-label": `${group.collapsed ? "Expand" : "Collapse"} ${epic.title}`,
+            onClick: () => toggle2(group.key),
+            children: /* @__PURE__ */ u3(IconChevron, {})
+          }
+        ),
+        /* @__PURE__ */ u3("div", { role: "listbox", "aria-label": epic.title, ...box(group.key), children: [
+          /* @__PURE__ */ u3(
+            BeadRow,
+            {
+              ...events,
+              variant: "epic",
+              bead: epic,
+              id: shortId(epic.id),
+              look: group.look,
+              label: epic.status,
+              marker: "builtin",
+              depth: 0,
+              unseen: group.unseen,
+              context: group.context,
+              dot: false,
+              below: group.progress && /* @__PURE__ */ u3(ProgressLine, { progress: group.progress, changed: group.changed })
+            }
+          ),
+          rows
+        ] }),
+        ready?.has(epic.id) && /* @__PURE__ */ u3(EpicReady, { epic, where: "row", paused }, epic.id)
+      ] }, group.key);
+    }) });
+  }
+
   // src/panel/ui/Detail.tsx
   function StatusPill({ status, statuses }) {
     const look = looker(statuses)(status);
@@ -9306,18 +12256,32 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     ] });
   }
   var peekOf = (text2) => text2.split("\n").map((l3) => l3.replace(/^\s*(?:#+|>|[-*+]|\d+[.)])\s*(?:\[[ xX]\]\s*)?/, "").replace(/[*_`~]/g, "").trim()).find(Boolean) ?? "";
-  function Section({ id, title, note, peek, folded = false, action, editing = false, children }) {
+  function Section({ id, title, note, peek, folded = false, action, editing = false, onToggle, children }) {
     const [isFolded, setFolded] = d2(folded);
     const open = editing || !isFolded;
     const bodyId = `bd-sec-${id}`;
     return /* @__PURE__ */ u3("section", { class: "bd-sec", "data-section": id, "data-open": open || void 0, "data-editing": editing || void 0, children: [
       /* @__PURE__ */ u3("h3", { class: "bd-sh", children: [
-        /* @__PURE__ */ u3("button", { type: "button", class: "bd-sh-tog", "aria-expanded": open, "aria-controls": bodyId, disabled: editing, onClick: () => setFolded((f5) => !f5), children: [
-          /* @__PURE__ */ u3("span", { class: "bd-chev", children: /* @__PURE__ */ u3(IconChevron, {}) }),
-          /* @__PURE__ */ u3("span", { class: "bd-sh-t", children: title }),
-          note && /* @__PURE__ */ u3("span", { class: "bd-n", children: note }),
-          !open && peek && /* @__PURE__ */ u3("span", { class: "bd-peek", children: peek })
-        ] }),
+        /* @__PURE__ */ u3(
+          "button",
+          {
+            type: "button",
+            class: "bd-sh-tog",
+            "aria-expanded": open,
+            "aria-controls": bodyId,
+            disabled: editing,
+            onClick: () => {
+              setFolded(!isFolded);
+              onToggle?.(isFolded);
+            },
+            children: [
+              /* @__PURE__ */ u3("span", { class: "bd-chev", children: /* @__PURE__ */ u3(IconChevron, {}) }),
+              /* @__PURE__ */ u3("span", { class: "bd-sh-t", children: title }),
+              note && /* @__PURE__ */ u3("span", { class: "bd-n", children: note }),
+              !open && peek && /* @__PURE__ */ u3("span", { class: "bd-peek", children: peek })
+            ]
+          }
+        ),
         !editing && action
       ] }),
       /* @__PURE__ */ u3("div", { id: bodyId, class: "bd-sec-body", hidden: !open, children })
@@ -9330,13 +12294,76 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     { field: "notes", title: "Notes", chip: "Notes", folded: true }
   ];
   var EDITABLE = ["title", ...TEXT_SECTIONS.map((s3) => s3.field)];
-  function Acceptance({ text: text2 }) {
-    const items = acceptanceItems(text2);
-    if (!items) return /* @__PURE__ */ u3(Markdown, { class: "bd-txt", text: text2 });
-    return /* @__PURE__ */ u3("ul", { class: "bd-ac", children: items.map((item, i3) => /* @__PURE__ */ u3("li", { "data-done": item.done || void 0, children: [
-      /* @__PURE__ */ u3("span", { class: "bd-ac-box", role: "img", "aria-label": item.done ? "Done" : "Not done yet" }),
-      /* @__PURE__ */ u3(Markdown, { inline: true, text: item.text })
-    ] }, i3)) });
+  function acceptanceNote(text2) {
+    const boxes = acceptanceLines(text2).filter((l3) => l3.kind === "box");
+    if (boxes.length > 0) return `${boxes.filter((l3) => l3.done).length}/${boxes.length}`;
+    return acceptanceItems(text2)?.length.toString();
+  }
+  function Acceptance({ bead, paused }) {
+    const store = useStoreApi();
+    const text2 = bead.acceptance;
+    const base = g2();
+    const [sending, setSending] = d2(null);
+    const [note, setNote] = d2(null);
+    h2(() => setNote((n2) => n2?.kind === "feedback" && n2.feedback?.kind === "uncertain" ? null : n2), [text2]);
+    const tick = async (index) => {
+      if (sending || paused !== null) return;
+      const next = toggleLine(text2, index);
+      if (next === null) return;
+      setSending({ index, text: text2 });
+      setNote(null);
+      const outcome = await store.update(bead.id, bead.updatedAt, { acceptance: next }, { acceptance: text2 });
+      setSending(null);
+      if (outcome.kind === "ok" || outcome.kind === "dropped") return;
+      if (outcome.kind === "conflict") setNote({ kind: outcome.current.acceptance === text2 ? "other" : "changed" });
+      else setNote({ kind: "feedback", feedback: feedbackOf(outcome) });
+    };
+    const pending = sending?.text === text2 ? sending.index : null;
+    return /* @__PURE__ */ u3("div", { class: "bd-acwrap", children: [
+      acceptanceBlocks(text2).map(
+        (block, b2) => block.kind === "text" ? /* @__PURE__ */ u3(Markdown, { class: "bd-txt", text: block.text }, b2) : (
+          // role="list": Safari drops a styled list's semantics without it.
+          /* @__PURE__ */ u3("ul", { class: "bd-ac", role: "list", children: block.lines.map((line) => {
+            if (line.kind !== "box") {
+              return /* @__PURE__ */ u3("li", { "data-kind": "bullet", "data-depth": line.depth || void 0, children: [
+                /* @__PURE__ */ u3("span", { class: "bd-ac-dot", "aria-hidden": "true" }),
+                /* @__PURE__ */ u3(Markdown, { inline: true, text: line.text })
+              ] }, line.index);
+            }
+            const id = `${base}-${line.index}`;
+            const busy = pending === line.index;
+            const done = busy ? !line.done : line.done;
+            const off = sending !== null || paused !== null;
+            return /* @__PURE__ */ u3("li", { "data-done": done || void 0, "data-busy": busy || void 0, "data-depth": line.depth || void 0, children: [
+              /* @__PURE__ */ u3(
+                "button",
+                {
+                  type: "button",
+                  id,
+                  role: "checkbox",
+                  class: "bd-ac-tick",
+                  "aria-checked": done,
+                  "aria-labelledby": `${id}-t`,
+                  "aria-disabled": off || void 0,
+                  "aria-busy": busy || void 0,
+                  title: paused ?? void 0,
+                  onClick: () => void tick(line.index),
+                  children: /* @__PURE__ */ u3("span", { class: "bd-ac-box", "aria-hidden": "true" })
+                }
+              ),
+              /* @__PURE__ */ u3("label", { id: `${id}-t`, for: id, class: "bd-ac-text", children: /* @__PURE__ */ u3(Markdown, { inline: true, text: line.text }) })
+            ] }, line.index);
+          }) }, b2)
+        )
+      ),
+      note?.kind === "feedback" ? /* @__PURE__ */ u3(WriteMessage, { feedback: note.feedback }) : note && /* @__PURE__ */ u3("p", { class: "bd-wmsg bd-ac-note", "data-tone": "note", role: "status", children: note.kind === "changed" ? "The criteria changed before your tick was saved. Nothing was saved. They show as they are now." : "Something else on this bead changed first. Nothing was saved. Tick it again to save it." })
+    ] });
+  }
+  function NoAcceptance({ paused, onAdd }) {
+    return /* @__PURE__ */ u3("div", { class: "bd-noac", children: [
+      /* @__PURE__ */ u3("span", { children: "No acceptance criteria" }),
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-edit", "data-edit": "acceptance", "aria-label": "Add acceptance criteria", title: paused ?? void 0, disabled: paused !== null, onClick: onAdd, children: "Add" })
+    ] });
   }
   function LeaveConfirm({ onKeep, onDiscard }) {
     const box = A2(null);
@@ -9390,6 +12417,29 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       /* @__PURE__ */ u3("button", { type: "button", class: "bd-banner-x", "aria-label": "Dismiss", onClick: onDismiss, children: /* @__PURE__ */ u3(IconX, {}) })
     ] });
   }
+  function withoutGates(related, gates, gateIds) {
+    const hidden = /* @__PURE__ */ new Set([...gateIds, ...gates.map((g3) => g3.id)]);
+    if (hidden.size === 0) return related;
+    const deps = related.deps.filter((d3) => !hidden.has(d3.dep.to) && !hidden.has(d3.dep.from));
+    return deps.length === related.deps.length ? related : { ...related, deps };
+  }
+  function WhyBlocked({ waits, fallback, known, open }) {
+    const { items, more } = waits ? waitItems(waits) : { items: [], more: "" };
+    return /* @__PURE__ */ u3("div", { class: "bd-dhint", "data-tone": "blocked", children: [
+      /* @__PURE__ */ u3(IconWait, { size: 13 }),
+      items.length === 0 ? /* @__PURE__ */ u3("span", { children: fallback }) : /* @__PURE__ */ u3("span", { children: [
+        "Waiting on ",
+        items.map(({ sep, item }) => /* @__PURE__ */ u3(S, { children: [
+          sep,
+          item.kind === "gate" ? item.word : /* @__PURE__ */ u3(S, { children: [
+            known(item.id) ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-hint-id", title: `Open ${item.title}`, onClick: () => open(item.id), children: shortId(item.id) }) : /* @__PURE__ */ u3("span", { class: "bd-hint-id", "data-plain": true, children: shortId(item.id) }),
+            item.title ? ` ${item.title}` : ""
+          ] })
+        ] })),
+        more
+      ] })
+    ] });
+  }
   var isField = (el2) => !!el2 && (el2 instanceof HTMLElement && el2.isContentEditable ? true : !!el2.closest("input, textarea, select"));
   function Detail({ footer, composer, inert }) {
     const state = useStore();
@@ -9440,7 +12490,24 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     const listed = entry ? byId.get(entry.id) ?? null : null;
     const bead = newerBead(data?.bead ?? null, listed);
     const writes = useInlineWrites(bead);
+    const gateKit = useGates(bead);
+    const [explained, setExplained] = d2(null);
+    const explainFor = bead && snapshot && bead.status === "open" && !snapshot.readyIds.includes(bead.id) && !state.unsupported.has("explain") ? `${bead.id}
+${snapshot.cursor}` : null;
+    h2(() => {
+      if (!explainFor) return;
+      const id = explainFor.split("\n")[0];
+      let live = true;
+      void store.readExplain(id).then((outcome) => {
+        if (live && outcome.kind === "ok") setExplained({ key: explainFor, value: outcome.value });
+      });
+      return () => {
+        live = false;
+      };
+    }, [explainFor]);
     const [linking, setLinking] = d2(false);
+    const [replacing, setReplacing] = d2(null);
+    const [historyFor, setHistoryFor] = d2(null);
     const drafted = (id) => id === null ? null : EDITABLE.find((field) => store.draft(id, field) !== null) ?? null;
     const [editing, setEditing] = d2(() => drafted(entryId));
     const [removing, setRemoving] = d2([]);
@@ -9448,12 +12515,13 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     const [composerRound, setComposerRound] = d2(0);
     h2(() => {
       setLinking(false);
+      setReplacing(null);
       setEditing(drafted(entryId));
     }, [entryId]);
-    const [dirty, setDirty] = d2({ editor: false, comment: false });
+    const [dirty, setDirty] = d2({ editor: false, comment: false, dates: false });
     const [asking, setAsking] = d2(null);
     useOverlay("leave", asking !== null);
-    const unsaved = dirty.editor || dirty.comment;
+    const unsaved = dirty.editor || dirty.comment || dirty.dates;
     h2(() => {
       store.setLeaveGuard(unsaved ? (go, stay) => setAsking({ go, stay, drops: "all" }) : null);
       return () => store.setLeaveGuard(null);
@@ -9472,7 +12540,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     const discard = () => {
       if (!asking) return;
       setAsking(null);
-      setDirty((d3) => asking.drops === "editor" ? { ...d3, editor: false } : { editor: false, comment: false });
+      setDirty((d3) => asking.drops === "editor" ? { ...d3, editor: false } : { editor: false, comment: false, dates: false });
       if (entryId !== null && asking.drops === "editor" && editing) store.setDraft(entryId, editing, null);
       if (entryId !== null && asking.drops === "all") {
         store.dropDrafts(entryId);
@@ -9505,22 +12573,26 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
         ] }) })
       ] });
     }
-    const related = liveRelated ?? data?.related ?? relatedFor(bead, snapshot.beads);
+    const related = withoutGates(liveRelated ?? data?.related ?? relatedFor(bead, snapshot.beads), state.gates, snapshot.gateIds);
     const epic = bead.type === "epic" ? null : nearestEpic(bead, byId);
     const root2 = bead.type === "epic" ? bead : epic;
     const c3 = classify(bead);
     const reason = closeReason(bead, snapshot.activity, statuses);
     const closed = closedAt2(bead, snapshot.activity, statuses);
-    const extra = moreFields(bead.extra, now);
+    const extra = moreFields(bead.extra, now).filter((f5) => f5.key !== "due_at" && f5.key !== "defer_until");
     const gone = data !== null && !listed;
     const sub = (id) => {
       const list = kids.get(id);
       return list?.length ? { done: list.filter((k3) => classify(k3).look === "done").length, total: list.length } : null;
     };
-    const waiting = bead.status === "open" && c3.bucket === "blocked";
     const blockers = related.deps.filter((d3) => d3.direction === "out" && d3.dep.kind === "blocks").map((d3) => byId.get(d3.dep.to) ?? d3.other).filter((b2) => b2 !== null && classify(b2).look !== "done");
-    const missing = TEXT_SECTIONS.filter((s3) => !bead[s3.field].trim() && editing !== s3.field);
+    const explain = explainFor !== null && explained?.key === explainFor ? explained.value : null;
+    const waits = waitsOf(bead, explain, state.gates, snapshot.gateIds, blockers);
+    const waiting2 = bead.status === "open" && (c3.bucket === "blocked" || waits !== null);
+    const reword = (message) => blockedMessage(message, bead, state.gates, waits?.beads ?? []);
+    const missing = TEXT_SECTIONS.filter((s3) => s3.field !== "acceptance" && !bead[s3.field].trim() && editing !== s3.field);
     const hasRelations = !!(related.parent || bead.parentId || related.children.length > 0 || related.deps.length > 0);
+    const ready = bead.type === "epic" && eligibleEpics(snapshot.beads, statuses, state.gates).some((e3) => e3.id === bead.id);
     const deferUntil = bead.status === "open" && c3.bucket === "deferred" && typeof bead.extra.defer_until === "string" ? bead.extra.defer_until : null;
     return /* @__PURE__ */ u3(
       "section",
@@ -9552,7 +12624,8 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
             ] }),
             /* @__PURE__ */ u3("span", { class: "bd-dacts", children: [
               /* @__PURE__ */ u3(NewBeadButton, {}),
-              /* @__PURE__ */ u3(StatusMenu, { bead, writes, disabled: paused, statuses })
+              /* @__PURE__ */ u3(StatusMenu, { bead, writes, disabled: paused, statuses }),
+              /* @__PURE__ */ u3(BeadMenu, { kit: gateKit, disabled: paused, done: c3.look === "done", replace: state.unsupported.has("supersede") ? void 0 : setReplacing })
             ] })
           ] }),
           detail.loading && /* @__PURE__ */ u3("div", { class: "bd-loadbar", "aria-hidden": "true" }),
@@ -9583,11 +12656,14 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
                 /* @__PURE__ */ u3("span", { children: bead.title || bead.id }),
                 /* @__PURE__ */ u3("button", { type: "button", class: "bd-edit bd-edit-title", "data-edit": "title", "aria-label": "Edit title", title: paused ?? "Edit title", disabled: paused !== null, onClick: () => edit("title"), children: /* @__PURE__ */ u3(IconEdit, { size: 13 }) })
               ] }),
-              /* @__PURE__ */ u3("button", { type: "button", class: "bd-did", title: "Copy ID", onClick: () => store.copyText(bead.id), children: [
-                /* @__PURE__ */ u3("span", { children: bead.id }),
-                /* @__PURE__ */ u3(IconCopy, { size: 11 })
+              /* @__PURE__ */ u3("div", { class: "bd-didrow", children: [
+                /* @__PURE__ */ u3("button", { type: "button", class: "bd-did", title: "Copy ID", onClick: () => store.copyText(bead.id), children: [
+                  /* @__PURE__ */ u3("span", { children: bead.id }),
+                  /* @__PURE__ */ u3(IconCopy, { size: 11 })
+                ] }),
+                /* @__PURE__ */ u3(TypeMenu, { bead, writes, disabled: paused, types: snapshot.types }),
+                /* @__PURE__ */ u3(ParentMenu, { bead, writes, disabled: paused, beads: snapshot.beads, byId, statuses })
               ] }),
-              /* @__PURE__ */ u3("span", { class: "bd-dtype", children: humanize(bead.type || "bead") }),
               /* @__PURE__ */ u3("div", { class: "bd-dmeta", children: [
                 /* @__PURE__ */ u3(StatusPill, { status: bead.status, statuses }),
                 /* @__PURE__ */ u3(PriorityMenu, { bead, writes, disabled: paused }),
@@ -9595,25 +12671,35 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
                 bead.labels.map((label) => /* @__PURE__ */ u3("span", { class: "bd-lb", children: label }, label)),
                 /* @__PURE__ */ u3(LabelsEditor, { bead, writes, disabled: paused, beads: snapshot.beads })
               ] }),
-              /* @__PURE__ */ u3(InlineNotice, { writes, statuses, paused }),
-              waiting && /* @__PURE__ */ u3("div", { class: "bd-dhint", "data-tone": "blocked", children: [
-                /* @__PURE__ */ u3(IconWait, { size: 13 }),
-                blockers.length === 0 ? /* @__PURE__ */ u3("span", { children: c3.label }) : /* @__PURE__ */ u3("span", { children: [
-                  "Waiting on ",
-                  blockers.map((b2, i3) => /* @__PURE__ */ u3(S, { children: [
-                    i3 > 0 && ", ",
-                    /* @__PURE__ */ u3("button", { type: "button", class: "bd-hint-id", title: `${b2.title}. See Blocked by below.`, onClick: () => store.openRelated(b2.id), children: shortId(b2.id) })
-                  ] }))
-                ] })
-              ] }),
+              /* @__PURE__ */ u3(InlineNotice, { writes, statuses, paused, reword, titleOf: (id) => byId.get(id)?.title || shortId(id) }),
+              waiting2 ? /* @__PURE__ */ u3(WhyBlocked, { waits, fallback: whyLine(bead, explain, state.gates, now, void 0, snapshot.gateIds) ?? c3.label, known: (id) => byId.has(id), open: (id) => store.openRelated(id) }) : bead.status === "open" && explain?.state === "ready" && /* @__PURE__ */ u3("div", { class: "bd-dhint", children: /* @__PURE__ */ u3("span", { children: "Ready to start" }) }),
               deferUntil && /* @__PURE__ */ u3("div", { class: "bd-dhint", children: [
                 /* @__PURE__ */ u3(IconClock, { size: 13 }),
                 /* @__PURE__ */ u3("span", { children: `Deferred until ${when(deferUntil, now)}` })
-              ] })
+              ] }),
+              ready && /* @__PURE__ */ u3(EpicReady, { epic: bead, where: "detail", paused }, bead.id)
             ] }),
             entry.change && /* @__PURE__ */ u3(Banner, { line: changeLine(entry.change, statuses, now), onDismiss: () => store.dismissChange() }),
+            replacing && /* @__PURE__ */ u3("div", { class: "bd-gates-wrap", children: /* @__PURE__ */ u3(
+              ReplaceStep,
+              {
+                kind: replacing,
+                bead,
+                beads: snapshot.beads,
+                statuses,
+                disabled: paused,
+                reword,
+                onClose: (closed2) => {
+                  setReplacing(null);
+                  (closed2 ? region.current?.querySelector(".bd-statbtn") : document.getElementById(BEAD_MENU_ID))?.focus({ preventScroll: true });
+                }
+              },
+              `${bead.id}:${replacing}`
+            ) }),
+            /* @__PURE__ */ u3(WaitingOn, { kit: gateKit, now, panel: panel2, paused }),
             TEXT_SECTIONS.map(({ field, title, folded }) => {
               const text2 = bead[field];
+              if (field === "acceptance" && !text2.trim() && editing !== field) return /* @__PURE__ */ u3(NoAcceptance, { paused, onAdd: () => edit(field) }, `${bead.id}:noac`);
               if (!text2.trim() && editing !== field) return null;
               return /* @__PURE__ */ u3(
                 Section,
@@ -9622,10 +12708,13 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
                   title,
                   folded,
                   peek: folded ? peekOf(text2) : void 0,
-                  note: field === "acceptance" ? acceptanceItems(text2)?.length.toString() : void 0,
+                  note: field === "acceptance" ? acceptanceNote(text2) : void 0,
                   editing: editing === field,
-                  action: /* @__PURE__ */ u3("button", { type: "button", class: "bd-edit", "data-edit": field, "aria-label": `Edit ${title.toLowerCase()}`, title: paused ?? void 0, disabled: paused !== null, onClick: () => edit(field), children: "Edit" }),
-                  children: editing === field ? /* @__PURE__ */ u3(TextEditor, { bead, field, label: title, disabled: paused, onClose: () => closeEditor(), onDirty: (d3) => setDirty((x4) => ({ ...x4, editor: d3 })) }) : field === "acceptance" ? /* @__PURE__ */ u3(Acceptance, { text: text2 }) : /* @__PURE__ */ u3(Markdown, { class: "bd-txt", text: text2 })
+                  action: /* @__PURE__ */ u3(S, { children: [
+                    field === "design" && c3.look !== "done" && /* @__PURE__ */ u3(PlanAsk, { kit: gateKit, disabled: paused }),
+                    /* @__PURE__ */ u3("button", { type: "button", class: "bd-edit", "data-edit": field, "aria-label": `Edit ${title.toLowerCase()}`, title: paused ?? void 0, disabled: paused !== null, onClick: () => edit(field), children: "Edit" })
+                  ] }),
+                  children: editing === field ? /* @__PURE__ */ u3(TextEditor, { bead, field, label: title, disabled: paused, onClose: () => closeEditor(), onDirty: (d3) => setDirty((x4) => ({ ...x4, editor: d3 })) }) : field === "acceptance" ? /* @__PURE__ */ u3(Acceptance, { bead, paused }) : /* @__PURE__ */ u3(Markdown, { class: "bd-txt", text: text2 })
                 },
                 `${bead.id}:${field}`
               );
@@ -9664,10 +12753,25 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
                 ] })
               }
             ) }, `${bead.id}:relationships`),
-            extra.length > 0 && /* @__PURE__ */ u3(Section, { id: "more", title: "More", note: String(Object.keys(bead.extra).length), children: /* @__PURE__ */ u3("dl", { class: "bd-more", children: extra.map((f5) => /* @__PURE__ */ u3("div", { class: "bd-more-row", "data-sub": f5.sub || void 0, "data-group": f5.group || void 0, children: [
-              /* @__PURE__ */ u3("dt", { title: f5.key, children: f5.label }),
-              /* @__PURE__ */ u3("dd", { title: f5.title, children: f5.code ? /* @__PURE__ */ u3("code", { children: f5.value }) : f5.value })
-            ] }, f5.key)) }) }, `${bead.id}:more`),
+            /* @__PURE__ */ u3(Section, { id: "more", title: "More", note: Object.keys(bead.extra).length > 0 ? String(Object.keys(bead.extra).length) : void 0, children: [
+              /* @__PURE__ */ u3(
+                DateFields,
+                {
+                  bead,
+                  disabled: paused,
+                  done: c3.look === "done",
+                  now,
+                  canDefer: !state.unsupported.has("defer"),
+                  reword,
+                  onDirty: (d3) => setDirty((x4) => x4.dates === d3 ? x4 : { ...x4, dates: d3 })
+                },
+                `${bead.id}:${composerRound}`
+              ),
+              extra.length > 0 && /* @__PURE__ */ u3("dl", { class: "bd-more", children: extra.map((f5) => /* @__PURE__ */ u3("div", { class: "bd-more-row", "data-sub": f5.sub || void 0, "data-group": f5.group || void 0, children: [
+                /* @__PURE__ */ u3("dt", { title: f5.key, children: f5.label }),
+                /* @__PURE__ */ u3("dd", { title: f5.title, children: f5.code ? /* @__PURE__ */ u3("code", { children: f5.value }) : f5.value })
+              ] }, f5.key)) })
+            ] }, `${bead.id}:more`),
             /* @__PURE__ */ u3(Section, { id: "activity", title: "Activity", note: bead.comments.length === 1 ? "1 comment" : `${bead.comments.length} comments`, children: [
               /* @__PURE__ */ u3(Comments, { comments: bead.comments, panel: panel2, now, composer: composer ?? /* @__PURE__ */ u3(CommentComposer, { bead, disabled: paused, onDirty: (d3) => setDirty((x4) => ({ ...x4, comment: d3 })) }, `${bead.id}:${composerRound}`) }),
               /* @__PURE__ */ u3("p", { class: "bd-stamp", children: [
@@ -9693,213 +12797,13 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
                   reason
                 ] })
               ] })
-            ] }, `${bead.id}:activity`)
+            ] }, `${bead.id}:activity`),
+            !state.unsupported.has("history") && /* @__PURE__ */ u3(Section, { id: "history", title: "History", folded: historyFor !== bead.id, onToggle: (open) => setHistoryFor(open ? bead.id : null), children: /* @__PURE__ */ u3(History, { bead, open: historyFor === bead.id, statuses, panel: panel2, paused, now, reword }, bead.id) }, `${bead.id}:history`)
           ] }),
           footer
         ]
       }
     );
-  }
-
-  // src/panel/ui/EmptyState.tsx
-  function Thread({ tone: tone2 }) {
-    return /* @__PURE__ */ u3("svg", { class: "bd-thread", "data-tone": tone2, width: "72", height: "20", viewBox: "0 0 72 20", "aria-hidden": "true", focusable: "false", children: [
-      /* @__PURE__ */ u3("path", { class: "bd-thread-line", d: "M2 10h68" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "16", cy: "10", r: "5" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-mid", cx: "36", cy: "10", r: "6" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "56", cy: "10", r: "5" })
-    ] });
-  }
-  function EmptyState({ tone: tone2, title, body, children }) {
-    return /* @__PURE__ */ u3("section", { class: "bd-empty", "data-tone": tone2, children: [
-      /* @__PURE__ */ u3(Thread, { tone: tone2 }),
-      /* @__PURE__ */ u3("h2", { class: "bd-empty-title", children: title }),
-      body !== void 0 && /* @__PURE__ */ u3("p", { class: "bd-empty-body", children: body }),
-      children !== void 0 && /* @__PURE__ */ u3("div", { class: "bd-empty-actions", children })
-    ] });
-  }
-  var MIN_BD = "1.2.2";
-  function workspaceCopy(workspace) {
-    switch (workspace.kind) {
-      case "no-bd":
-        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
-      case "bd-too-old":
-        return {
-          tone: "warning",
-          title: "This version of Beads is too old.",
-          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
-        };
-      case "no-workspace":
-        return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
-      case "pre-dolt":
-        return {
-          tone: "warning",
-          title: "This project uses an older Beads format.",
-          body: "The panel can't read this format. Ask your agent to upgrade the project's Beads data to the current format, then retry."
-        };
-      case "needs-first-contact":
-        return {
-          tone: "ask",
-          title: `Open this project with Beads ${workspace.bdVersion}?`,
-          body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it here lets Beads update it to ${workspace.bdVersion}, which may change its files.`
-        };
-      case "server-down":
-        return {
-          tone: "error",
-          title: "This project's Beads server isn't running.",
-          body: "Start it the way you usually do, then retry. The panel never starts it for you.",
-          detail: `The Beads database server for ${workspace.root} is expected on port ${workspace.port} and did not answer.`
-        };
-      case "ok":
-        return { tone: "neutral", title: "This project is ready.", body: "" };
-      default:
-        return { tone: "neutral", title: "Beads can't open this project right now.", body: "Retry in a moment. If this keeps happening, update the Beads extension." };
-    }
-  }
-  function RetryButton({ primary: primary2 = false }) {
-    const store = useStoreApi();
-    const [checking, setChecking] = d2(false);
-    h2(() => {
-      if (!checking) return;
-      const id = setTimeout(() => setChecking(false), 900);
-      return () => clearTimeout(id);
-    }, [checking]);
-    return /* @__PURE__ */ u3(
-      "button",
-      {
-        type: "button",
-        class: primary2 ? "bd-btn bd-btn-primary" : "bd-btn",
-        "aria-busy": checking,
-        disabled: checking,
-        onClick: () => {
-          setChecking(true);
-          store.retry();
-        },
-        children: [
-          checking && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
-          "Retry"
-        ]
-      }
-    );
-  }
-  function CopyDetails({ error, always = false }) {
-    const store = useStoreApi();
-    if (!error.detail && !always) return null;
-    return /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", onClick: () => store.copyDetails(error), children: "Copy details" });
-  }
-  function WorkspaceEmpty({ workspace }) {
-    const state = useStore();
-    const store = useStoreApi();
-    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
-    if (workspace.kind !== "needs-first-contact") {
-      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
-        /* @__PURE__ */ u3(RetryButton, { primary: true }),
-        detail && /* @__PURE__ */ u3(CopyDetails, { error: { code: "workspace", message: title, detail } })
-      ] });
-    }
-    return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
-      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", disabled: state.confirming, "aria-busy": state.confirming, onClick: () => void store.confirmFirstContact(), children: [
-        state.confirming && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
-        "Open project"
-      ] }),
-      /* @__PURE__ */ u3("p", { class: "bd-empty-note", children: "You only need to confirm this once for this project." }),
-      state.confirmError && /* @__PURE__ */ u3("p", { class: "bd-empty-error", role: "alert", children: [
-        state.confirmError.message,
-        " ",
-        /* @__PURE__ */ u3(CopyDetails, { error: state.confirmError })
-      ] })
-    ] });
-  }
-  function LoadError() {
-    const error = firstLoadError(useStore());
-    if (!error) return null;
-    return /* @__PURE__ */ u3(EmptyState, { tone: "error", title: "Couldn't load this project's beads.", children: [
-      /* @__PURE__ */ u3(RetryButton, { primary: true }),
-      /* @__PURE__ */ u3(CopyDetails, { error, always: true })
-    ] });
-  }
-  function NoProject() {
-    return /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "Open a project to see its beads." });
-  }
-  function NoBeads() {
-    return /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "No beads in this project yet.", body: "When your agent creates beads, they show up here within a few seconds." });
-  }
-  function Loading() {
-    const widths = [72, 54, 88, 61, 79, 46, 67];
-    return /* @__PURE__ */ u3("div", { class: "bd-skeleton", "aria-busy": "true", "aria-label": "Loading beads", children: widths.map((w4, i3) => /* @__PURE__ */ u3("div", { class: "bd-skel-row", style: { "--w": `${w4}%`, "--d": `${i3 * 70}ms` }, children: [
-      /* @__PURE__ */ u3("i", { class: "bd-skel-dot" }),
-      /* @__PURE__ */ u3("i", { class: "bd-skel-id" }),
-      /* @__PURE__ */ u3("i", { class: "bd-skel-bar" })
-    ] }, i3)) });
-  }
-
-  // src/panel/ui/EpicView.tsx
-  function Bar({ progress }) {
-    const share = (n2) => `${progress.total ? n2 / progress.total * 100 : 0}%`;
-    return /* @__PURE__ */ u3("span", { class: "bd-bar", "aria-hidden": "true", children: [
-      /* @__PURE__ */ u3("i", { "data-look": "done", style: { width: share(progress.done) } }),
-      /* @__PURE__ */ u3("i", { "data-look": "progress", style: { width: share(progress.inProgress) } }),
-      /* @__PURE__ */ u3("i", { "data-look": "blocked", style: { width: share(progress.blocked) } })
-    ] });
-  }
-  function ProgressLine({ progress, changed }) {
-    return /* @__PURE__ */ u3("div", { class: "bd-prog", children: [
-      /* @__PURE__ */ u3(Bar, { progress }),
-      progress.total === 0 ? /* @__PURE__ */ u3("span", { children: "Nothing in it yet" }) : /* @__PURE__ */ u3("span", { title: `${progress.done} of ${progress.total} beads in this epic done`, children: `${progress.done}/${progress.total} done` }),
-      progress.blocked > 0 && /* @__PURE__ */ u3("span", { class: "bd-prog-blk", children: `${progress.blocked} blocked` }),
-      changed > 0 && /* @__PURE__ */ u3("span", { class: "bd-prog-new", children: `${changed} changed` })
-    ] });
-  }
-  var headerId = (key) => `bd-h-${key}`;
-  function EpicView({ groups, toggle: toggle2, box, ...events }) {
-    return /* @__PURE__ */ u3(S, { children: groups.map((group) => {
-      const { epic } = group;
-      const rows = group.rows.map((row2) => /* @__PURE__ */ u3(Row, { row: row2, dot: true, ...events }, row2.bead.id));
-      if (!epic) {
-        return /* @__PURE__ */ u3("section", { class: "bd-orphans", "data-collapsed": group.collapsed || void 0, children: [
-          /* @__PURE__ */ u3("button", { type: "button", class: "bd-sect", "aria-expanded": !group.collapsed, onClick: () => toggle2(group.key), children: [
-            /* @__PURE__ */ u3("span", { class: "bd-chev", children: /* @__PURE__ */ u3(IconChevron, {}) }),
-            /* @__PURE__ */ u3("span", { id: headerId(group.key), children: "Not in an epic" }),
-            /* @__PURE__ */ u3("span", { class: "bd-n", children: group.count }),
-            group.changed > 0 && /* @__PURE__ */ u3("span", { class: "bd-ux", children: `${group.changed} changed` })
-          ] }),
-          rows.length > 0 && /* @__PURE__ */ u3("div", { role: "listbox", "aria-labelledby": headerId(group.key), ...box(group.key), children: rows })
-        ] }, group.key);
-      }
-      return /* @__PURE__ */ u3("section", { class: "bd-epic", "data-collapsed": group.collapsed || void 0, children: [
-        /* @__PURE__ */ u3(
-          "button",
-          {
-            type: "button",
-            class: "bd-chev bd-epic-chev",
-            "aria-expanded": !group.collapsed,
-            "aria-label": `${group.collapsed ? "Expand" : "Collapse"} ${epic.title}`,
-            onClick: () => toggle2(group.key),
-            children: /* @__PURE__ */ u3(IconChevron, {})
-          }
-        ),
-        /* @__PURE__ */ u3("div", { role: "listbox", "aria-label": epic.title, ...box(group.key), children: [
-          /* @__PURE__ */ u3(
-            BeadRow,
-            {
-              ...events,
-              variant: "epic",
-              bead: epic,
-              id: shortId(epic.id),
-              look: group.look,
-              label: epic.status,
-              marker: "builtin",
-              depth: 0,
-              unseen: group.unseen,
-              context: group.context,
-              dot: false,
-              below: group.progress && /* @__PURE__ */ u3(ProgressLine, { progress: group.progress, changed: group.changed })
-            }
-          ),
-          rows
-        ] })
-      ] }, group.key);
-    }) });
   }
 
   // src/panel/ui/StatusView.tsx
@@ -9933,7 +12837,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     if (!(target instanceof HTMLElement)) return "list";
     if (target.matches(SEARCH)) return "search";
     if (target.isContentEditable || target.closest("input, textarea, select")) return "field";
-    if (target.closest('button, a, [role="menuitem"]')) return "control";
+    if (target.closest('button, a, [role="menuitem"], [data-refused]')) return "control";
     return "list";
   }
   function List() {
@@ -9958,6 +12862,8 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       const groups = epicView(input);
       return { kind: "epic", groups, keyed: groups.map((g3) => ({ key: g3.key, ids: rowOrder([g3]) })), ids: rowOrder(groups), input };
     }, [beads, statuses, readyIds, unseenIds, state.filters, state.query, state.collapsed, state.view, expanded, minute]);
+    const gates = state.gates;
+    const ready = T2(() => new Set(beads && statuses ? eligibleEpics(beads, statuses, gates).map((b2) => b2.id) : []), [beads, statuses, gates]);
     const shown = cursor !== null && (model?.ids.includes(cursor) ?? false) ? cursor : null;
     h2(() => {
       store.setListCursor(shown);
@@ -9978,7 +12884,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     h2(() => {
       const onKey = (e3) => {
         const { ids, cursor: at2, menu: open, state: s3 } = live.current;
-        if (s3.detail || s3.overlays.length > 0 || open || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey) return;
+        if (s3.detail || s3.page !== "list" || s3.overlays.length > 0 || open || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey) return;
         const key = e3.key === "F10" && e3.shiftKey ? "ContextMenu" : e3.key;
         const focus2 = focusOf(e3.target);
         const action = listKey({ key, ids, cursor: at2, focus: focus2 });
@@ -10051,7 +12957,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       ] });
     }
     return /* @__PURE__ */ u3("div", { class: "bd-list", role: "group", "aria-label": model.kind === "epic" ? "Beads by epic" : "Beads by status", "data-stale": stale || void 0, "data-view": model.kind, children: [
-      model.kind === "epic" ? /* @__PURE__ */ u3(EpicView, { groups: model.groups, toggle: (key) => store.toggleCollapsed(key), box, ...events }) : /* @__PURE__ */ u3(StatusView, { sections: model.sections, toggle: (key) => store.toggleCollapsed(key), expand: (key) => setExpanded((list) => [...list, key]), box, ...events }),
+      model.kind === "epic" ? /* @__PURE__ */ u3(EpicView, { groups: model.groups, toggle: (key) => store.toggleCollapsed(key), box, ready, paused: writesPaused(snapshot), ...events }) : /* @__PURE__ */ u3(StatusView, { sections: model.sections, toggle: (key) => store.toggleCollapsed(key), expand: (key) => setExpanded((list) => [...list, key]), box, ...events }),
       menu && /* @__PURE__ */ u3(RowMenu, { at: menu, actions, onClose: closeMenu })
     ] });
   }
@@ -10097,8 +13003,8 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
         if (!before || !after) return "Labels changed";
         const added = after.filter((l3) => !before.includes(l3));
         const removed = before.filter((l3) => !after.includes(l3));
-        const parts = [added.length ? `added ${listWords(added)}` : "", removed.length ? `removed ${listWords(removed)}` : ""].filter(Boolean);
-        return parts.length ? `Labels: ${parts.join(", ")}` : "Labels changed";
+        const parts2 = [added.length ? `added ${listWords(added)}` : "", removed.length ? `removed ${listWords(removed)}` : ""].filter(Boolean);
+        return parts2.length ? `Labels: ${parts2.join(", ")}` : "Labels changed";
       }
       case "type":
         if (!isText(to)) return "Type changed";
@@ -10143,8 +13049,22 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       }
       case "field":
         return fieldWhat(e3, statuses);
+      case "gate_opened":
+      case "gate_resolved": {
+        const { head, by } = gateEventWords(gateEventOf(e3));
+        return by ? `${head} by ${by}` : head;
+      }
     }
     return humanize(String(e3.kind));
+  }
+  var ROW_RESTORABLE = /* @__PURE__ */ new Set(["title", "status", "priority", "assignee", "labels"]);
+  var ROW_TEXT_MAX = 2e3;
+  var whole = (v5) => v5 !== void 0 && !(typeof v5 === "string" && v5.length > ROW_TEXT_MAX);
+  function rowChange(e3) {
+    if (e3.kind !== "field" || !e3.field || !ROW_RESTORABLE.has(e3.field)) return null;
+    if (!whole(e3.from) || !whole(e3.to)) return null;
+    if (e3.field === "labels" && (strings(e3.from) === null || strings(e3.to) === null)) return null;
+    return { field: e3.field, from: e3.from, to: e3.to, text: false };
   }
   var whoOf = (e3) => e3.byPanel ? "you (panel)" : e3.actor ?? "unknown";
   var atOf = (e3) => e3.changedAt ?? e3.observedAt;
@@ -10171,6 +13091,9 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       case "dep_added":
       case "dep_removed":
         return { kind: "link" };
+      case "gate_opened":
+      case "gate_resolved":
+        return { kind: "gate" };
       case "closed":
         return { kind: "status", look: "done", marker: isText(e3.to) ? markerOf(e3.to) : "builtin" };
       case "reopened":
@@ -10231,10 +13154,10 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   var entryDomId = (eventId) => `bd-act-${eventId}`;
   function Mark({ mark }) {
     if (mark.kind === "status") return /* @__PURE__ */ u3(StatusDot, { look: mark.look, marker: mark.marker });
-    const Icon2 = { created: IconPlus, deleted: IconTrash, comment: IconChat, link: IconLink, edit: IconEdit }[mark.kind];
+    const Icon2 = { created: IconPlus, deleted: IconTrash, comment: IconChat, link: IconLink, edit: IconEdit, gate: IconWait }[mark.kind];
     return /* @__PURE__ */ u3("span", { class: "bd-act-ic", "data-kind": mark.kind, children: /* @__PURE__ */ u3(Icon2, { size: 13 }) });
   }
-  function Entry({ entry, now, cursor, selected, pick, menu }) {
+  function Entry2({ entry, now, cursor, selected, pick, menu }) {
     const { event } = entry;
     return /* @__PURE__ */ u3(
       "div",
@@ -10306,6 +13229,21 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
       )
     ] });
   }
+  function RestoreBar({ target, bead, kit, statuses, paused, reword, onClose }) {
+    const label = `${fieldWord(target.change.field)} on ${shortId(target.beadId)}`;
+    return /* @__PURE__ */ u3("div", { class: "bd-act-rs", role: "group", "aria-label": `Restore ${label}`, children: [
+      /* @__PURE__ */ u3("div", { class: "bd-act-rs-top", children: [
+        /* @__PURE__ */ u3(IconRestore, { size: 13 }),
+        /* @__PURE__ */ u3("span", { class: "bd-act-rs-what", children: [
+          `Restore ${fieldWord(target.change.field)} on `,
+          /* @__PURE__ */ u3("span", { class: "bd-id", children: shortId(target.beadId) }),
+          bead && /* @__PURE__ */ u3("span", { class: "bd-title", children: ` ${bead.title}` })
+        ] }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-banner-x", "aria-label": "Close", disabled: kit.busy(target.key), onClick: onClose, children: /* @__PURE__ */ u3(IconX, {}) })
+      ] }),
+      bead ? /* @__PURE__ */ u3(RestoreControl, { kit, scope: "a", rkey: target.key, bead, change: target.change, statuses, paused, reword, grouped: true, onKeep: onClose }) : /* @__PURE__ */ u3("p", { class: "bd-rs-msg", children: "This bead is no longer in the project." })
+    ] });
+  }
   function ActivityView() {
     const state = useStore();
     const store = useStoreApi();
@@ -10314,6 +13252,8 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     const [opened, setOpened] = d2(null);
     const [menu, setMenu] = d2(null);
     const actions = useRowActions();
+    const kit = useRestore("a", { focusChoice: true });
+    const [restoring, setRestoring] = d2(null);
     const scrollTo = A2(false);
     const box = A2(null);
     const snapshot = state.snapshot;
@@ -10334,7 +13274,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     };
     const showMenu = (entry, at2) => {
       setCursor(entry.event.id);
-      setMenu(at2);
+      setMenu({ at: at2, eventId: entry.event.id });
     };
     const closeMenu = q2((why) => {
       setMenu(null);
@@ -10345,7 +13285,7 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     h2(() => {
       const onKey = (e3) => {
         const { ids: order, cursor: at2, entries: list, state: s3, open: go, menu: opened2, showMenu: openMenu } = live.current;
-        if (s3.detail || s3.overlays.length > 0 || opened2 || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey) return;
+        if (s3.detail || s3.page !== "list" || s3.overlays.length > 0 || opened2 || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey) return;
         const focus2 = focusOf(e3.target);
         const key = e3.key === "F10" && e3.shiftKey ? "ContextMenu" : e3.key;
         const action = listKey({ key, ids: order, cursor: at2, focus: focus2 });
@@ -10406,12 +13346,46 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
     }
     const stale = describeFreshness(state, now)?.stale ?? false;
     const unseen = entries2.filter((e3) => e3.event.unseen).length;
+    const paused = writesPaused(snapshot);
+    const beadOf = (id) => beads?.find((b2) => b2.id === id) ?? null;
+    const reword = (message) => restoring ? blockedMessage(message, { id: restoring.beadId }, state.gates) : message;
+    const restoreItem = (entry) => {
+      const change = entry && !entry.gone ? rowChange(entry.event) : null;
+      const bead = entry ? beadOf(entry.event.beadId) : null;
+      if (!entry || !change || !bead || !restoreRequest(bead, change)) return [];
+      const where = restoreState(bead, change);
+      const key = entry.event.id;
+      const run = () => {
+        setRestoring({ key, beadId: bead.id, change });
+        if (where === "changed") kit.hold(key, bead);
+        else kit.restore(key, bead, change);
+      };
+      const off = paused ?? (where === "unchanged" ? "Already the earlier value" : kit.busy(key) ? "Restoring" : void 0);
+      return [{ label: "Restore previous value", icon: /* @__PURE__ */ u3(IconRestore, {}), run, ...off ? { off } : {} }];
+    };
     return /* @__PURE__ */ u3("div", { class: "bd-list bd-act", "data-stale": stale || void 0, children: [
       /* @__PURE__ */ u3(SeenBar, { total: entries2.length, unseen, beadsUnseen: snapshot.unseenIds.length }),
+      restoring && /* @__PURE__ */ u3(
+        RestoreBar,
+        {
+          target: restoring,
+          bead: beadOf(restoring.beadId),
+          kit,
+          statuses: snapshot.statuses,
+          paused,
+          reword,
+          onClose: () => {
+            kit.dismiss(restoring.key);
+            setRestoring(null);
+            box.current?.focus({ preventScroll: true });
+          }
+        },
+        restoring.key
+      ),
       /* @__PURE__ */ u3("div", { role: "listbox", "aria-label": "Activity", tabIndex: 0, ref: box, ...shown ? { "aria-activedescendant": entryDomId(shown) } : {}, children: days.map((day) => /* @__PURE__ */ u3("div", { role: "group", class: "bd-day-grp", "aria-labelledby": `bd-day-${day.key}`, children: [
         /* @__PURE__ */ u3("div", { class: "bd-day", id: `bd-day-${day.key}`, role: "presentation", children: day.label }),
         day.entries.map((entry) => /* @__PURE__ */ u3(
-          Entry,
+          Entry2,
           {
             entry,
             now,
@@ -10423,8 +13397,1251 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
           entry.event.id
         ))
       ] }, day.key)) }),
-      menu && /* @__PURE__ */ u3(RowMenu, { at: menu, actions, onClose: closeMenu })
+      menu && /* @__PURE__ */ u3(RowMenu, { at: menu.at, actions, extra: restoreItem(entries2.find((e3) => e3.event.id === menu.eventId)), onClose: closeMenu })
     ] });
+  }
+
+  // src/panel/ui/NeedsView.tsx
+  var SECTION_TITLES = {
+    waiting: "Waiting for your review",
+    asked: "Asked for help",
+    stuck: "Stuck",
+    changed: "Changed since you looked"
+  };
+  var ORDER = ["waiting", "asked", "stuck", "changed"];
+  var needDomId = (key) => `bd-need-${key.replace(/[^\w.-]/g, "_")}`;
+  var firstLine3 = (text2) => text2.trim().split("\n")[0].trim();
+  function blockerText(ids, beads, gates) {
+    const held = gates.filter((g3) => ids.includes(g3.id));
+    const named = ids.flatMap((id) => held.some((g3) => g3.id === id) ? [] : beads.filter((b2) => b2.id === id).map((b2) => ({ id: b2.id, title: b2.title })));
+    return sentence(waitsText({ gates: held, beads: named }));
+  }
+  var targetGate = (row2) => row2.gates.find((g3) => g3.reason) ?? row2.gates[0];
+  var gateLock = (gateId) => `gate:${gateId}`;
+  function itemsOf(state, now) {
+    const needs = needsOf(state, now);
+    return {
+      waiting: needs.waiting.map((row2) => ({ section: "waiting", key: `waiting:${row2.bead.id}`, bead: row2.bead, row: row2 })),
+      asked: needs.asked.map((row2) => ({ section: "asked", key: `asked:${row2.bead.id}`, bead: row2.bead, row: row2 })),
+      stuck: needs.stuck.map((row2) => ({ section: "stuck", key: `stuck:${row2.bead.id}`, bead: row2.bead, row: row2 })),
+      changed: needs.changed.map((row2) => ({ section: "changed", key: `changed:${row2.bead.id}`, bead: row2.bead, row: row2 }))
+    };
+  }
+  function whyOf(item) {
+    switch (item.section) {
+      case "waiting":
+        return item.row.gates.map((g3) => g3.reason ?? "").join(" ");
+      case "asked":
+        return item.row.text;
+      case "stuck":
+        return item.row.why;
+      case "changed":
+        return item.row.summary;
+    }
+  }
+  var matches = (item, query) => {
+    const q4 = query.trim().toLowerCase();
+    if (!q4) return true;
+    return [item.bead.id, item.bead.title, whyOf(item)].some((text2) => text2.toLowerCase().includes(q4));
+  };
+  function sinceOf(item) {
+    switch (item.section) {
+      case "waiting":
+        return targetGate(item.row).createdAt;
+      case "asked":
+        return item.bead.createdAt;
+      case "stuck":
+        return item.bead.updatedAt;
+      case "changed":
+        return item.row.event?.changedAt ?? item.row.event?.observedAt ?? item.bead.updatedAt;
+    }
+  }
+  function SectionIcon({ section }) {
+    if (section === "waiting") return /* @__PURE__ */ u3(IconWait, { size: 13 });
+    if (section === "asked") return /* @__PURE__ */ u3(IconChat, { size: 13 });
+    if (section === "stuck") return /* @__PURE__ */ u3(IconClock, { size: 13 });
+    return /* @__PURE__ */ u3("span", { class: "bd-nsec-dot" });
+  }
+  var without = (map, key) => {
+    if (!(key in map)) return map;
+    const { [key]: _gone, ...rest } = map;
+    return rest;
+  };
+  var MAX_NOTICES = 3;
+  function NeedsView() {
+    const state = useStore();
+    const store = useStoreApi();
+    const now = useNow(3e4);
+    const minute = Math.floor(now / 6e4) * 6e4;
+    const [cursor, setCursor] = d2(null);
+    const [opened, setOpened] = d2(null);
+    const [steps, setSteps] = d2({});
+    const inflight = A2(/* @__PURE__ */ new Set());
+    const [busy, setBusy] = d2(/* @__PURE__ */ new Set());
+    const [feedback, setFeedback] = d2({});
+    const [settled, setSettled] = d2({});
+    const [notices, setNotices] = d2([]);
+    const noticeId = A2(0);
+    const snapshot = state.snapshot;
+    const sections = T2(() => itemsOf(state, minute), [state.snapshot, state.settings, state.keep, minute]);
+    const shownSections = ORDER.map((section) => ({ section, items: sections[section].filter((item) => matches(item, state.query)) })).filter((s3) => s3.items.length > 0);
+    const total = ORDER.reduce((n2, s3) => n2 + sections[s3].length, 0);
+    const ids = shownSections.flatMap((s3) => s3.items.map((i3) => i3.key));
+    const shown = cursor !== null && ids.includes(cursor) ? cursor : null;
+    const tabStop = shown ?? ids[0] ?? null;
+    const items = shownSections.flatMap((s3) => s3.items);
+    const paused = writesPaused(snapshot);
+    const look = looker(snapshot?.statuses ?? []);
+    const open = (item) => {
+      setCursor(item.key);
+      setOpened(item.key);
+      store.select(item.bead.id);
+    };
+    const focusRow = (...keys) => {
+      const listed = keys.map((key) => key && document.getElementById(needDomId(key))).find(Boolean);
+      const target = listed || document.querySelector('.bd-nmain[tabindex="0"]');
+      target?.focus({ preventScroll: true });
+    };
+    const refocus = A2(null);
+    _2(() => {
+      const keys = refocus.current;
+      if (!keys) return;
+      refocus.current = null;
+      focusRow(...keys);
+    });
+    const neighbourOf = (key) => {
+      const at2 = ids.indexOf(key);
+      return at2 < 0 ? null : ids[at2 + 1] ?? ids[at2 - 1] ?? null;
+    };
+    const live = A2({ ids, cursor: shown, items, state, open });
+    live.current = { ids, cursor: shown, items, state, open };
+    h2(() => {
+      const onKey = (e3) => {
+        const { ids: order, cursor: at2, items: list, state: s3, open: go } = live.current;
+        if (s3.detail || s3.page !== "list" || s3.overlays.length > 0 || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey) return;
+        const focus2 = focusOf(e3.target);
+        const action = listKey({ key: e3.key, ids: order, cursor: at2, focus: focus2 });
+        if (!action || action.type === "menu") return;
+        e3.preventDefault();
+        switch (action.type) {
+          case "move": {
+            setCursor(action.id);
+            const row2 = document.getElementById(needDomId(action.id));
+            row2?.focus({ preventScroll: true });
+            row2?.scrollIntoView?.({ block: "nearest" });
+            break;
+          }
+          case "open": {
+            const item = list.find((x4) => x4.key === action.id);
+            if (item) go(item);
+            break;
+          }
+          case "search":
+            document.querySelector(SEARCH)?.focus();
+            break;
+          case "escape":
+            if (focus2 === "search") {
+              if (s3.query) store.setQuery("");
+              else e3.target.blur();
+            } else if (s3.selectedId !== null) store.select(null);
+            else setCursor(null);
+            break;
+        }
+      };
+      document.addEventListener("keydown", onKey);
+      return () => document.removeEventListener("keydown", onKey);
+    }, [store]);
+    const hadDetail = A2(state.detail !== null);
+    h2(() => {
+      const back = hadDetail.current && state.detail === null;
+      hadDetail.current = state.detail !== null;
+      const active2 = document.activeElement;
+      if (back && (!active2 || active2 === document.body)) focusRow(live.current.cursor);
+    }, [state.detail]);
+    if (!snapshot) return null;
+    if (snapshot.beads.length === 0) return /* @__PURE__ */ u3(NoBeads, {});
+    const notice = (text2) => setNotices((list) => [...list, { id: ++noticeId.current, text: text2 }].slice(-MAX_NOTICES));
+    const settle = (key, text2) => setSettled((s3) => ({ ...s3, [key]: text2 }));
+    const setStep = (key, step) => setSteps((all) => step ? { ...all, [key]: step } : without(all, key));
+    const closeStep = (key) => {
+      refocus.current = [key];
+      setStep(key, null);
+    };
+    async function run(item, send, done, locks = []) {
+      const { key } = item;
+      const held = [key, ...locks];
+      if (held.some((k3) => inflight.current.has(k3))) return;
+      for (const k3 of held) inflight.current.add(k3);
+      setBusy(new Set(inflight.current));
+      setFeedback((f5) => without(f5, key));
+      const neighbour = neighbourOf(key);
+      const outcome = await send();
+      for (const k3 of held) inflight.current.delete(k3);
+      setBusy(new Set(inflight.current));
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        done(outcome.value);
+        const inRow = document.activeElement?.closest("[data-row]")?.dataset.row === key;
+        setStep(key, null);
+        if (inRow || document.activeElement === document.body) refocus.current = [key, neighbour];
+        return;
+      }
+      if (outcome.kind === "conflict") {
+        setFeedback((f5) => ({ ...f5, [key]: { kind: "error", error: { code: "conflict", message: "This bead changed since it was shown. Check it, then try again." } } }));
+        return;
+      }
+      setFeedback((f5) => ({ ...f5, [key]: feedbackOf(outcome) }));
+    }
+    const resolve = (item, reason) => {
+      const gate = targetGate(item.row);
+      void run(item, () => store.resolveReview(gate.id, reason.trim() || void 0), (result) => {
+        if (result.ok) {
+          settle(gate.id, gate.planApproval ? "Approved. Updating the list." : "Resolved. Updating the list.");
+          store.notify(gate.planApproval ? `Plan approved for ${shortId(item.bead.id)}.` : `Review resolved for ${shortId(item.bead.id)}.`);
+          return;
+        }
+        const at2 = result.at === null ? NaN : Date.parse(result.at);
+        const who = result.resolvedBy ?? "someone else";
+        settle(gate.id, "Updating the list.");
+        notice(`The ${gate.planApproval ? "plan approval" : "review"} on ${shortId(item.bead.id)} was already resolved by ${who}${Number.isFinite(at2) ? ` ${ago(Date.now() - at2)}` : ""}.`);
+      }, [gateLock(gate.id)]);
+    };
+    const answer = (item, mode, text2) => {
+      const version = `${item.bead.id}@${item.bead.updatedAt}`;
+      const send = () => mode === "respond" ? store.respond(item.bead.id, text2.trim()) : store.dismissRequest(item.bead.id, text2.trim() || void 0);
+      void run(item, send, (result) => {
+        if (result.ok) {
+          store.notify(mode === "respond" ? `Answer sent to ${shortId(item.bead.id)}.` : `Request ${shortId(item.bead.id)} dismissed.`);
+          return;
+        }
+        settle(version, "Updating the list.");
+        notice(`The request ${shortId(item.bead.id)} was already answered or closed.`);
+      });
+    };
+    const defer = (item, until) => {
+      const read = parseDateInput(until, Date.now(), localZone());
+      void run(item, () => store.defer(item.bead.id, item.bead.updatedAt, until.trim()), () => {
+        store.notify(read.kind === "ok" ? `${shortId(item.bead.id)} deferred until ${read.label}.` : `${shortId(item.bead.id)} deferred.`);
+      });
+    };
+    const keep = (item) => {
+      refocus.current = [neighbourOf(item.key)];
+      store.keepStuck(item.bead.id);
+      store.notify(`${shortId(item.bead.id)} is hidden from Stuck for 7 days.`);
+    };
+    const stale = describeFreshness(state, now)?.stale ?? false;
+    return /* @__PURE__ */ u3("div", { class: "bd-list bd-needs", "data-stale": stale || void 0, children: [
+      notices.length > 0 && /* @__PURE__ */ u3("div", { class: "bd-nnotes", children: notices.map((n2) => /* @__PURE__ */ u3("div", { class: "bd-nnote", role: "status", children: [
+        /* @__PURE__ */ u3("span", { children: n2.text }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-nnote-x", "aria-label": "Hide this note", onClick: () => setNotices((list) => list.filter((x4) => x4.id !== n2.id)), children: /* @__PURE__ */ u3(IconX, {}) })
+      ] }, n2.id)) }),
+      paused && total > 0 && /* @__PURE__ */ u3(PausedNote, { reason: paused }),
+      total === 0 ? /* @__PURE__ */ u3("p", { class: "bd-nquiet", children: "Nothing needs you right now." }) : shownSections.length === 0 ? /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "Nothing here matches.", body: "No bead in Needs me has that id, title or reason.", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn", onClick: () => store.setQuery(""), children: "Clear search" }) }) : shownSections.map(({ section, items: rows }) => /* @__PURE__ */ u3("section", { class: "bd-nsec", "data-section": section, "aria-labelledby": `bd-nsec-${section}`, children: [
+        /* @__PURE__ */ u3("div", { class: "bd-nsec-h", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-nsec-ic", "data-section": section, "aria-hidden": "true", children: /* @__PURE__ */ u3(SectionIcon, { section }) }),
+          /* @__PURE__ */ u3("h2", { class: "bd-nsec-title", id: `bd-nsec-${section}`, children: [
+            SECTION_TITLES[section],
+            " ",
+            /* @__PURE__ */ u3("span", { class: "bd-n", children: rows.length })
+          ] }),
+          section === "changed" && /* @__PURE__ */ u3(SeenAll, {})
+        ] }),
+        /* @__PURE__ */ u3("ul", { class: "bd-nlist", role: "list", "aria-labelledby": `bd-nsec-${section}`, children: rows.map((item) => /* @__PURE__ */ u3(
+          NeedRow,
+          {
+            item,
+            now: minute,
+            look,
+            cursor: shown === item.key,
+            tabStop: tabStop === item.key,
+            selected: opened === item.key && state.selectedId === item.bead.id,
+            pick: open,
+            onFocus: () => setCursor(item.key),
+            children: /* @__PURE__ */ u3(
+              RowActions,
+              {
+                item,
+                state,
+                step: steps[item.key] ?? null,
+                setStep: (step) => setStep(item.key, step),
+                closeStep: () => closeStep(item.key),
+                busy: busy.has(item.key) || item.section === "waiting" && busy.has(gateLock(targetGate(item.row).id)),
+                paused,
+                settled: settledText(item, settled),
+                feedback: feedback[item.key] ?? null,
+                resolve,
+                answer,
+                defer,
+                keep
+              }
+            )
+          },
+          item.key
+        )) })
+      ] }, section))
+    ] });
+  }
+  function settledText(item, settled) {
+    if (item.section === "waiting") return settled[targetGate(item.row).id] ?? null;
+    if (item.section === "asked") return settled[`${item.bead.id}@${item.bead.updatedAt}`] ?? null;
+    return null;
+  }
+  function SeenAll() {
+    const store = useStoreApi();
+    const [busy, setBusy] = d2(false);
+    return /* @__PURE__ */ u3(
+      "button",
+      {
+        type: "button",
+        class: "bd-link bd-nsec-act",
+        disabled: busy,
+        "aria-busy": busy,
+        onClick: () => {
+          setBusy(true);
+          void store.markAllSeen().finally(() => setBusy(false));
+        },
+        children: "Mark all seen"
+      }
+    );
+  }
+  function NeedRow({ item, now, look, cursor, tabStop, selected, pick, onFocus, children }) {
+    const { bead } = item;
+    const since = Date.parse(sinceOf(item));
+    const id = needDomId(item.key);
+    return /* @__PURE__ */ u3(
+      "li",
+      {
+        class: "bd-row bd-nrow",
+        "data-row": item.key,
+        "data-section": item.section,
+        "data-cursor": cursor || void 0,
+        "data-selected": selected || void 0,
+        "data-unseen": item.section === "changed" || void 0,
+        onFocusCapture: onFocus,
+        children: [
+          /* @__PURE__ */ u3(
+            "div",
+            {
+              id,
+              class: "bd-nmain",
+              role: "button",
+              tabIndex: tabStop ? 0 : -1,
+              "aria-labelledby": `${id}-id ${id}-t`,
+              "aria-describedby": `${id}-why`,
+              "aria-current": selected || void 0,
+              onClick: () => pick(item),
+              onKeyDown: (e3) => {
+                if ((e3.key === " " || e3.key === "Enter" && !composing(e3)) && e3.target === e3.currentTarget) {
+                  e3.preventDefault();
+                  pick(item);
+                }
+              },
+              children: [
+                /* @__PURE__ */ u3("div", { class: "bd-nrow-top", children: [
+                  /* @__PURE__ */ u3(StatusDot, { look: look(bead.status), marker: markerOf(bead.status) }),
+                  /* @__PURE__ */ u3("span", { class: "bd-id", id: `${id}-id`, title: bead.id, children: shortId(bead.id) }),
+                  /* @__PURE__ */ u3("span", { class: "bd-title", id: `${id}-t`, title: bead.title, children: bead.title }),
+                  Number.isFinite(since) && /* @__PURE__ */ u3("time", { class: "bd-age", dateTime: sinceOf(item), children: shortAgo(now - since) })
+                ] }),
+                /* @__PURE__ */ u3("div", { id: `${id}-why`, class: "bd-nwhy", children: /* @__PURE__ */ u3(Why, { item }) })
+              ]
+            }
+          ),
+          children
+        ]
+      }
+    );
+  }
+  function Why({ item }) {
+    const state = useStore();
+    switch (item.section) {
+      case "waiting": {
+        const gate = targetGate(item.row);
+        const more = item.row.gates.length - 1;
+        return /* @__PURE__ */ u3("p", { class: "bd-why", "data-section": "waiting", children: [
+          /* @__PURE__ */ u3("span", { class: "bd-tag", "data-kind": gate.planApproval ? "plan" : "review", children: gate.planApproval ? "Plan" : "Review" }),
+          /* @__PURE__ */ u3("span", { class: "bd-why-text", children: [
+            gate.reason ? firstLine3(gate.reason) : "No reason given",
+            gate.createdBy && /* @__PURE__ */ u3("span", { class: "bd-why-by", children: ` from ${gate.createdBy}` })
+          ] }),
+          more > 0 && /* @__PURE__ */ u3("span", { class: "bd-why-more", children: `and ${more} more` })
+        ] });
+      }
+      case "asked": {
+        const { row: row2, bead } = item;
+        const own = row2.text.trim() !== bead.title.trim();
+        return /* @__PURE__ */ u3(S, { children: [
+          own ? /* @__PURE__ */ u3("p", { class: "bd-quote", title: row2.text, children: row2.text }) : /* @__PURE__ */ u3("p", { class: "bd-why", "data-section": "asked", children: bead.createdBy ? `Asked by ${bead.createdBy}` : "Asked for help" }),
+          row2.blockers.length > 0 && /* @__PURE__ */ u3("p", { class: "bd-why", "data-tone": "hold", children: [
+            /* @__PURE__ */ u3(IconWait, { size: 12 }),
+            /* @__PURE__ */ u3("span", { class: "bd-why-text", children: `${blockerText(row2.blockers, state.snapshot?.beads ?? [], state.gates)}. You can answer once that is done.` })
+          ] })
+        ] });
+      }
+      case "stuck":
+        return /* @__PURE__ */ u3("p", { class: "bd-why", "data-section": "stuck", children: /* @__PURE__ */ u3("span", { class: "bd-why-text", children: item.row.why }) });
+      case "changed":
+        return /* @__PURE__ */ u3("p", { class: "bd-why", "data-section": "changed", children: /* @__PURE__ */ u3("span", { class: "bd-why-text", children: item.row.summary }) });
+    }
+  }
+  function RowActions(props) {
+    const { item, state, step, setStep, closeStep, busy, paused, settled, feedback } = props;
+    if (item.section === "changed") return null;
+    if (settled) {
+      return /* @__PURE__ */ u3("p", { class: "bd-why bd-nsettled", "data-tone": "done", role: "status", children: settled });
+    }
+    const message = feedback && /* @__PURE__ */ u3("div", { class: "bd-nmsg", children: /* @__PURE__ */ u3(WriteMessage, { feedback }) });
+    if (step) {
+      const common = { text: step.text, set: (text2) => setStep({ ...step, text: text2 }), cancel: () => !busy && closeStep(), busy, paused, message };
+      if (step.mode === "respond" && item.section === "asked") return /* @__PURE__ */ u3(AnswerStep, { ...common, send: (text2) => props.answer(item, "respond", text2) });
+      if (step.mode === "defer" && item.section === "stuck") return /* @__PURE__ */ u3(DeferStep, { ...common, send: (text2) => props.defer(item, text2) });
+      if (step.mode === "resolve" && item.section === "waiting") {
+        const plan = targetGate(item.row).planApproval;
+        return /* @__PURE__ */ u3(ReasonStep2, { ...common, action: plan ? "Approve plan" : "Resolve review", hint: plan ? "Approving lets work on the plan start." : "Resolving lets the bead close.", send: (text2) => props.resolve(item, text2) });
+      }
+      if (step.mode === "dismiss" && item.section === "asked") return /* @__PURE__ */ u3(ReasonStep2, { ...common, action: "Dismiss request", hint: "Closes the request without an answer.", send: (text2) => props.answer(item, "dismiss", text2) });
+    }
+    const openStep = (mode) => () => setStep({ mode, text: "" });
+    const off = paused !== null || busy;
+    const title = paused ?? void 0;
+    const buttons = [];
+    if (item.section === "waiting" && !state.unsupported.has("gates")) {
+      const plan = targetGate(item.row).planApproval;
+      buttons.push(
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, "aria-busy": busy || void 0, title, onClick: () => props.resolve(item, ""), children: plan ? "Approve" : "Resolve" }, "resolve"),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-link bd-nreason", disabled: off, title, onClick: openStep("resolve"), children: "Add a reason" }, "reason")
+      );
+    }
+    if (item.section === "asked" && item.row.blockers.length === 0 && !state.unsupported.has("human")) {
+      buttons.push(
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, title, onClick: openStep("respond"), children: "Respond" }, "respond"),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: off, "aria-busy": busy || void 0, title, onClick: () => props.answer(item, "dismiss", ""), children: "Dismiss" }, "dismiss"),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-link bd-nreason", disabled: off, title, onClick: openStep("dismiss"), children: "Dismiss with a reason" }, "reason")
+      );
+    }
+    if (item.section === "stuck") {
+      buttons.push(
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, title: "Hide it from Stuck for 7 days. Nothing changes in Beads.", onClick: () => props.keep(item), children: "Keep" }, "keep")
+      );
+      if (!state.unsupported.has("defer")) {
+        buttons.push(
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: off, title, onClick: openStep("defer"), children: "Defer" }, "defer")
+        );
+      }
+    }
+    if (buttons.length === 0 && !message) return null;
+    return /* @__PURE__ */ u3("div", { class: "bd-nacts", children: [
+      buttons.length > 0 && /* @__PURE__ */ u3("div", { class: "bd-nacts-row", children: buttons }),
+      message
+    ] });
+  }
+  function useFirstFocus2() {
+    const ref = A2(null);
+    h2(() => ref.current?.focus(), []);
+    return ref;
+  }
+  var escapeCloses2 = (cancel) => (e3) => {
+    if (e3.key !== "Escape" || composing(e3)) return;
+    e3.preventDefault();
+    e3.stopPropagation();
+    cancel();
+  };
+  function StepBox({ children, go, action, primaryOff, busy, paused, cancel, message }) {
+    return /* @__PURE__ */ u3("div", { class: "bd-nstep", children: [
+      children,
+      /* @__PURE__ */ u3("div", { class: "bd-nstep-acts", children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: primaryOff || busy || paused !== null, "aria-busy": busy, title: paused ?? void 0, onClick: go, children: action }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: cancel, children: "Cancel" })
+      ] }),
+      message
+    ] });
+  }
+  function AnswerStep({ text: text2, set, cancel, send, busy, paused, message }) {
+    const field = useFirstFocus2();
+    const go = () => {
+      if (text2.trim() && !busy && paused === null) send(text2);
+    };
+    return /* @__PURE__ */ u3(StepBox, { go, action: "Send", primaryOff: !text2.trim(), busy, paused, cancel, message, children: [
+      /* @__PURE__ */ u3(
+        "textarea",
+        {
+          ref: field,
+          class: "bd-input bd-ntext",
+          "aria-label": "Your answer",
+          placeholder: "Your answer",
+          rows: 3,
+          value: text2,
+          disabled: busy,
+          onInput: (e3) => set(e3.currentTarget.value),
+          onKeyDown: (e3) => {
+            escapeCloses2(cancel)(e3);
+            if (isSubmitKey(e3)) {
+              e3.preventDefault();
+              go();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u3("p", { class: "bd-nstep-hint", children: `Added as a comment, then the request closes. ${saveKey()} sends.` })
+    ] });
+  }
+  function ReasonStep2({ text: text2, set, cancel, send, busy, paused, message, action, hint }) {
+    const field = useFirstFocus2();
+    const go = () => {
+      if (!busy && paused === null) send(text2);
+    };
+    return /* @__PURE__ */ u3(StepBox, { go, action, primaryOff: false, busy, paused, cancel, message, children: [
+      /* @__PURE__ */ u3(
+        "input",
+        {
+          ref: field,
+          type: "text",
+          class: "bd-input",
+          "aria-label": "Reason (optional)",
+          placeholder: "Reason (optional)",
+          value: text2,
+          disabled: busy,
+          onInput: (e3) => set(e3.currentTarget.value),
+          onKeyDown: (e3) => {
+            escapeCloses2(cancel)(e3);
+            if (isEnterInInput(e3)) {
+              e3.preventDefault();
+              go();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u3("p", { class: "bd-nstep-hint", children: hint })
+    ] });
+  }
+  function DeferStep({ text: text2, set, cancel, send, busy, paused, message }) {
+    const go = () => {
+      if (text2.trim() && !busy && paused === null) send(text2);
+    };
+    return /* @__PURE__ */ u3(StepBox, { go, action: "Defer", primaryOff: !text2.trim(), busy, paused, cancel, message, children: /* @__PURE__ */ u3("div", { onKeyDown: escapeCloses2(cancel), children: /* @__PURE__ */ u3(DateInput, { label: "Defer until", lead: "Until", value: text2, onInput: set, onEnter: go, disabled: busy, autoFocus: true }) }) });
+  }
+
+  // src/panel/ui/MemoriesPage.tsx
+  var SEARCH_WAIT_MS = 250;
+  function newestFirst(memories) {
+    return memories.map((m3, i3) => [m3, i3]).sort(([a5, i3], [b2, j4]) => {
+      if (a5.changedAt === b2.changedAt) return i3 - j4;
+      if (a5.changedAt === null) return 1;
+      if (b2.changedAt === null) return -1;
+      return Date.parse(b2.changedAt) - Date.parse(a5.changedAt) || i3 - j4;
+    }).map(([m3]) => m3);
+  }
+  function changedLine(memory, now) {
+    if (memory.changedAt === null) return null;
+    const at2 = Date.parse(memory.changedAt);
+    if (Number.isNaN(at2)) return null;
+    return `Changed ${ago(now - at2)}${memory.changedBy ? ` by ${memory.changedBy}` : ""}`;
+  }
+  var controlId = (control, key) => `bd-mem${control}-${key}`;
+  var keyId = (key) => controlId("key", key);
+  var DRAFTS = "\0memories";
+  var editField = (key) => `edit:${key}`;
+  var ADD_FIELD = "add";
+  var editDirty = (item) => item.refused !== void 0 || item.draft !== item.base;
+  var composerDirty = (c3) => c3 !== null && (c3.text.trim() !== "" || c3.name.trim() !== "");
+  function MemoriesPage() {
+    const store = useStoreApi();
+    const state = useStore();
+    const now = useNow(6e4);
+    const paused = writesPaused(state.snapshot);
+    const [loaded, setLoaded] = d2({ kind: "loading" });
+    const [query, setQuery] = d2("");
+    const [items, setItems] = d2({});
+    const [busy, setBusy] = d2([]);
+    const [composer, setComposer] = d2(() => {
+      const kept = store.draft(DRAFTS, ADD_FIELD);
+      return kept ? { text: kept.text, name: kept.base ?? "", taken: null, feedback: null } : null;
+    });
+    const [leaving, setLeaving] = d2(false);
+    const restored = A2(false);
+    const [adding, setAdding] = d2(false);
+    const [notice, setNotice] = d2(null);
+    const [undoing, setUndoing] = d2(false);
+    const [fresh, setFresh] = d2(null);
+    const seq = A2(0);
+    const queryRef = A2("");
+    const refocus = A2("heading");
+    const heading = A2(null);
+    const addButton = A2(null);
+    const itemsRef = A2(items);
+    itemsRef.current = items;
+    const patchItem = (key, next) => setItems((all) => {
+      const copy = { ...all };
+      if (next) copy[key] = next;
+      else delete copy[key];
+      return copy;
+    });
+    const busyNow = A2(/* @__PURE__ */ new Set());
+    const hold = (key, on) => {
+      if (on) busyNow.current.add(key);
+      else busyNow.current.delete(key);
+      setBusy((keys) => on ? [...keys, key] : keys.filter((k3) => k3 !== key));
+    };
+    const load = async () => {
+      const mine = ++seq.current;
+      const query2 = queryRef.current.trim() || void 0;
+      const outcome = await store.readMemories(query2);
+      if (mine !== seq.current || outcome.kind === "dropped") return null;
+      if (outcome.kind === "error") {
+        setLoaded((l3) => l3.kind === "ok" ? { ...l3, error: outcome.error } : { kind: "error", error: outcome.error });
+        return null;
+      }
+      const memories = newestFirst(outcome.value.memories);
+      const filtered = query2 !== void 0;
+      setLoaded({ kind: "ok", memories, filtered, error: null });
+      if (!restored.current && !filtered) restoreEdits(memories);
+      settle(memories, filtered);
+      return memories;
+    };
+    const restoreEdits = (memories) => {
+      restored.current = true;
+      const back2 = {};
+      for (const field of store.draftFields(DRAFTS)) {
+        if (!field.startsWith("edit:")) continue;
+        const key = field.slice("edit:".length);
+        const kept = store.draft(DRAFTS, field);
+        const base = kept.original ?? kept.text;
+        const last = memories.find((m3) => m3.key === key) ?? { key, text: base, changedAt: null, changedBy: null };
+        back2[key] = { mode: "edit", draft: kept.text, base, last, feedback: null };
+      }
+      if (Object.keys(back2).length > 0) setItems((all) => ({ ...back2, ...all }));
+    };
+    const settle = (memories, filtered) => {
+      const byKey = new Map(memories.map((m3) => [m3.key, m3]));
+      for (const [key, item] of Object.entries(itemsRef.current)) {
+        const now2 = byKey.get(key);
+        if (item.mode === "forget" && !busyNow.current.has(key) && !item.check && now2 && now2.text !== item.text) refocus.current = { key, control: "cancel" };
+      }
+      setItems((all) => {
+        const copy = { ...all };
+        for (const [key, item] of Object.entries(all)) {
+          const now2 = byKey.get(key);
+          if (busyNow.current.has(key)) continue;
+          if (item.mode === "forget") {
+            if (!item.check && now2 && now2.text !== item.text) copy[key] = { ...item, text: now2.text, moved: true, feedback: null };
+            else if (!item.check && !now2 && !filtered) delete copy[key];
+            else if (item.check && !filtered) {
+              if (!now2) delete copy[key];
+              else copy[key] = { ...item, check: false, feedback: { kind: "checked", saved: false } };
+            }
+            continue;
+          }
+          if (!now2 && filtered) continue;
+          if (item.check) {
+            if (filtered) continue;
+            if (now2?.text === item.draft.trim()) {
+              delete copy[key];
+              continue;
+            }
+            copy[key] = { ...item, check: false, feedback: { kind: "checked", saved: false, kept: "Your text is still here." } };
+          }
+          const edit = copy[key];
+          if (!now2) copy[key] = { ...edit, refused: "gone" };
+          else if (now2.text !== edit.base) copy[key] = { ...edit, base: now2.text, last: now2, refused: "changed" };
+          else copy[key] = { ...edit, last: now2 };
+        }
+        return copy;
+      });
+      setComposer((c3) => {
+        if (!c3?.check || filtered) return c3;
+        return memories.some((m3) => m3.text === c3.text.trim()) ? null : { ...c3, check: false, feedback: { kind: "checked", saved: false, kept: "Your text is still here." } };
+      });
+    };
+    h2(() => {
+      void load();
+    }, []);
+    h2(() => {
+      if (query === queryRef.current) return;
+      const id = setTimeout(() => {
+        queryRef.current = query;
+        void load();
+      }, SEARCH_WAIT_MS);
+      return () => clearTimeout(id);
+    }, [query]);
+    _2(() => {
+      const want = refocus.current;
+      if (!want) return;
+      const el2 = want === "heading" ? heading.current : want === "add" ? addButton.current : want === "new" ? document.getElementById("bd-mem-new") : document.getElementById(controlId(want.control, want.key));
+      if (!el2) return;
+      refocus.current = null;
+      el2.focus({ preventScroll: true });
+    });
+    h2(() => {
+      const want = refocus.current;
+      if (loaded.kind === "ok" && want && typeof want === "object" && !document.getElementById(controlId(want.control, want.key))) refocus.current = null;
+    }, [loaded]);
+    const back = () => store.setPage("list");
+    const dirtyKeys = Object.entries(items).flatMap(([key, item]) => item.mode === "edit" && editDirty(item) ? [key] : []);
+    const unsaved = dirtyKeys.length > 0 || composerDirty(composer);
+    const unsavedRef = A2(unsaved);
+    unsavedRef.current = unsaved;
+    const requestBack = () => {
+      if (unsavedRef.current) setLeaving(true);
+      else back();
+    };
+    const discardAndLeave = () => {
+      store.dropDrafts(DRAFTS);
+      back();
+    };
+    const keepEditing = () => {
+      setLeaving(false);
+      refocus.current = dirtyKeys[0] !== void 0 ? { key: dirtyKeys[0], control: "field" } : "new";
+    };
+    h2(() => {
+      const want = /* @__PURE__ */ new Map();
+      for (const [key, item] of Object.entries(items)) if (item.mode === "edit" && editDirty(item)) want.set(editField(key), { text: item.draft, original: item.base });
+      if (composer && composerDirty(composer)) want.set(ADD_FIELD, { text: composer.text, base: composer.name });
+      for (const field of store.draftFields(DRAFTS)) {
+        if (!want.has(field) && (restored.current || !field.startsWith("edit:"))) store.setDraft(DRAFTS, field, null);
+      }
+      for (const [field, draft] of want) store.setDraft(DRAFTS, field, draft);
+    }, [items, composer]);
+    h2(() => {
+      const onKey = (e3) => {
+        if (e3.key !== "Escape" || e3.defaultPrevented || e3.metaKey || e3.ctrlKey || e3.altKey || composing(e3)) return;
+        if (e3.target instanceof Element && e3.target.closest("input, textarea, select")) return;
+        if (store.get().overlays.length > 0) return;
+        e3.preventDefault();
+        requestBack();
+      };
+      document.addEventListener("keydown", onKey);
+      return () => document.removeEventListener("keydown", onKey);
+    }, [store]);
+    const listed = loaded.kind === "ok" ? loaded.memories : [];
+    const pinned = Object.values(items).flatMap((item) => item.mode === "edit" && !listed.some((m3) => m3.key === item.last.key) ? [item.last] : []);
+    const shown = [...pinned, ...listed];
+    const neighbourOf = (key) => {
+      const i3 = listed.findIndex((m3) => m3.key === key);
+      const next = listed[i3 + 1] ?? listed[i3 - 1];
+      return next ? { key: next.key, control: "edit" } : "add";
+    };
+    const replaceListed = (memory) => setLoaded((l3) => l3.kind === "ok" ? { ...l3, memories: l3.memories.map((m3) => m3.key === memory.key ? memory : m3) } : l3);
+    const startEdit = (memory) => patchItem(memory.key, { mode: "edit", draft: memory.text, base: memory.text, last: memory, feedback: null });
+    const cancelItem = (key, control) => {
+      const item = itemsRef.current[key];
+      if (item?.mode === "edit" && editDirty(item)) {
+        patchItem(key, { ...item, asking: true });
+        return;
+      }
+      patchItem(key, null);
+      refocus.current = { key, control };
+    };
+    const keepEdit = (key) => {
+      const item = itemsRef.current[key];
+      if (item?.mode === "edit") patchItem(key, { ...item, asking: false });
+      refocus.current = { key, control: "field" };
+    };
+    const discardEdit = (key) => {
+      const item = itemsRef.current[key];
+      if (item?.mode === "edit" && item.refused === "gone") return leaveGone(key);
+      if (item?.mode === "edit" && item.refused === "changed") return keepCurrent(key);
+      patchItem(key, null);
+      refocus.current = { key, control: "edit" };
+    };
+    const save = async (key, item, readd = false) => {
+      if (busy.includes(key) || paused !== null) return;
+      hold(key, true);
+      patchItem(key, { ...item, feedback: null });
+      const outcome = await store.remember(readd ? { key, text: item.draft } : { key, text: item.draft, expectedText: item.base });
+      hold(key, false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        const result = outcome.value;
+        if (result.ok) {
+          patchItem(key, null);
+          refocus.current = { key, control: "edit" };
+          setFresh(key);
+          void load();
+          return;
+        }
+        if (result.current) {
+          replaceListed(result.current);
+          patchItem(key, { ...item, base: result.current.text, last: result.current, refused: "changed", feedback: null });
+        } else {
+          patchItem(key, { ...item, refused: "gone", feedback: null });
+        }
+        return;
+      }
+      if (outcome.kind === "uncertain" && outcome.saved) {
+        patchItem(key, null);
+        refocus.current = { key, control: "edit" };
+        void load();
+        return;
+      }
+      patchItem(key, { ...item, feedback: feedbackOf(outcome), check: outcome.kind === "uncertain" });
+      if (outcome.kind === "uncertain") void load();
+    };
+    const leaveGone = (key) => {
+      refocus.current = neighbourOf(key);
+      patchItem(key, null);
+      setLoaded((l3) => l3.kind === "ok" ? { ...l3, memories: l3.memories.filter((m3) => m3.key !== key) } : l3);
+      void load();
+    };
+    const keepCurrent = (key) => {
+      patchItem(key, null);
+      refocus.current = { key, control: "edit" };
+      void load();
+    };
+    const askForget = (memory) => {
+      patchItem(memory.key, { mode: "forget", text: memory.text, feedback: null });
+      refocus.current = { key: memory.key, control: "cancel" };
+    };
+    const forget = async (shown2, step) => {
+      const key = shown2.key;
+      if (busy.includes(key) || paused !== null) return;
+      const memory = { ...shown2, text: step.text };
+      const after = neighbourOf(key);
+      hold(key, true);
+      patchItem(key, { ...step, feedback: null });
+      const outcome = await store.forget(key, step.text);
+      hold(key, false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        const result = outcome.value;
+        if (result.ok) {
+          patchItem(key, null);
+          setNotice({ kind: "forgot", memory, feedback: null });
+          refocus.current = after;
+          void load();
+          return;
+        }
+        if (result.current) {
+          replaceListed(result.current);
+          patchItem(key, { mode: "forget", text: result.current.text, moved: true, feedback: null });
+          refocus.current = { key, control: "cancel" };
+          return;
+        }
+        patchItem(key, null);
+        refocus.current = after;
+        void load();
+        return;
+      }
+      patchItem(key, { ...step, feedback: feedbackOf(outcome), check: outcome.kind === "uncertain" && !outcome.saved });
+      if (outcome.kind === "uncertain") {
+        const memories = await load();
+        if (memories && !memories.some((m3) => m3.key === key)) setNotice({ kind: "forgot", memory, feedback: null });
+      }
+    };
+    const undo = async (memory) => {
+      if (undoing || paused !== null) return;
+      setUndoing(true);
+      const outcome = await store.remember({ key: memory.key, text: memory.text });
+      setUndoing(false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        setNotice(outcome.value.ok ? { kind: "back", key: memory.key } : { kind: "taken", memory });
+        if (outcome.value.ok) {
+          refocus.current = { key: memory.key, control: "edit" };
+          setFresh(memory.key);
+        }
+        void load();
+        return;
+      }
+      setNotice({ kind: "forgot", memory, feedback: feedbackOf(outcome) });
+      if (outcome.kind === "uncertain") void load();
+    };
+    const openComposer = () => {
+      if (!composer) setComposer({ text: "", name: "", taken: null, feedback: null });
+    };
+    const closeComposer = () => {
+      if (adding) return;
+      setComposer(null);
+      refocus.current = "add";
+    };
+    const cancelComposer = () => {
+      if (adding || !composer) return;
+      if (composerDirty(composer)) setComposer({ ...composer, asking: true });
+      else closeComposer();
+    };
+    const add = async (c3, replace = false) => {
+      const text2 = c3.text.trim();
+      const name = c3.name.trim();
+      if (adding || text2 === "" || paused !== null) return;
+      setAdding(true);
+      setComposer({ ...c3, feedback: null, vanished: void 0 });
+      const outcome = await store.remember({ text: c3.text, ...name ? { key: name } : {}, ...replace && c3.taken ? { key: c3.taken.key, expectedText: c3.taken.text } : {} });
+      setAdding(false);
+      if (outcome.kind === "dropped") return;
+      if (outcome.kind === "ok") {
+        const result = outcome.value;
+        if (result.ok) {
+          setComposer(null);
+          refocus.current = "add";
+          if (result.memory) setFresh(result.memory.key);
+          void load();
+          return;
+        }
+        if (replace && !result.current && c3.taken) {
+          setComposer({ ...c3, taken: null, feedback: null, vanished: `${c3.taken.key} was removed elsewhere. Nothing was saved. Add memory adds yours as new.` });
+          return;
+        }
+        setComposer({ ...c3, taken: result.current, feedback: null, vanished: void 0 });
+        return;
+      }
+      if (outcome.kind === "uncertain" && outcome.saved) {
+        setComposer(null);
+        refocus.current = "add";
+        void load();
+        return;
+      }
+      setComposer({ ...c3, feedback: feedbackOf(outcome), check: outcome.kind === "uncertain" });
+      if (outcome.kind === "uncertain") void load();
+    };
+    const count = loaded.kind === "ok" && !loaded.filtered ? loaded.memories.length : null;
+    const searching = queryRef.current.trim() !== "";
+    return /* @__PURE__ */ u3("section", { class: "bd-mem", "aria-labelledby": "bd-mem-h", children: [
+      /* @__PURE__ */ u3("nav", { class: "bd-dnav bd-mem-nav", children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-iconbtn bd-back", "aria-label": "Back", title: "Back (Esc)", onClick: requestBack, children: /* @__PURE__ */ u3(IconBack, {}) }),
+        /* @__PURE__ */ u3("h1", { class: "bd-mem-h", id: "bd-mem-h", ref: heading, tabIndex: -1, children: [
+          "Memories",
+          " ",
+          count !== null && !searching && /* @__PURE__ */ u3("span", { class: "bd-n", children: count })
+        ] }),
+        /* @__PURE__ */ u3(
+          "button",
+          {
+            ref: addButton,
+            type: "button",
+            class: "bd-btn bd-btn-sm bd-mem-addbtn",
+            "aria-expanded": composer !== null,
+            disabled: paused !== null,
+            title: paused ?? "Add a memory",
+            onClick: openComposer,
+            children: [
+              /* @__PURE__ */ u3(IconPlus, {}),
+              "Add"
+            ]
+          }
+        )
+      ] }),
+      leaving && /* @__PURE__ */ u3(DiscardAsk, { label: "Discard your unsaved text?", detail: "What you typed here goes. Saved memories stay as they are.", onKeep: keepEditing, onDiscard: discardAndLeave }),
+      /* @__PURE__ */ u3("div", { class: "bd-mem-body", inert: leaving, children: [
+        /* @__PURE__ */ u3("p", { class: "bd-mem-lede", children: "Every agent session in this project starts with these." }),
+        /* @__PURE__ */ u3("label", { class: "bd-search bd-mem-search", "data-hint": "long", children: [
+          /* @__PURE__ */ u3(IconSearch, {}),
+          /* @__PURE__ */ u3(
+            "input",
+            {
+              type: "search",
+              placeholder: "Search memories",
+              "aria-label": "Search memories",
+              value: query,
+              onInput: (e3) => setQuery(e3.currentTarget.value),
+              onKeyDown: (e3) => {
+                if (e3.key === "Escape" && query !== "" && !composing(e3)) {
+                  e3.preventDefault();
+                  setQuery("");
+                }
+              }
+            }
+          )
+        ] }),
+        paused && /* @__PURE__ */ u3(PausedNote, { reason: paused }),
+        notice && /* @__PURE__ */ u3(NoticeBar, { notice, undoing, paused, undo, hide: () => setNotice(null) }),
+        composer && /* @__PURE__ */ u3(
+          AddBox,
+          {
+            composer,
+            busy: adding,
+            paused,
+            set: (next) => setComposer({ ...composer, ...next }),
+            add: (replace) => void add(composer, replace),
+            cancel: cancelComposer,
+            keep: () => {
+              setComposer({ ...composer, asking: false });
+              refocus.current = "new";
+            },
+            discard: closeComposer
+          }
+        ),
+        loaded.kind === "ok" && loaded.error && /* @__PURE__ */ u3("div", { class: "bd-mem-err", role: "alert", children: [
+          /* @__PURE__ */ u3("span", { children: `Could not read the memories again: ${loaded.error.message} The list shows them as last read.` }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => void load(), children: "Try again" })
+        ] }),
+        loaded.kind === "loading" ? /* @__PURE__ */ u3("p", { class: "bd-mem-quiet", role: "status", children: "Reading memories\u2026" }) : loaded.kind === "error" ? /* @__PURE__ */ u3("div", { class: "bd-mem-err", role: "alert", children: [
+          /* @__PURE__ */ u3("span", { children: loaded.error.message }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => void load(), children: "Try again" })
+        ] }) : shown.length === 0 ? searching ? /* @__PURE__ */ u3("div", { class: "bd-mem-quiet", children: [
+          /* @__PURE__ */ u3("p", { children: "No memory matches." }),
+          /* @__PURE__ */ u3(
+            "button",
+            {
+              type: "button",
+              class: "bd-btn bd-btn-sm",
+              onClick: () => {
+                setQuery("");
+                queryRef.current = "";
+                void load();
+              },
+              children: "Clear search"
+            }
+          )
+        ] }) : /* @__PURE__ */ u3("div", { class: "bd-mem-quiet", children: [
+          /* @__PURE__ */ u3("p", { children: "No memories yet." }),
+          /* @__PURE__ */ u3("p", { class: "bd-mem-quiet-sub", children: "Add one and every agent session in this project starts with it." })
+        ] }) : (
+          // role="list": Safari drops a styled list's semantics without it.
+          /* @__PURE__ */ u3("ul", { class: "bd-mem-list", role: "list", "aria-label": "Memories", children: shown.map((memory) => /* @__PURE__ */ u3(
+            MemoryItem,
+            {
+              memory,
+              item: items[memory.key] ?? null,
+              busy: busy.includes(memory.key),
+              paused,
+              fresh: fresh === memory.key,
+              when: changedLine(memory, now),
+              pinned: pinned.includes(memory),
+              edit: () => startEdit(memory),
+              setDraft: (draft) => {
+                const item = items[memory.key];
+                if (item?.mode === "edit") patchItem(memory.key, { ...item, draft });
+              },
+              save: (readd) => {
+                const item = items[memory.key];
+                if (item?.mode === "edit") void save(memory.key, item, readd);
+              },
+              keepCurrent: () => keepCurrent(memory.key),
+              leaveGone: () => leaveGone(memory.key),
+              askForget: () => askForget(memory),
+              forget: () => {
+                const item = items[memory.key];
+                if (item?.mode === "forget") void forget(memory, item);
+              },
+              cancel: (control) => cancelItem(memory.key, control),
+              keepEditing: () => keepEdit(memory.key),
+              discard: () => discardEdit(memory.key)
+            },
+            memory.key
+          )) })
+        )
+      ] })
+    ] });
+  }
+  var escapeCloses3 = (cancel) => (e3) => {
+    if (e3.key !== "Escape" || composing(e3)) return;
+    e3.preventDefault();
+    e3.stopPropagation();
+    cancel();
+  };
+  function MemoryItem(props) {
+    const { memory, item, busy, paused, fresh, when: when2 } = props;
+    const off = busy || paused !== null;
+    const title = paused ?? void 0;
+    const head = /* @__PURE__ */ u3("span", { class: "bd-mem-key", id: keyId(memory.key), title: memory.key, children: memory.key });
+    if (item?.mode === "forget") {
+      const stepId = controlId("ask", memory.key);
+      return /* @__PURE__ */ u3("li", { class: "bd-mem-item", "data-mode": "forget", children: [
+        head,
+        /* @__PURE__ */ u3("div", { class: "bd-mem-forget", role: "group", "aria-labelledby": stepId, onKeyDown: escapeCloses3(() => !busy && props.cancel("forget")), children: [
+          /* @__PURE__ */ u3("p", { class: "bd-mem-forget-h", id: stepId, children: `Forget ${memory.key}?` }),
+          item.moved && /* @__PURE__ */ u3("p", { class: "bd-mem-alert", role: "alert", children: "This memory changed since you opened this step. This is its text now; nothing was forgotten." }),
+          /* @__PURE__ */ u3("p", { class: "bd-mem-text bd-mem-quote", children: item.text }),
+          /* @__PURE__ */ u3("p", { class: "bd-mem-hint", children: "Every agent session in this project will stop seeing this." }),
+          /* @__PURE__ */ u3("div", { class: "bd-mem-acts", children: [
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-mem-danger", disabled: off, "aria-busy": busy || void 0, title, onClick: props.forget, children: "Forget memory" }),
+            /* @__PURE__ */ u3("button", { type: "button", id: controlId("cancel", memory.key), class: "bd-btn bd-btn-sm", disabled: busy, onClick: () => props.cancel("forget"), children: "Cancel" })
+          ] }),
+          item.feedback && /* @__PURE__ */ u3(WriteMessage, { feedback: item.feedback })
+        ] })
+      ] });
+    }
+    if (item?.mode === "edit") {
+      const fieldId2 = controlId("field", memory.key);
+      const unchanged = item.draft.trim() === "" || item.draft === item.base && !item.refused;
+      const go = () => {
+        if (!unchanged && !off) props.save(item.refused === "gone");
+      };
+      return /* @__PURE__ */ u3("li", { class: "bd-mem-item", "data-mode": "edit", children: [
+        head,
+        /* @__PURE__ */ u3("div", { class: "bd-mem-was", "data-refused": item.refused, children: [
+          /* @__PURE__ */ u3("span", { class: "bd-mem-label", children: item.refused === "changed" ? "Now in Beads" : item.refused === "gone" ? "Was" : "Now" }),
+          /* @__PURE__ */ u3("p", { class: "bd-mem-text", children: memory.text })
+        ] }),
+        item.refused && /* @__PURE__ */ u3("p", { class: "bd-mem-alert", role: "alert", children: item.refused === "changed" ? `${memory.key} changed elsewhere while you were editing. Nothing was saved.` : "This memory was removed elsewhere. Nothing was saved. Add it again with your text, or discard it." }),
+        /* @__PURE__ */ u3("label", { class: "bd-mem-label", for: fieldId2, children: "New text" }),
+        /* @__PURE__ */ u3(
+          EditField,
+          {
+            id: fieldId2,
+            value: item.draft,
+            busy,
+            onInput: props.setDraft,
+            onSave: item.refused ? () => {
+            } : go,
+            onEscape: () => !busy && props.cancel("edit")
+          }
+        ),
+        props.pinned && !item.refused && /* @__PURE__ */ u3("p", { class: "bd-mem-hint", children: "Shown while you edit it, though the search leaves it out." }),
+        !item.refused && /* @__PURE__ */ u3("p", { class: "bd-mem-hint", children: `${saveKey()} saves. The text above stays until you save.` }),
+        item.asking ? /* @__PURE__ */ u3(DiscardAsk, { label: "Discard your changes?", onKeep: props.keepEditing, onDiscard: props.discard }) : /* @__PURE__ */ u3("div", { class: "bd-mem-acts", children: item.refused === "changed" ? /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off || item.draft.trim() === "", "aria-busy": busy || void 0, title, onClick: go, children: "Save mine anyway" }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: props.keepCurrent, children: "Keep current" })
+        ] }) : item.refused === "gone" ? /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off || item.draft.trim() === "", "aria-busy": busy || void 0, title, onClick: go, children: "Add it again" }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: props.leaveGone, children: "Discard" })
+        ] }) : /* @__PURE__ */ u3(S, { children: [
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off || unchanged, "aria-busy": busy || void 0, title, onClick: go, children: "Save" }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: () => props.cancel("edit"), children: "Cancel" })
+        ] }) }),
+        item.feedback && /* @__PURE__ */ u3(WriteMessage, { feedback: item.feedback })
+      ] });
+    }
+    return (
+      // The name and its actions on one line, then the text, then when and by whom if Beads knows: a memory with no date simply ends
+      // with its text, the same shape as the others.
+      /* @__PURE__ */ u3("li", { class: "bd-mem-item", "data-fresh": fresh || void 0, children: [
+        /* @__PURE__ */ u3("div", { class: "bd-mem-top", children: [
+          head,
+          /* @__PURE__ */ u3("span", { class: "bd-mem-tools", children: [
+            /* @__PURE__ */ u3("button", { type: "button", id: controlId("edit", memory.key), class: "bd-mem-act", disabled: off, title, "aria-describedby": keyId(memory.key), onClick: props.edit, children: "Edit" }),
+            /* @__PURE__ */ u3("button", { type: "button", id: controlId("forget", memory.key), class: "bd-mem-act", disabled: off, title, "aria-describedby": keyId(memory.key), onClick: props.askForget, children: "Forget" })
+          ] })
+        ] }),
+        /* @__PURE__ */ u3("p", { class: "bd-mem-text", children: memory.text }),
+        when2 && /* @__PURE__ */ u3("p", { class: "bd-mem-meta", children: when2 })
+      ] })
+    );
+  }
+  function EditField({ id, value, busy, onInput, onSave, onEscape }) {
+    const ref = A2(null);
+    h2(() => {
+      const el2 = ref.current;
+      if (!el2) return;
+      el2.focus({ preventScroll: true });
+      el2.setSelectionRange(el2.value.length, el2.value.length);
+    }, []);
+    return /* @__PURE__ */ u3(
+      "textarea",
+      {
+        ref,
+        id,
+        class: "bd-input bd-ntext bd-mem-field",
+        rows: 3,
+        value,
+        readOnly: busy,
+        onInput: (e3) => onInput(e3.currentTarget.value),
+        onKeyDown: (e3) => {
+          escapeCloses3(onEscape)(e3);
+          if (isSubmitKey(e3)) {
+            e3.preventDefault();
+            if (!busy) onSave();
+          }
+        }
+      }
+    );
+  }
+  function AddBox({ composer, busy, paused, set, add, cancel, keep, discard }) {
+    const off = busy || paused !== null || composer.text.trim() === "";
+    const taken = composer.taken;
+    const go = () => {
+      if (!off) add(false);
+    };
+    return /* @__PURE__ */ u3("div", { class: "bd-mem-add", role: "group", "aria-label": "New memory", onKeyDown: escapeCloses3(cancel), children: [
+      /* @__PURE__ */ u3("label", { class: "bd-mem-label", for: "bd-mem-new", children: "Memory" }),
+      /* @__PURE__ */ u3(EditField, { id: "bd-mem-new", value: composer.text, busy, onInput: (text2) => set({ text: text2 }), onSave: go, onEscape: cancel }),
+      /* @__PURE__ */ u3(
+        "input",
+        {
+          type: "text",
+          class: "bd-input bd-mem-name",
+          "aria-label": "Name (optional)",
+          "aria-describedby": "bd-mem-name-hint",
+          placeholder: "Name (optional)",
+          value: composer.name,
+          readOnly: busy,
+          spellcheck: false,
+          autoCapitalize: "off",
+          onInput: (e3) => set({ name: e3.currentTarget.value, taken: null }),
+          onKeyDown: (e3) => {
+            if (isEnterInInput(e3)) {
+              e3.preventDefault();
+              go();
+            }
+          }
+        }
+      ),
+      /* @__PURE__ */ u3("p", { class: "bd-mem-hint", id: "bd-mem-name-hint", children: `Leave the name empty and Beads makes one from the text. ${saveKey()} adds.` }),
+      composer.vanished && /* @__PURE__ */ u3("p", { class: "bd-mem-alert", role: "alert", children: composer.vanished }),
+      taken && /* @__PURE__ */ u3("div", { class: "bd-mem-taken", children: [
+        /* @__PURE__ */ u3("p", { class: "bd-mem-alert", role: "alert", children: `A memory named ${taken.key} already exists. Nothing was saved.` }),
+        /* @__PURE__ */ u3("p", { class: "bd-mem-text bd-mem-quote", children: taken.text })
+      ] }),
+      composer.asking ? /* @__PURE__ */ u3(DiscardAsk, { label: "Discard this memory?", onKeep: keep, onDiscard: discard }) : /* @__PURE__ */ u3("div", { class: "bd-mem-acts", children: [
+        taken ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, "aria-busy": busy || void 0, title: paused ?? void 0, onClick: () => add(true), children: "Replace it with mine" }) : /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: off, "aria-busy": busy || void 0, title: paused ?? void 0, onClick: go, children: "Add memory" }),
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", disabled: busy, onClick: cancel, children: "Cancel" })
+      ] }),
+      composer.feedback && /* @__PURE__ */ u3(WriteMessage, { feedback: composer.feedback })
+    ] });
+  }
+  function NoticeBar({ notice, undoing, paused, undo, hide }) {
+    let body;
+    if (notice.kind === "forgot") {
+      body = /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("span", { children: `Forgot ${notice.memory.key}.` }),
+        /* @__PURE__ */ u3(
+          "button",
+          {
+            type: "button",
+            class: "bd-btn bd-btn-sm bd-btn-primary bd-mem-undo",
+            disabled: undoing || paused !== null,
+            "aria-busy": undoing || void 0,
+            title: paused ?? `Bring back ${notice.memory.key} with the same text`,
+            onClick: () => undo(notice.memory),
+            children: "Undo"
+          }
+        ),
+        notice.feedback && /* @__PURE__ */ u3(WriteMessage, { feedback: notice.feedback })
+      ] });
+    } else if (notice.kind === "back") {
+      body = /* @__PURE__ */ u3("span", { children: `${notice.key} is back.` });
+    } else {
+      body = /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("span", { children: `Could not bring back ${notice.memory.key}: a memory with that name exists now. Nothing was saved. Its text was:` }),
+        /* @__PURE__ */ u3("p", { class: "bd-mem-text bd-mem-quote", children: notice.memory.text })
+      ] });
+    }
+    return /* @__PURE__ */ u3("div", { class: "bd-nnote bd-mem-note", role: "status", "data-kind": notice.kind, children: [
+      /* @__PURE__ */ u3("span", { class: "bd-mem-note-body", children: body }),
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-nnote-x", "aria-label": "Hide this note", onClick: hide, children: /* @__PURE__ */ u3(IconX, {}) })
+    ] });
+  }
+  function DiscardAsk({ label, detail, onKeep, onDiscard }) {
+    const box = A2(null);
+    h2(() => box.current?.focus({ preventScroll: true }), []);
+    return /* @__PURE__ */ u3(
+      "div",
+      {
+        ref: box,
+        tabIndex: -1,
+        class: "bd-confirm bd-mem-ask",
+        role: "alertdialog",
+        "aria-label": label,
+        onKeyDown: (e3) => {
+          if (e3.key === "Escape") {
+            e3.preventDefault();
+            e3.stopPropagation();
+            onKeep();
+          } else if (isConfirmKey(e3)) {
+            e3.preventDefault();
+            e3.stopPropagation();
+            onDiscard();
+          }
+        },
+        children: [
+          /* @__PURE__ */ u3("span", { class: "bd-mem-ask-q", children: [
+            label,
+            detail && /* @__PURE__ */ u3("span", { class: "bd-mem-ask-d", children: detail })
+          ] }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: onKeep, children: "Keep editing" }),
+          /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", "data-tone": "danger", onClick: onDiscard, children: "Discard" })
+        ]
+      }
+    );
   }
 
   // src/panel/ui/Footer.tsx
@@ -10795,7 +15012,6 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   background: transparent;
   color: var(--bd-muted);
   font-size: 11.5px;
-  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .bd-seg button:hover {
@@ -10920,6 +15136,16 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
 
 .bd-btn:disabled {
   opacity: 0.75;
+}
+
+/* Saving, with focus kept on the button: it reads as working, not as off. */
+.bd-btn[aria-busy='true'] {
+  cursor: progress;
+}
+
+.bd-btn[aria-disabled='true']:not([aria-busy='true']) {
+  opacity: 0.75;
+  cursor: default;
 }
 
 .bd-link {
@@ -11077,6 +15303,103 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   margin: 2px 0 0;
   color: var(--bd-err-text);
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- the one-time project update */
+
+/* The empty state's column, with a left-aligned stack under it: the confirm, the note and the details read as text, not as a caption. */
+.bd-upd-acts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  align-self: stretch;
+  margin-top: 16px;
+}
+
+.bd-upd-ask,
+.bd-upd-note {
+  align-self: stretch;
+  text-align: left;
+}
+
+.bd-upd-ask {
+  padding: 10px 11px;
+  font-size: 12px;
+}
+
+.bd-upd-ask .bd-pm-ask-t {
+  font-size: 12.5px;
+}
+
+.bd-upd-ask .bd-pm-ask-acts {
+  margin-top: 4px;
+}
+
+.bd-upd-note {
+  font-size: 12px;
+}
+
+.bd-upd-note:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.bd-upd-note[data-tone='ok'] {
+  border-left-color: var(--bd-ok);
+}
+
+.bd-upd-note[data-tone='info'] {
+  border-left-color: var(--bd-accent);
+}
+
+.bd-upd-say {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  /* A live region that stays in the accessibility tree while empty (display:none would drop it, and the first message would not be announced). One line is kept, so nothing shifts when text arrives. */
+  min-height: 1.4em;
+}
+
+.bd-upd-more {
+  align-self: stretch;
+  text-align: left;
+}
+
+.bd-upd-more > summary {
+  width: max-content;
+  margin: 0 auto;
+  padding: 2px 4px;
+  border-radius: var(--bd-radius);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.bd-upd-more > summary:hover {
+  color: var(--bd-fg);
+}
+
+.bd-upd-more > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-upd-raw {
+  max-height: 10.5em;
+  margin: 6px 0 0;
+  padding: 7px 8px;
+  overflow: auto;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-family: var(--bd-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- loading */
@@ -11780,7 +16103,8 @@ button.bd-chev:hover {
   margin: 4px -4px -4px;
   padding: 5px 12px 6px;
   border-top: 1px solid var(--bd-line);
-  color: var(--bd-dim);
+  /* Which bead the menu is for: information, so muted (readable in both themes), never the dim of something switched off. */
+  color: var(--bd-muted);
   font: 10.5px/1.3 var(--bd-mono);
   overflow: hidden;
   white-space: nowrap;
@@ -11905,7 +16229,8 @@ button.bd-chev:hover {
 
 .bd-foot [data-tone='blocked'],
 .bd-foot [data-tone='blocked'] b {
-  color: var(--bd-err-text);
+  /* Toward the foreground: darker on light, lighter on dark, so the red reads in both themes. */
+  color: color-mix(in srgb, var(--bd-err-text) 80%, var(--bd-fg));
 }
 
 /* ---------------------------------------------------------------- detail */
@@ -12076,6 +16401,11 @@ button.bd-chev:hover {
 .bd-pop[data-align='end'] {
   right: 0;
   left: auto;
+}
+
+/* Over the detail's header, a menu keeps a band of the page around it, so the words it covers end at a clean edge, not mid-letter. */
+.bd-dnav .bd-pop {
+  box-shadow: 0 0 0 6px var(--bd-bg), 0 12px 30px rgba(0, 0, 0, 0.24), 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .bd-pop .bd-menu-item[aria-checked='true'] {
@@ -12846,7 +17176,9 @@ button.bd-chev:hover {
 .bd-dbody {
   flex: 1;
   min-height: 0;
-  padding-bottom: 18px;
+  /* Clear of the Attach footer's fade, also when a field scrolls into view. */
+  padding-bottom: 36px;
+  scroll-padding-bottom: 40px;
   overflow-x: clip;
   overflow-y: auto;
 }
@@ -12945,10 +17277,103 @@ button.bd-chev:hover {
   color: var(--bd-fg);
 }
 
-.bd-dtype {
-  margin-left: 8px;
-  color: var(--bd-dim);
+/* The id, type and parent share a line and wrap under one another at the same indent when the panel is narrow. */
+.bd-didrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 6px 0 0 24px;
+}
+
+.bd-didrow .bd-did {
+  margin: 0;
+  max-width: 100%;
+}
+
+.bd-didrow .bd-chipbtn {
+  gap: 3px;
+  min-width: 0;
+  color: var(--bd-muted);
   font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.bd-didrow .bd-chipbtn .bd-i:last-child {
+  width: 10px;
+  height: 10px;
+  opacity: 0.7;
+}
+
+.bd-didrow .bd-chipbtn:hover:not(:disabled),
+.bd-didrow .bd-chipbtn[aria-expanded='true'] {
+  color: var(--bd-fg);
+}
+
+.bd-parentwrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bd-parent .bd-i:first-child {
+  flex-shrink: 0;
+  color: var(--bd-accent-text);
+}
+
+.bd-parent-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-parent[data-none] .bd-parent-t {
+  font-style: italic;
+}
+
+.bd-menu-rule {
+  height: 1px;
+  margin: 2px -4px;
+  background: var(--bd-line);
+}
+
+/* A long list of epics scrolls inside the menu instead of running off the panel. */
+.bd-menu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 232px;
+  overflow-y: auto;
+}
+
+.bd-menu-epic .bd-i {
+  flex-shrink: 0;
+  color: var(--bd-accent-text);
+}
+
+.bd-menu-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-menu-sub {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--bd-muted);
+  font: 10.5px/1 var(--bd-mono);
+}
+
+/* A menu item that only says something: muted (readable), not the dim of a switched-off choice. */
+.bd-menu-item.bd-menu-note:disabled {
+  height: auto;
+  padding: 4px 8px 6px;
+  color: var(--bd-muted);
+  cursor: default;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 .bd-dmeta {
@@ -13372,6 +17797,131 @@ button.bd-chev:hover {
   color: var(--bd-muted);
 }
 
+/* Criteria that mix prose and lists: each block keeps a little air. */
+.bd-acwrap > * + * {
+  margin-top: 6px;
+}
+
+.bd-ac li {
+  align-items: flex-start;
+}
+
+.bd-ac li[data-depth] {
+  padding-left: 18px;
+}
+
+/* A written box is a checkbox: an 18 px target around a 12 px box, its text the label (a click there ticks too). */
+.bd-ac-tick {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.bd-ac-tick .bd-ac-box {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border-color: var(--bd-muted);
+  border-radius: 3px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.bd-ac-tick:hover:not([aria-disabled]) .bd-ac-box {
+  border-color: var(--bd-accent);
+  background: color-mix(in srgb, var(--bd-accent) 10%, transparent);
+}
+
+.bd-ac-tick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-ac-tick[aria-disabled] {
+  cursor: default;
+}
+
+.bd-ac li[data-done] .bd-ac-tick .bd-ac-box {
+  border-color: var(--bd-ok);
+  background: var(--bd-ok);
+  box-shadow: none;
+}
+
+/* The tick mark itself, drawn in the page colour on the filled box. */
+.bd-ac li[data-done] .bd-ac-tick .bd-ac-box::after {
+  position: absolute;
+  top: 1px;
+  left: 3.5px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bd-bg);
+  border-width: 0 1.6px 1.6px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+/* Saving: the box already shows where it is going, and breathes until Beads answers. */
+.bd-ac li[data-busy] .bd-ac-box {
+  animation: bd-breathe 900ms ease-in-out infinite;
+}
+
+.bd-ac-text {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.bd-ac-tick[aria-disabled] + .bd-ac-text {
+  cursor: default;
+}
+
+/* A list line without a box: a bullet, so it never looks like something to tick. */
+.bd-ac-dot {
+  flex-shrink: 0;
+  width: 4px;
+  height: 4px;
+  margin: 7.5px 4px 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bd-muted) 75%, transparent);
+}
+
+.bd-ac-note {
+  margin-top: 6px;
+}
+
+/* No criteria: one quiet line where the section would be, with its Add. */
+.bd-noac {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 4px 0 30px;
+  border-top: 1px solid var(--bd-line);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-noac span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-noac .bd-edit {
+  opacity: 1;
+  color: var(--bd-muted);
+}
+
 /* relationships */
 
 .bd-rgroup + .bd-rgroup {
@@ -13480,6 +18030,121 @@ button.bd-rel:focus-visible {
   font: 11px/1.45 var(--bd-mono);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Due and defer dates: the same label column as the fields under them, each value with its own small actions. */
+.bd-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-dates + .bd-more {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-daterow {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-datelab {
+  color: var(--bd-muted);
+}
+
+.bd-dateval {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The value, then its actions on a line of their own, so they start at the same edge at every width. */
+.bd-dateline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 22px;
+}
+
+.bd-datetext {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  color: var(--bd-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-datetext[data-none] {
+  color: var(--bd-muted);
+}
+
+.bd-overdue {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-err) 12%, transparent);
+  color: var(--bd-err-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+}
+
+.bd-dateacts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  /* The buttons' own padding: their text lines up with the value above. */
+  margin-left: -7px;
+}
+
+/* Quiet text actions that read as what they do, framed on hover like the section Edit buttons. */
+.bd-datebtn {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.bd-datebtn:hover:not(:disabled),
+.bd-datebtn:focus-visible {
+  border-color: var(--bd-line);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+}
+
+.bd-datebtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.bd-daterow[data-busy] .bd-datetext {
+  opacity: 0.6;
+}
+
+.bd-dateedit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-dateedit .bd-input {
+  width: 100%;
+}
+
+.bd-wnote-date {
+  margin: 0;
 }
 
 /* comments */
@@ -13697,6 +18362,15 @@ button.bd-rel:focus-visible {
   color: var(--bd-err-text);
   font-size: 10.5px;
   line-height: 15px;
+}
+
+/* Activity rows: the menu button sits on the first line, in place of the time, so it never covers who made the change. */
+.bd-act-row .bd-rowmore {
+  top: 13px;
+}
+
+.bd-act-row:is(:hover, [data-cursor]) .bd-act-when {
+  visibility: hidden;
 }
 
 .bd-act-who {
@@ -14732,23 +19406,1934 @@ button.bd-rel:focus-visible {
   color: var(--bd-muted);
   font-size: 11px;
 }
+
+/* ---------------------------------------------------------------- needs me */
+
+/*
+ * A calm inbox: each section is a sentence-case heading with a tinted mark, each row a bead, the reason it is here, and its
+ * actions under it. Decisions (Resolve, Respond) carry the accent; ways out (Keep, Dismiss, Defer) stay quiet.
+ */
+.bd-needs {
+  padding-top: 0;
+  /* Room for the last row's actions above the footer's fade. */
+  padding-bottom: 56px;
+}
+
+.bd-nsec {
+  padding-bottom: 6px;
+}
+
+.bd-nsec + .bd-nsec {
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-nsec-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 12px 5px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.bd-nsec-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bd-accent) 13%, transparent);
+  color: var(--bd-accent-text);
+}
+
+.bd-nsec-ic[data-section='stuck'] {
+  background: color-mix(in srgb, var(--bd-prog) 18%, transparent);
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-nsec-ic[data-section='changed'] {
+  background: color-mix(in srgb, var(--bd-fg) 7%, transparent);
+}
+
+.bd-nsec-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-nsec-title {
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-fg);
+}
+
+.bd-nsec-act {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+/* A two-line row: the bead, then why it is here and what can be done, set under the id. */
+.bd-nrow {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 6px 12px 7px 14px;
+}
+
+/* The section already says these changed: the tint stays, the unseen dot (which read as an indent) does not. */
+.bd-nrow[data-unseen]::before {
+  display: none;
+}
+
+.bd-nrow-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 20px;
+}
+
+/* The list is plain; each item holds the focusable part (bead and why) and, beside it, the row's actions. */
+.bd-nlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A question is the point of the row: its title gets two lines before it is cut. */
+.bd-nrow-top .bd-title {
+  display: -webkit-box;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bd-nrow-top :is(.bd-id, .bd-age) {
+  line-height: 18px;
+}
+
+.bd-nrow-top .bd-sd {
+  margin-top: 4.5px;
+}
+
+.bd-nmain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  outline: none;
+}
+
+/* The row shows keyboard focus as the list's cursor ring does. */
+.bd-nrow:has(> .bd-nmain:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+.bd-nwhy,
+.bd-nrow > :not(.bd-nmain) {
+  margin-left: 16px;
+}
+
+.bd-nwhy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bd-why-by {
+  color: var(--bd-dim);
+}
+
+.bd-nreason {
+  align-self: center;
+  margin-left: 2px;
+}
+
+.bd-why {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in srgb, var(--bd-muted) 82%, var(--bd-fg));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bd-why-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bd-why > .bd-i {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.bd-why[data-tone='hold'] {
+  color: var(--bd-warn-text);
+}
+
+.bd-why[data-tone='done'] {
+  color: var(--bd-dim);
+}
+
+.bd-why-more {
+  flex-shrink: 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-tag {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-accent) 12%, transparent);
+  color: var(--bd-accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bd-tag[data-kind='plan'] {
+  background: color-mix(in srgb, var(--bd-ok) 18%, transparent);
+  color: color-mix(in srgb, var(--bd-ok) 58%, var(--bd-fg));
+}
+
+/* A help request is someone's words: set as a quote, three lines at most. */
+.bd-quote {
+  display: -webkit-box;
+  margin: 1px 0;
+  padding: 0 0 0 8px;
+  overflow: hidden;
+  border-left: 2px solid color-mix(in srgb, var(--bd-accent) 45%, var(--bd-line));
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-line;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.bd-nacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 3px;
+}
+
+.bd-nacts-row,
+.bd-nstep-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bd-nstep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  cursor: auto;
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-nstep .bd-input {
+  width: 100%;
+}
+
+.bd-ntext {
+  height: auto;
+  min-height: 62px;
+  padding: 6px 8px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.bd-nstep-hint {
+  margin: 0;
+  /* Muted, not dim: it says what the button will do, and dim text was the faintest on screen in dark mode. */
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* A date as typed, with what Beads will store under it. */
+.bd-date {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-date-preview {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-date-preview[data-kind='ok'] {
+  color: var(--bd-fg);
+  font-weight: 500;
+}
+
+.bd-nquiet {
+  margin: 0;
+  padding: 32px 16px;
+  color: var(--bd-dim);
+  font-size: 12.5px;
+  text-align: center;
+  animation: bd-rise 260ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Something changed under the person (an agent got there first): said once, at the top, until hidden. */
+.bd-nnotes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 2px;
+}
+
+.bd-nnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 5px 6px 9px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  animation: bd-drop 180ms ease-out;
+}
+
+.bd-nnote > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-nnote-x {
+  display: flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--bd-dim);
+}
+
+.bd-nnote-x:hover {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+/* ---------------------------------------------------------------- header: Needs me tab, project menu */
+
+/* Its count rides in the tab; zero shows none. The rail badge is a different count (unseen beads). */
+.bd-seg-n {
+  min-width: 16px;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bd-accent) 16%, transparent);
+  color: var(--bd-accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.bd-seg button[aria-pressed='true'] .bd-seg-n {
+  background: var(--bd-accent);
+  color: var(--bd-accent-fg);
+}
+
+/* Four tabs and the tools do not fit one line in a narrow panel: the tabs take a line of their own, the search gets its room back. */
+.bd-head {
+  container: bdhead / inline-size;
+}
+
+@container bdhead (max-width: 419px) {
+  .bd-tools {
+    flex-wrap: wrap;
+    row-gap: 7px;
+  }
+
+  .bd-tools .bd-seg {
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .bd-tools .bd-seg button {
+    flex: 1 0 auto;
+    justify-content: center;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+}
+
+/* Too narrow for the name and the freshness line both: the menu's chevron gives its room to the name (hover still shows the button). */
+@container bdhead (max-width: 359px) {
+  .bd-projbtn > .bd-i:last-child {
+    display: none;
+  }
+}
+
+/* The project name opens the project menu. */
+/* The frame reaches past the name so the folder icon stays where the plain name had it; the wrapper takes the offset, so the button keeps its full width. */
+.bd-pm {
+  min-width: 0;
+  margin: -3px -6px;
+}
+
+.bd-projbtn {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--bd-radius);
+  background: none;
+  font-size: inherit;
+}
+
+.bd-projbtn:hover,
+.bd-projbtn[aria-expanded='true'] {
+  background: var(--bd-hover);
+}
+
+.bd-projbtn > .bd-i:last-child {
+  color: var(--bd-dim);
+  transition: transform 140ms ease;
+}
+
+.bd-projbtn[aria-expanded='true'] > .bd-i:last-child {
+  transform: rotate(180deg);
+}
+
+.bd-pm .bd-pop {
+  left: 10px;
+}
+
+.bd-pm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 244px;
+  padding: 6px 6px 5px;
+}
+
+.bd-pm-h {
+  margin: 0;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-pm-set {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-pm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.bd-pm-days {
+  width: 44px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.bd-pm-unit {
+  color: var(--bd-muted);
+}
+
+/* Live updates: a hairline above sets it apart from the panel's own settings, since this one is written to the project. */
+.bd-pm-live {
+  padding-top: 8px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-pm-live .bd-pm-label {
+  font-weight: 500;
+}
+
+.bd-pm-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--bd-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-pm-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bd-muted);
+}
+
+.bd-pm-state[data-tone='ok'] .bd-pm-dot {
+  background: var(--bd-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bd-ok) 22%, transparent);
+}
+
+.bd-pm-state[data-tone='warn'] .bd-pm-dot {
+  background: var(--bd-warn);
+}
+
+.bd-pm-state[data-tone='err'] .bd-pm-dot {
+  background: var(--bd-err);
+}
+
+.bd-pm-state[data-tone='off'] .bd-pm-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--bd-muted);
+}
+
+.bd-pm-say {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* The status line and the note take focus only so their words are read out; they are not controls, so no ring. */
+.bd-pm-say:focus,
+.bd-pm-note:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.bd-pm-note {
+  margin: 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--bd-warn);
+  border-radius: 0 var(--bd-radius) var(--bd-radius) 0;
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-pm-note[data-tone='error'] {
+  border-left-color: var(--bd-err);
+  color: var(--bd-err-text);
+}
+
+/* The confirm sits in the menu itself: the panel's frame allows no pop-up windows or modal dialogs. */
+.bd-pm-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  font-size: 11.5px;
+  line-height: 1.45;
+  animation: bd-pm-ask-in 160ms ease-out;
+}
+
+.bd-pm-ask p {
+  margin: 0;
+}
+
+.bd-pm-ask-d {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-pm-ask-t {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bd-pm-file {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bd-on);
+  font-family: var(--bd-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.bd-pm-ask-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+@keyframes bd-pm-ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-pm-ask {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------- gates on the detail */
+
+/* What holds the bead, right under its header: a held card, warm like a waiting hint, quieter than an error. */
+.bd-gates-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 12px 12px;
+}
+
+.bd-gates {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 26%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 5%, var(--bd-bg));
+  animation: bd-drop 200ms ease-out;
+}
+
+/* A rail down the left edge: the bead is held until these clear. */
+.bd-gates::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: color-mix(in srgb, var(--bd-warn) 70%, var(--bd-bg));
+}
+
+.bd-gates-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px 4px 14px;
+  color: var(--bd-warn-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-gates-h .bd-n {
+  letter-spacing: 0;
+}
+
+.bd-glist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px 9px 14px;
+  outline: none;
+}
+
+.bd-gate + .bd-gate {
+  border-top: 1px solid color-mix(in srgb, var(--bd-warn) 14%, var(--bd-line));
+}
+
+.bd-gate:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+/* An ask that found this gate already open: it lights up once, so the eye lands on it. */
+.bd-gate[data-found] {
+  animation: bd-gate-found 1.4s ease-out;
+}
+
+@keyframes bd-gate-found {
+  from {
+    background: color-mix(in srgb, var(--bd-accent) 16%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.bd-gate-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bd-gate-reason {
+  min-width: 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.bd-gate-reason[data-none] {
+  color: var(--bd-dim);
+  font-style: italic;
+}
+
+.bd-gate-meta {
+  margin: 0;
+  color: color-mix(in srgb, var(--bd-muted) 82%, var(--bd-fg));
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-gate-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.bd-gate .bd-gstep {
+  margin-top: 4px;
+  background: var(--bd-bg);
+}
+
+.bd-gate-settled {
+  padding-top: 2px;
+}
+
+/* Kinds that only say where they stand: neutral, so a person's review keeps the colour. */
+.bd-tag[data-kind='timer'],
+.bd-tag[data-kind='github'],
+.bd-tag[data-kind='bead'],
+.bd-tag[data-kind='other'] {
+  background: color-mix(in srgb, var(--bd-fg) 8%, transparent);
+  color: var(--bd-muted);
+}
+
+/* Asking with a reason: which kind, as two pressed-or-not buttons. */
+.bd-gkind {
+  display: flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-bg);
+}
+
+.bd-gkind-opt {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-gkind-opt:hover:not(:disabled) {
+  color: var(--bd-fg);
+}
+
+.bd-gkind-opt[aria-pressed='true'] {
+  background: var(--bd-on);
+  color: var(--bd-fg);
+  font-weight: 600;
+  box-shadow: inset 0 1px 1px var(--bd-inset);
+}
+
+.bd-gnote {
+  padding: 0 2px;
+}
+
+/* Beside Design's Edit: the way to ask for the plan's approval, as quiet as Edit until the section is hovered. */
+.bd-planask {
+  margin-right: 0;
+  color: var(--bd-accent-text);
+}
+
+/* A bead Beads named that this list does not have: an id, not a link. */
+.bd-hint-id[data-plain] {
+  cursor: default;
+}
+
+.bd-menu-rule {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--bd-line);
+}
+
+/* ---------------------------------------------------------------- history */
+
+/* A timeline: a rail down the left, a dot per version, the day as a quiet label on the rail. */
+[data-section='history'] .bd-sec-body {
+  padding: 0 12px 10px 16px;
+}
+
+.bd-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bd-hist-load,
+.bd-hist-none,
+.bd-hist-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 4px 14px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+}
+
+.bd-hist-note {
+  margin-top: 6px;
+}
+
+.bd-hist-err {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 2px 0 4px 14px;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+}
+
+.bd-hist-newer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0 0 4px;
+  padding: 5px 8px;
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-hday-h {
+  position: relative;
+  margin: 6px 0 2px;
+  padding-left: 14px;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-hes,
+.bd-hcs,
+.bd-diff-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-he {
+  position: relative;
+  padding: 3px 0 9px 14px;
+  border-left: 1px solid var(--bd-line);
+  margin-left: 3px;
+}
+
+.bd-hday:last-of-type .bd-he:last-child {
+  border-left-color: transparent;
+}
+
+/* The dot: hollow for a change, filled for a review event, accent-ringed for the bead's creation. */
+.bd-he::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid color-mix(in srgb, var(--bd-muted) 70%, var(--bd-bg));
+  border-radius: 50%;
+  background: var(--bd-bg);
+}
+
+.bd-he[data-kind='gate']::before {
+  border-color: color-mix(in srgb, var(--bd-warn) 70%, var(--bd-bg));
+  background: color-mix(in srgb, var(--bd-warn) 40%, var(--bd-bg));
+}
+
+.bd-he[data-kind='gate'][data-what='resolved']::before {
+  border-color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-bg));
+  background: color-mix(in srgb, var(--bd-ok) 40%, var(--bd-bg));
+}
+
+.bd-he[data-kind='created']::before {
+  border-color: var(--bd-accent);
+}
+
+.bd-he-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.bd-he-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-he-who {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-he-who[data-unknown] {
+  color: var(--bd-dim);
+  font-weight: 400;
+  font-style: italic;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+.bd-he-gate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+}
+
+.bd-he[data-kind='gate'] .bd-he-gate .bd-i {
+  color: var(--bd-warn-text);
+}
+
+.bd-he[data-what='resolved'] .bd-he-gate .bd-i {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-he-reason {
+  margin: 1px 0 0 18px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* One field per line: its name, before and after, and Restore at the end. */
+.bd-hc {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'f v a'
+    'd d d';
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.bd-hc-f {
+  grid-area: f;
+  overflow: hidden;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-hv,
+.bd-hc-what {
+  grid-area: v;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bd-hc-what {
+  color: var(--bd-muted);
+}
+
+.bd-hv[data-stacked] {
+  flex-direction: column;
+  gap: 1px;
+}
+
+.bd-hv-to {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  /* Names and statuses break between words, never inside one. */
+  overflow-wrap: normal;
+}
+
+.bd-hv[data-stacked] .bd-hv-to {
+  display: block;
+}
+
+.bd-rs-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bd-hv-old {
+  color: var(--bd-dim);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.bd-hv-new {
+  color: var(--bd-fg);
+}
+
+.bd-hv-arrow {
+  color: var(--bd-dim);
+}
+
+.bd-hv-new[data-look='blocked'] {
+  color: var(--bd-err-text);
+}
+
+.bd-hv-new[data-look='progress'] {
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-hv-new[data-look='done'] {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-hv-labels .bd-lb[data-diff='add'] {
+  background: color-mix(in srgb, var(--bd-ok) 16%, transparent);
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-fg));
+}
+
+.bd-hv-labels .bd-lb[data-diff='add']::before {
+  content: '+';
+}
+
+.bd-hv-labels .bd-lb[data-diff='del'] {
+  text-decoration: line-through;
+}
+
+.bd-hc-act {
+  grid-area: a;
+  justify-self: end;
+  min-width: 0;
+}
+
+/* A refusal or a message takes the whole line under the change. */
+.bd-hc-act:has(.bd-rs[data-refused], .bd-wmsg) {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  justify-self: stretch;
+}
+
+.bd-hc-diff {
+  grid-area: d;
+  min-width: 0;
+}
+
+/* The restore action: readable at rest (muted text, a visible outline), so it never depends on hover, which touch does not have. */
+.bd-rs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--bd-line) 70%, transparent);
+  border-radius: var(--bd-radius);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.bd-hc:hover .bd-rs-btn,
+.bd-rs-btn:focus-visible {
+  border-color: var(--bd-line);
+  color: var(--bd-fg);
+}
+
+.bd-rs-btn:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-accent-text);
+}
+
+.bd-rs-btn[aria-busy='true'] {
+  color: var(--bd-muted);
+}
+
+/* Changed again since: a small mark says a choice comes first. */
+.bd-rs[data-state='changed'] .bd-rs-btn .bd-i {
+  color: var(--bd-warn-text);
+}
+
+.bd-rs-tag {
+  display: block;
+  max-width: 7.5em;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.bd-rs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  outline: none;
+}
+
+.bd-rs[data-refused] {
+  align-items: stretch;
+  margin: 4px 0 2px;
+  padding: 7px 9px 8px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 32%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 7%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-rs-msg {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bd-rs-msg b {
+  color: var(--bd-warn-text);
+  font-weight: 600;
+}
+
+.bd-rs-msg[data-tone='done'] {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-rs-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bd-rs-acts .bd-btn {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-block: 3px;
+  text-align: left;
+}
+
+/* Compact diff: removed and added lines tinted, unchanged runs folded into a count. */
+.bd-diff {
+  margin: 3px 0 2px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--bd-line) 80%, transparent);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  font-family: var(--bd-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.bd-diff-line {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+}
+
+.bd-diff-mark {
+  flex-shrink: 0;
+  width: 9px;
+  color: var(--bd-dim);
+  text-align: center;
+}
+
+.bd-diff-t {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-diff-line[data-kind='same'] .bd-diff-t {
+  color: var(--bd-muted);
+}
+
+.bd-diff-line[data-kind='del'] {
+  background: color-mix(in srgb, var(--bd-err) 9%, transparent);
+}
+
+.bd-diff-line[data-kind='del'] .bd-diff-t {
+  color: var(--bd-err-text);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.bd-diff-line[data-kind='add'] {
+  background: color-mix(in srgb, var(--bd-ok) 11%, transparent);
+}
+
+.bd-diff-line[data-kind='add'] .bd-diff-mark,
+.bd-diff-line[data-kind='add'] .bd-diff-t {
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-fg));
+}
+
+.bd-diff-skip {
+  padding: 1px 8px 1px 19px;
+  color: var(--bd-dim);
+  font-family: var(--oc-font, system-ui, sans-serif);
+  font-size: 10.5px;
+  font-style: italic;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--bd-line) 45%, transparent) 4px 5px);
+}
+
+.bd-diff-more {
+  margin: 2px 8px 4px 19px;
+  font-family: var(--oc-font, system-ui, sans-serif);
+  font-size: 11px;
+}
+
+.bd-hc-cut {
+  margin: 2px 0 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-hist-older {
+  align-self: flex-start;
+  margin: 4px 0 0 14px;
+}
+
+/* Activity: a restore chosen from a row's menu, above the feed. */
+.bd-act-rs {
+  position: sticky;
+  top: var(--bd-act-bar);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 12px 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-accent) 22%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 5%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-act-rs-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.bd-act-rs-top > .bd-i {
+  color: var(--bd-accent-text);
+}
+
+.bd-act-rs-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-act-rs-what .bd-title {
+  color: var(--bd-muted);
+}
+
+.bd-act-rs .bd-rs {
+  align-items: flex-start;
+}
+
+.bd-act-rs .bd-rs[data-refused] {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- project menu: pages */
+
+/* A page the menu opens: its name, what it holds, and an arrow that says it goes somewhere. */
+.bd-pm-go {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1px 8px;
+  width: 100%;
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  text-align: left;
+}
+
+.bd-pm-go:hover {
+  background: color-mix(in srgb, var(--bd-fg) 6%, var(--bd-field));
+}
+
+.bd-pm-go-t {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.bd-pm-go-d {
+  grid-row: 2;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.bd-pm-go .bd-i {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  color: var(--bd-muted);
+  transform: rotate(-90deg);
+}
+
+/* ---------------------------------------------------------------- memories page */
+
+/*
+ * What every agent session in the project starts with. Set like notes on a board: the name small and exact, the text at
+ * reading size, and nothing destructive that is one click away. Each memory hangs off a hairline rule on its left that
+ * warms to the accent while it is being changed, and red while a forget is asked.
+ */
+.bd-mem {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  animation: bd-enter 170ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.bd-mem-h {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.bd-mem-h .bd-n {
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+.bd-mem-addbtn .bd-i {
+  margin-left: -2px;
+}
+
+.bd-mem-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px 20px;
+  overflow-y: auto;
+}
+
+.bd-mem-lede {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-mem-search {
+  flex: none;
+  height: 28px;
+}
+
+.bd-mem-body > .bd-paused {
+  margin: 0;
+}
+
+.bd-mem-note {
+  align-items: center;
+  color: var(--bd-fg);
+  font-size: 12px;
+}
+
+.bd-mem-note-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.bd-mem-note-body > span {
+  overflow-wrap: anywhere;
+}
+
+/* After a forget: tinted with the accent so it is seen, with Undo as the one strong button on it. */
+.bd-mem-note[data-kind='forgot'] {
+  border-color: color-mix(in srgb, var(--bd-accent) 45%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 10%, var(--bd-bg));
+  font-weight: 500;
+}
+
+.bd-mem-note .bd-mem-quote {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 400;
+}
+
+.bd-mem-note[data-kind='taken'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+}
+
+.bd-mem-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-mem-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0 10px 11px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-mem-item:last-child {
+  border-bottom: 0;
+}
+
+.bd-mem-item::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--bd-muted) 30%, transparent);
+  transition: background 160ms ease;
+}
+
+.bd-mem-item:hover::before,
+.bd-mem-item:focus-within::before,
+.bd-mem-item[data-mode='edit']::before {
+  background: var(--bd-accent);
+}
+
+.bd-mem-item[data-mode='forget']::before {
+  background: var(--bd-err);
+}
+
+/* Just written: a short warm wash, so the eye finds it at the top of the list. */
+.bd-mem-item[data-fresh] {
+  animation: bd-mem-fresh 1400ms ease-out;
+}
+
+@keyframes bd-mem-fresh {
+  from {
+    background: color-mix(in srgb, var(--bd-accent) 14%, transparent);
+  }
+}
+
+.bd-mem-key {
+  overflow: hidden;
+  color: var(--bd-fg);
+  font-family: var(--bd-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-mem-text {
+  margin: 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-mem-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -2px 0 0;
+}
+
+.bd-mem-top .bd-mem-key {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-mem-meta {
+  margin: 1px 0 0;
+  /* Between muted and the text colour: above 4.5:1 on both themes (preview tokens: light 6.3:1, dark 7.8:1). */
+  color: color-mix(in srgb, var(--bd-muted) 70%, var(--bd-fg));
+  font-size: 11px;
+}
+
+.bd-mem-tools {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-right: -4px;
+}
+
+/* Quiet at rest but plainly readable, touch has no hover (preview tokens: light 7.2:1, dark 9.6:1). */
+.bd-mem-act {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 1px);
+  background: none;
+  color: color-mix(in srgb, var(--bd-muted) 45%, var(--bd-fg));
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-mem-act:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-mem-act[id^='bd-memforget-']:hover:not(:disabled) {
+  color: var(--bd-err-text);
+}
+
+.bd-mem-act:disabled {
+  opacity: 0.6;
+}
+
+/* Changing a memory: what it says now stays on screen, above the new text, until Save. */
+.bd-mem-was {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px 7px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-mem-was[data-refused='changed'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 45%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 7%, var(--bd-field));
+}
+
+.bd-mem-was[data-refused='gone'] .bd-mem-text {
+  color: var(--bd-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--bd-muted) 60%, transparent);
+}
+
+.bd-mem-label {
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bd-mem-item > .bd-mem-label {
+  margin-top: 4px;
+}
+
+.bd-mem-field {
+  width: 100%;
+  min-height: 72px;
+}
+
+.bd-mem-hint {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bd-mem-alert {
+  margin: 0;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.bd-mem-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* The forget step: the text that goes, what happens, and a red button that is not where Forget was. */
+.bd-mem-forget {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 9px 9px;
+  border: 1px solid color-mix(in srgb, var(--bd-err) 35%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-err) 6%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-mem-forget-h {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.bd-mem-quote {
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--bd-err) 45%, var(--bd-line));
+}
+
+.bd-mem-forget .bd-mem-hint {
+  color: var(--bd-fg);
+}
+
+.bd-mem-danger {
+  border-color: transparent;
+  background: var(--bd-err);
+  color: var(--bd-bg);
+  font-weight: 600;
+}
+
+.bd-mem-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bd-err) 86%, var(--bd-fg));
+}
+
+/* A new memory: the text first, then an optional name. */
+.bd-mem-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--bd-accent) 30%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-mem-name {
+  width: 100%;
+  font-family: var(--bd-mono);
+  font-size: 12px;
+}
+
+.bd-mem-taken {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-mem-quiet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 28px 12px;
+  color: var(--bd-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.bd-mem-quiet p {
+  margin: 0;
+}
+
+.bd-mem-quiet-sub {
+  max-width: 30ch;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bd-mem-err {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--bd-err-text);
+  font-size: 12px;
+}
+
+/* Focus lands on the page title only so Tab and screen readers start there; it draws no ring. */
+.bd .bd-mem-h:focus-visible {
+  outline: none;
+}
+
+/* "Discard your changes?": in place of the step's buttons, or under the top bar when leaving the page. */
+.bd-mem-ask {
+  flex-wrap: wrap;
+  gap: 6px 6px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+  color: var(--bd-fg);
+  outline: none;
+  animation: bd-drop 140ms ease-out;
+}
+
+.bd-mem-ask:focus-visible {
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-mem-ask-q {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.bd-mem-ask-d {
+  color: var(--bd-muted);
+  font-weight: 400;
+}
+
+.bd-mem > .bd-mem-ask {
+  margin: 8px 12px 0;
+}
+
+/* Leaving the page: the question and what it means take the full width, the two buttons a row of their own. */
+.bd-mem > .bd-mem-ask .bd-mem-ask-q {
+  flex-basis: 100%;
+}
+
+/* ---------------------------------------------------------------- supersede and duplicate */
+
+.bd-replace .bd-input {
+  width: 100%;
+}
+
+.bd-replace .bd-opts {
+  margin: 0 -2px;
+}
+
+/* The confirmation closes the bead: tinted like the other questions that cannot be taken back in one click. */
+.bd-replace[data-stage='confirm'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 6%, var(--bd-field));
+}
+
+.bd-replace-q {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+
+.bd-replace-lab {
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-replace-pick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.bd-replace-pick .bd-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-fg);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-replace-says {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-replace-says b {
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- close dialog */
+
+.bd-closeform {
+  gap: 4px;
+}
+
+.bd-closeq {
+  margin: 0 0 2px;
+  color: var(--bd-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bd-closeform .bd-flab {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.bd-closeform .bd-input {
+  width: 100%;
+}
+
+.bd-closenote {
+  min-height: 48px;
+  max-height: 160px;
+  padding: 5px 8px;
+  line-height: 1.45;
+  resize: none;
+}
+
+.bd-closeform .bd-popacts,
+.bd-closeform .bd-confirm {
+  margin-top: 4px;
+}
+
+.bd-closeform .bd-confirm {
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------- epics ready to close */
+
+/* Under the epic's group, lined up with its progress bar: the one thing left to do for it. */
+.bd-epic-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 12px 4px 54px;
+}
+
+.bd-epic-ready[data-where='detail'] {
+  margin: 8px 0 0 24px;
+}
+
+.bd-epic-ready-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.bd-epic-ready-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--bd-ok-text, var(--bd-ok));
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-epic-ready[data-where='detail'] .bd-epic-ready-t {
+  margin-right: 0;
+}
+
+/* A small filled tick, the same mark as a done acceptance box. */
+.bd-epic-ready-mark {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bd-ok);
+}
+
+.bd-epic-ready-mark::after {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bd-bg);
+  border-width: 0 1.6px 1.6px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.bd-epic-ready .bd-nstep {
+  margin-top: 0;
+}
 `;
 
   // src/panel/ui/App.tsx
   var listing = (state) => state.directory !== null && (!state.workspace || state.workspace.kind === "ok") && !firstLoadError(state) && (state.snapshot?.beads.length ?? 0) > 0;
-  var showingDetail = (state) => state.detail !== null && state.snapshot !== null && (!state.workspace || state.workspace.kind === "ok");
+  var showingDetail = (state) => state.detail !== null && state.snapshot !== null && (!state.workspace || state.workspace.kind === "ok") && !needsUpdate(state);
+  var showingMemories = (state) => state.page === "memories" && state.directory !== null && state.workspace?.kind === "ok" && !needsUpdate(state);
   function Body() {
     const state = useStore();
     if (state.directory === null) return /* @__PURE__ */ u3(NoProject, {});
     if (state.workspace && state.workspace.kind !== "ok") return /* @__PURE__ */ u3(WorkspaceEmpty, { workspace: state.workspace });
+    if (needsUpdate(state)) return /* @__PURE__ */ u3(ProjectUpdate, {}, state.directory);
     if (firstLoadError(state)) return /* @__PURE__ */ u3(LoadError, {});
     if (!state.snapshot) return /* @__PURE__ */ u3(Loading, {});
     if (state.view === "activity") return /* @__PURE__ */ u3(ActivityView, {}, state.directory);
+    if (state.view === "needs") return /* @__PURE__ */ u3(NeedsView, {}, state.directory);
     return /* @__PURE__ */ u3(List, {}, state.directory);
   }
   function App() {
     const state = useStore();
     const detail = showingDetail(state);
+    const memories = showingMemories(state);
     const covered = state.overlays.length > 0;
     const sheet = state.overlays.some((name) => name !== "leave");
     const body = A2(null);
@@ -14765,17 +21350,26 @@ button.bd-rel:focus-visible {
       const row2 = state.selectedId ? document.getElementById(rowDomId(state.selectedId)) : null;
       row2?.closest('[role="listbox"]')?.focus({ preventScroll: true });
     }, [detail]);
+    const wasMemories = A2(memories);
+    _2(() => {
+      const leaving = wasMemories.current && !memories;
+      wasMemories.current = memories;
+      const active2 = document.activeElement;
+      if (!leaving || active2 && active2 !== document.body) return;
+      document.querySelector(".bd-projbtn")?.focus({ preventScroll: true });
+    }, [memories]);
     return /* @__PURE__ */ u3("div", { class: "bd", children: [
       /* @__PURE__ */ u3(Header, {}),
       /* @__PURE__ */ u3(SyncCard, {}, state.directory ?? ""),
-      /* @__PURE__ */ u3("main", { class: "bd-body", ref: body, hidden: detail, inert: covered, onScroll: (e3) => {
+      /* @__PURE__ */ u3("main", { class: "bd-body", ref: body, hidden: detail || memories, inert: covered, onScroll: (e3) => {
         if (!detail) scrolled.current = e3.currentTarget.scrollTop;
       }, children: /* @__PURE__ */ u3(Body, {}) }),
-      detail && /* @__PURE__ */ u3(Detail, { inert: sheet, footer: /* @__PURE__ */ u3(AttachFooter, { id: state.detail.stack[state.detail.stack.length - 1].id }) }),
-      listing(state) && !detail && /* @__PURE__ */ u3(Footer, {}),
-      state.create && state.snapshot && /* @__PURE__ */ u3(CreateForm, {}),
+      memories && /* @__PURE__ */ u3(MemoriesPage, {}, state.directory),
+      detail && !memories && /* @__PURE__ */ u3(Detail, { inert: sheet, footer: /* @__PURE__ */ u3(AttachFooter, { id: state.detail.stack[state.detail.stack.length - 1].id }) }),
+      listing(state) && !detail && !memories && /* @__PURE__ */ u3(Footer, {}),
+      state.create && state.snapshot && !needsUpdate(state) && /* @__PURE__ */ u3(CreateForm, {}),
       /* @__PURE__ */ u3(WorktreeSheet, {}),
-      /* @__PURE__ */ u3(PublishSheet, {})
+      !needsUpdate(state) && /* @__PURE__ */ u3(PublishSheet, {})
     ] });
   }
   var styled = false;

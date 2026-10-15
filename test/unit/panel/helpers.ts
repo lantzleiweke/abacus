@@ -67,6 +67,10 @@ export function snapshot(over: Partial<Extract<SnapshotResponse, { unchanged: fa
     sync: { kind: 'idle' },
     writesBlocked: false,
     panelActor: '',
+    capabilities: { eventsJournal: false, leases: false },
+    gates: [],
+    gateIds: [],
+    leases: [],
     ...over,
   };
 }

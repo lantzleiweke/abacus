@@ -2,11 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import type { Bead, ChangeEvent, ChangeKind, Dependency, Freshness, JsonValue, SnapshotResponse, StatusDef, SyncState, WorkspaceState } from '../shared/types';
+import type { Bead, Capabilities, ChangeEvent, ChangeKind, Dependency, Freshness, Gate, JsonValue, Lease, SchemaSkew, SnapshotResponse, StatusDef, SyncState, WorkspaceState } from '../shared/types';
 import { BdProvider, onPanelWrite, panelActor, withRootQueue, type PanelWrite } from './bd/adapter';
-import { AUDIT_BEAD_IDS_MAX, AUDIT_LIMIT_MAX, eventTimeMs, readAuditEvents, type AuditEvent } from './bd/audit';
+import { AUDIT_BEAD_IDS_MAX, AUDIT_LIMIT_MAX, eventTimeMs, noteBdVersion, readAuditEvents, runSql, storeWritesUtc, type AuditEvent } from './bd/audit';
 import { BdError, resolveExecutable } from './bd/exec';
-import { DETAIL_MAX, capText, errorDetail, readErrorText } from './errors';
+import { capabilitiesFor } from './capabilities';
+import { DETAIL_MAX, capText, errorDetail, readErrorText, schemaSkewOf } from './errors';
+import { deriveGates, parseLeaseRows, splitGates } from './gates';
+import { follower, setLiveStorageDir } from './live';
+import { forgetUpdateFailure, resetUpdateState, updateJob, updateRunning } from './schema-update';
 import { checkBackedOut, checkHalfMerge, lastTeamSync, onSyncChange, onTeamSynced, resetSyncState, seedLastTeamSync, syncSignature, syncState, unpublishedCount, writesBlocked } from './sync';
 import { detectWorkspace } from './workspace';
 
@@ -76,7 +80,12 @@ function sameField(name: FieldName, a: Bead, b: Bead): boolean {
 const isCount = (key: string): boolean => key.endsWith('_count');
 const sameJson = (a: JsonValue | undefined, b: JsonValue | undefined): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-function diffBead(prev: Bead, next: Bead, observedAt: string, done: ReadonlySet<string>, out: ChangeEvent[]): void {
+/** Claim lease bookkeeping: bd 1.3 rewrites these on every heartbeat, with no change to the bead. Leases are read separately (Stuck). */
+const LEASE_KEYS: ReadonlySet<string> = new Set(['heartbeat_at', 'lease_expires_at']);
+
+const commentKey = (c: { author: string | null; createdAt: string; text: string }): string => `${c.author ?? ''}\u0000${c.createdAt}\u0000${c.text}`;
+
+function diffBead(prev: Bead, next: Bead, observedAt: string, done: ReadonlySet<string>, out: ChangeEvent[], gateIds: ReadonlySet<string>): void {
   let movedDone = false;
   let movedStatus = false;
   for (const name of FIELDS) {
@@ -110,20 +119,25 @@ function diffBead(prev: Bead, next: Bead, observedAt: string, done: ReadonlySet<
   const extraBefore = prev.extra ?? {};
   const extraAfter = next.extra ?? {};
   for (const key of new Set([...Object.keys(extraBefore), ...Object.keys(extraAfter)])) {
-    if (isCount(key) || sameJson(extraBefore[key], extraAfter[key])) continue;
+    if (isCount(key) || LEASE_KEYS.has(key) || sameJson(extraBefore[key], extraAfter[key])) continue;
     // Beads stamps `started_at` when a bead first moves on, so one set with the status change is part of that row.
     if (key === 'started_at' && movedStatus && isBlank(extraBefore[key])) continue;
     out.push(makeEvent(next.id, 'field', observedAt, null, { field: key, from: capValue(extraBefore[key] ?? null), to: capValue(extraAfter[key] ?? null) }));
   }
 
-  const knownComments = new Set(prev.comments.map((c) => c.id));
+  // A comment is the same comment by author, time and text, not by id: bd 1.3 numbers comments again (UUIDv5, where 1.2.2 used UUIDv7),
+  // so after an upgrade every old comment has a new id. Equal comments are counted, so a real second copy still shows.
+  const known = new Map<string, number>();
+  for (const c of prev.comments) known.set(commentKey(c), (known.get(commentKey(c)) ?? 0) + 1);
   for (const c of next.comments) {
-    if (!knownComments.has(c.id)) out.push(makeEvent(next.id, 'comment', observedAt, c.author, { to: capText(c.text, COMMENT_TEXT_MAX) }));
+    const left = known.get(commentKey(c)) ?? 0;
+    if (left > 0) known.set(commentKey(c), left - 1);
+    else out.push(makeEvent(next.id, 'comment', observedAt, c.author, { to: capText(c.text, COMMENT_TEXT_MAX) }));
   }
 
-  // A parent-child link is the parentId field, which is already reported above.
-  const before = new Map(prev.dependencies.filter((d) => d.kind !== 'parent-child').map((d) => [depKey(d), d]));
-  const after = new Map(next.dependencies.filter((d) => d.kind !== 'parent-child').map((d) => [depKey(d), d]));
+  // A parent-child link is the parentId field, which is already reported above. An edge to a gate is reported as the gate opening or resolving.
+  const before = new Map(prev.dependencies.filter((d) => d.kind !== 'parent-child' && !gateIds.has(d.to)).map((d) => [depKey(d), d]));
+  const after = new Map(next.dependencies.filter((d) => d.kind !== 'parent-child' && !gateIds.has(d.to)).map((d) => [depKey(d), d]));
   for (const [key, d] of after) {
     if (!before.has(key)) out.push(makeEvent(next.id, 'dep_added', observedAt, d.createdBy, { field: d.kind, to: d.to }));
   }
@@ -134,16 +148,16 @@ function diffBead(prev: Bead, next: Bead, observedAt: string, done: ReadonlySet<
 
 /**
  * What changed between two reads of all beads. `done` is the set of done-category status names:
- * moving into one is `closed`, out of one is `reopened`.
+ * moving into one is `closed`, out of one is `reopened`. `gateIds`: links to these are not reported as dependency changes.
  */
-export function diffSnapshots(prev: Bead[], next: Bead[], observedAt: string, done: ReadonlySet<string> = DEFAULT_DONE): ChangeEvent[] {
+export function diffSnapshots(prev: Bead[], next: Bead[], observedAt: string, done: ReadonlySet<string> = DEFAULT_DONE, gateIds: ReadonlySet<string> = new Set()): ChangeEvent[] {
   const out: ChangeEvent[] = [];
   const before = new Map(prev.map((b) => [b.id, b]));
   const present = new Set<string>();
   for (const b of next) {
     present.add(b.id);
     const old = before.get(b.id);
-    if (old) diffBead(old, b, observedAt, done, out);
+    if (old) diffBead(old, b, observedAt, done, out, gateIds);
     else out.push(makeEvent(b.id, 'created', observedAt, b.createdBy));
   }
   for (const b of prev) {
@@ -292,6 +306,9 @@ function panelWrote(wrote: PanelWrite, e: ChangeEvent): boolean {
       return wrote.comment === true;
     case 'created':
       return wrote.created === true;
+    case 'gate_opened':
+    case 'gate_resolved':
+      return e.gateId !== undefined && (wrote.deps ?? []).some(([from, to]) => from === e.beadId && to === e.gateId);
     default:
       return false;
   }
@@ -372,8 +389,22 @@ function reopenedAfterClose(audit: AuditEvent[], statuses: StatusDef[] | undefin
   return out;
 }
 
+/** What the store remembers of an open gate, to see it resolve (and to see which beads it held) on a later read. */
+export type OpenGate = { id: string; reason: string | null; blocks: string[]; /** Absent in state saved before it was kept. */ kind?: string };
+
+/** The gates of one read: the open ones, and every gate id (open or closed). */
+export type GateState = { open: Gate[]; ids: string[]; /** The closed gates, to name the kind and reason of one that opened and closed between two reads. */ closed?: Gate[] };
+
+const openGateOf = (g: Gate): OpenGate => ({ id: g.id, reason: g.reason, blocks: [...g.blocks], kind: g.kind });
+
+function isOpenGate(v: unknown): v is OpenGate {
+  return isRecord(v) && typeof v.id === 'string' && (v.reason === null || typeof v.reason === 'string') && (v.kind === undefined || typeof v.kind === 'string') && Array.isArray(v.blocks) && v.blocks.every((b) => typeof b === 'string');
+}
+
 type Persisted = {
   v: typeof FILE_VERSION;
+  /** The open gates at the last read. Absent in 0.1 files, which kept gate rows among the beads: they are read from there (and when that cannot be, the next read is a baseline for gates, with no events). */
+  openGates?: OpenGate[] | null;
   /** The last read of all beads given to `apply`; null until the first one (and when the file has none we can trust). */
   snapshot: Bead[] | null;
   seen: Record<string, string>;
@@ -386,7 +417,7 @@ type Persisted = {
   lastTeamSyncAt: string | null;
 };
 
-const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeKind>(['created', 'field', 'closed', 'reopened', 'deleted', 'dep_added', 'dep_removed', 'comment']);
+const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeKind>(['created', 'field', 'closed', 'reopened', 'deleted', 'dep_added', 'dep_removed', 'comment', 'gate_opened', 'gate_resolved']);
 
 function isChangeEvent(v: unknown): v is ChangeEvent {
   if (typeof v !== 'object' || v === null) return false;
@@ -399,7 +430,10 @@ function isChangeEvent(v: unknown): v is ChangeEvent {
     (e.actor === null || typeof e.actor === 'string') &&
     typeof e.byPanel === 'boolean' &&
     typeof e.observedAt === 'string' &&
-    (e.title === undefined || typeof e.title === 'string')
+    (e.title === undefined || typeof e.title === 'string') &&
+    (e.gateId === undefined || typeof e.gateId === 'string') &&
+    (e.gateKind === undefined || typeof e.gateKind === 'string') &&
+    (e.ended === undefined || e.ended === 'deleted' || e.ended === 'unlinked')
   );
 }
 
@@ -424,6 +458,15 @@ function stringMap(v: unknown): Record<string, string> {
   return isRecord(v) ? Object.fromEntries(Object.entries(v).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
 }
 
+/** The gates that were open at a 0.1 file's last read, from the gate rows it kept among its beads (0.1 had no gate list). Null when the rows cannot be read. */
+function openGatesOf(held: { beads: Bead[]; gateRows: Bead[] }): OpenGate[] | null {
+  try {
+    return deriveGates(held.gateRows, held.beads).gates.map(openGateOf);
+  } catch {
+    return null;
+  }
+}
+
 /** Null for anything unparseable or of another version: the caller starts over. A snapshot that fails its shape check is dropped alone (a baseline is taken again). */
 function parsePersisted(text: string): Persisted | null {
   let raw: unknown;
@@ -434,9 +477,12 @@ function parsePersisted(text: string): Persisted | null {
   }
   if (!isRecord(raw) || raw.v !== FILE_VERSION) return null;
   if (!isRecord(raw.seen) || !Array.isArray(raw.activity) || !Array.isArray(raw.usedAuditIds)) return null;
+  const held = Array.isArray(raw.snapshot) && raw.snapshot.every(isSnapshotBead) ? splitGates(raw.snapshot) : null;
   return {
     v: FILE_VERSION,
-    snapshot: Array.isArray(raw.snapshot) && raw.snapshot.every(isSnapshotBead) ? raw.snapshot : null,
+    // A 0.1 file held gate rows as beads; 0.2 splits them out of every export, so they leave the baseline too (else each would read as a deletion).
+    snapshot: held ? held.beads : null,
+    openGates: Array.isArray(raw.openGates) && raw.openGates.every(isOpenGate) ? raw.openGates : held ? openGatesOf(held) : null,
     seen: stringMap(raw.seen),
     seenAt: stringMap(raw.seenAt),
     activity: raw.activity.filter(isChangeEvent).slice(-ACTIVITY_MAX),
@@ -453,6 +499,8 @@ function parsePersisted(text: string): Persisted | null {
 export class ProjectStore {
   private readonly path: string;
   private snapshot: Bead[] | null = null;
+  /** The open gates at the last read; null until one was read (and for a 0.1 file), when the next read only sets this. */
+  private openGates: OpenGate[] | null = null;
   private index = new Map<string, Bead>();
   private seen = new Map<string, string>();
   private seenAt = new Map<string, string>();
@@ -489,6 +537,7 @@ export class ProjectStore {
     const persisted = parsePersisted(text);
     if (!persisted) return;
     this.setSnapshot(persisted.snapshot);
+    this.openGates = persisted.snapshot === null ? null : (persisted.openGates ?? null);
     this.seen = new Map(Object.entries(persisted.seen));
     this.seenAt = new Map(Object.entries(persisted.seenAt));
     this.ring = persisted.activity;
@@ -538,9 +587,93 @@ export class ProjectStore {
   }
 
   /** Ids of beads that differ from the current snapshot (new, changed, or gone), without changing anything. Empty before the first snapshot. */
-  changedBeadIds(next: Bead[]): string[] {
+  changedBeadIds(next: Bead[], gates?: GateState): string[] {
     if (!this.snapshot) return [];
-    return [...new Set(diffSnapshots(this.snapshot, next, '').map((c) => c.beadId))];
+    return [...new Set(diffSnapshots(this.snapshot, next, '', DEFAULT_DONE, this.suppressedGateIds(gates)).map((c) => c.beadId))];
+  }
+
+  /** Links to these are not dependency changes: every gate of this read, and every one that was open at the last. */
+  private suppressedGateIds(gates?: GateState): ReadonlySet<string> {
+    return new Set([...(gates?.ids ?? []), ...(this.openGates ?? []).map((g) => g.id)]);
+  }
+
+  /**
+   * What happened to reviews between the last read and this one, as (gate, bead) pairs:
+   * - opened: a pair that is open now and was not at the last read, or an edge to an already closed gate that is new on the bead
+   *   (a review opened and resolved between two reads);
+   * - ended: a pair that was open and is not any more, whether the gate closed, was deleted, or its link was removed.
+   * Pairs whose bead is gone are left out (the bead's own deletion is the row).
+   */
+  private gateChanges(prevBeads: Bead[], prevGates: OpenGate[], next: Bead[], gates: GateState) {
+    const open = new Set(gates.open.map((g) => g.id));
+    const known = new Set(gates.ids);
+    const present = new Set(next.map((b) => b.id));
+    const edgeOf = (beadId: string, gateId: string) => next.find((b) => b.id === beadId)?.dependencies.find((d) => d.to === gateId);
+    const prevPairs = new Set(prevGates.flatMap((g) => g.blocks.map((b) => `${g.id}|${b}`)));
+    const nowPairs = new Set(gates.open.flatMap((g) => g.blocks.map((b) => `${g.id}|${b}`)));
+    const opened: Array<{ gateId: string; beadId: string; reason: string | null; actor: string | null; kind: string | undefined }> = [];
+    const ended: Array<{ gateId: string; beadId: string; reason: string | null; stillOpen: boolean; kind: string | undefined; how: 'deleted' | 'unlinked' | undefined }> = [];
+    for (const g of gates.open) {
+      for (const beadId of g.blocks) {
+        // A link added to a gate that already existed is named after who added the link; a new gate, its creator.
+        if (!prevPairs.has(`${g.id}|${beadId}`)) opened.push({ gateId: g.id, beadId, reason: g.reason, actor: edgeOf(beadId, g.id)?.createdBy ?? g.createdBy, kind: g.kind });
+      }
+    }
+    for (const g of prevGates) {
+      for (const beadId of g.blocks) {
+        if (!nowPairs.has(`${g.id}|${beadId}`) && present.has(beadId)) ended.push({ gateId: g.id, beadId, reason: g.reason, stillOpen: open.has(g.id), kind: g.kind, how: open.has(g.id) ? 'unlinked' : known.has(g.id) ? undefined : 'deleted' });
+      }
+    }
+    const before = new Map(prevBeads.map((b) => [b.id, b]));
+    const closed = new Set(gates.ids.filter((id) => !open.has(id)));
+    const closedRows = new Map((gates.closed ?? []).map((g) => [g.id, g]));
+    for (const b of next) {
+      const had = new Set((before.get(b.id)?.dependencies ?? []).map((d) => d.to));
+      for (const d of b.dependencies) {
+        if (!closed.has(d.to) || had.has(d.to)) continue;
+        const row = closedRows.get(d.to);
+        opened.push({ gateId: d.to, beadId: b.id, reason: row?.reason ?? null, actor: d.createdBy, kind: row?.kind });
+        ended.push({ gateId: d.to, beadId: b.id, reason: row?.reason ?? null, stillOpen: false, kind: row?.kind, how: undefined });
+      }
+    }
+    return { opened, ended };
+  }
+
+  /** Ids of gates that ended since the last read (closed, deleted, or opened and closed between reads): the audit log names who resolved each. */
+  resolvedGateIds(next: Bead[], gates: GateState): string[] {
+    if (!this.snapshot || !this.openGates) return [];
+    return [...new Set(this.gateChanges(this.snapshot, this.openGates, next, gates).ended.filter((e) => !e.stillOpen).map((e) => e.gateId))];
+  }
+
+  /**
+   * Gate events against the last read. An opening is one event per bead (actor: who made the gate or the link); an ending is one
+   * per bead (actor: the audit `closed` event on the gate when there is one, else null: a deleted gate or a removed link has none).
+   */
+  private gateEvents(prevBeads: Bead[], prevGates: OpenGate[], gates: GateState, next: Bead[], audit: AuditEvent[] | null, panelActor: string, now: string): ChangeEvent[] {
+    const { opened, ended } = this.gateChanges(prevBeads, prevGates, next, gates);
+    const out: ChangeEvent[] = [];
+    for (const o of opened) {
+      out.push({ ...makeEvent(o.beadId, 'gate_opened', now, o.actor), gateId: o.gateId, ...(o.kind !== undefined ? { gateKind: o.kind } : {}), ...(o.reason !== null ? { reason: o.reason } : {}), byPanel: isPanelActor(o.actor, panelActor) });
+    }
+    const named = new Map<string, { actor: string | null; changedAt: string | null }>();
+    for (const e of ended) {
+      if (!named.has(e.gateId)) {
+        const hit = e.stillOpen ? undefined : (audit ?? []).find((a) => a.beadId === e.gateId && a.type === 'closed' && !this.usedAuditIds.has(a.id));
+        if (hit) this.usedAuditIds.add(hit.id);
+        named.set(e.gateId, { actor: hit?.actor ?? null, changedAt: hit ? eventIso(hit) : null });
+      }
+      const { actor, changedAt } = named.get(e.gateId)!;
+      out.push({
+        ...makeEvent(e.beadId, 'gate_resolved', now, actor),
+        gateId: e.gateId,
+        ...(e.kind !== undefined ? { gateKind: e.kind } : {}),
+        ...(e.how !== undefined ? { ended: e.how } : {}),
+        ...(e.reason !== null ? { reason: e.reason } : {}),
+        ...(changedAt !== null ? { changedAt } : {}),
+        byPanel: isPanelActor(actor, panelActor),
+      });
+    }
+    return out;
   }
 
   /**
@@ -548,8 +681,11 @@ export class ProjectStore {
    * seen and there are no change events. Otherwise it diffs against the previous read, attributes
    * the changes, and adds them to the activity ring. Returns the new change events.
    */
-  apply(next: Bead[], audit: AuditEvent[] | null, panelActor: string, now: string, statuses: StatusDef[]): ChangeEvent[] {
+  apply(next: Bead[], audit: AuditEvent[] | null, panelActor: string, now: string, statuses: StatusDef[], gates?: GateState): ChangeEvent[] {
     const prev = this.snapshot;
+    const prevGates = this.openGates;
+    const suppress = this.suppressedGateIds(gates);
+    if (gates) this.openGates = gates.open.map(openGateOf);
     // The marks cover this apply only, including a baseline one: they never reach a later refresh.
     const panelWrites = this.panelWrites;
     this.panelWrites = new Map();
@@ -569,7 +705,9 @@ export class ProjectStore {
     }
 
     const done = new Set(statuses.filter((s) => s.category === 'done').map((s) => s.name));
-    const events = attributeChanges(diffSnapshots(prev, next, now, done.size > 0 ? done : DEFAULT_DONE), audit, panelActor, this.usedAuditIds);
+    const events = attributeChanges(diffSnapshots(prev, next, now, done.size > 0 ? done : DEFAULT_DONE, suppress), audit, panelActor, this.usedAuditIds);
+    // A first read of gates (no list held: a new project, or a 0.1 file) is a baseline: gates already open are not news.
+    if (gates && prevGates !== null) events.push(...this.gateEvents(prev, prevGates, gates, next, audit, panelActor, now));
     // The panel just wrote these. A change the audit log did not name (a dependency removal, or a log that could not be
     // read) is the panel's when it is what the panel wrote; a change the log credits to someone else keeps its actor.
     for (const e of events) {
@@ -650,6 +788,18 @@ export class ProjectStore {
     return (this.snapshot ?? []).filter((b) => this.isUnseen(b)).map((b) => b.id);
   }
 
+  /** Ids of beads with a gate event (a review opened or ended) that has not been marked seen. A gate event does not move the bead's own version, so it is carried here. */
+  unseenGateBeadIds(): string[] {
+    const ids = new Set<string>();
+    for (const e of this.ring) if ((e.kind === 'gate_opened' || e.kind === 'gate_resolved') && this.isEventUnseen(e)) ids.add(e.beadId);
+    return [...ids];
+  }
+
+  /** Every bead with news not yet marked seen: changed beads, beads with a review row, and gone beads. The one list the snapshot and the `seen` answer both give the panel. */
+  allUnseenIds(): string[] {
+    return [...new Set([...this.unseenIds(), ...this.unseenGateBeadIds(), ...this.unseenDeletionIds()])];
+  }
+
   /** Ids of gone beads whose deletion has not been marked seen. */
   unseenDeletionIds(): string[] {
     const ids = new Set<string>();
@@ -679,9 +829,12 @@ export class ProjectStore {
    * until the bead's mark is newer, and never once that mark is forgotten. Backfilled history is never unseen.
    */
   isEventUnseen(e: ChangeEvent): boolean {
-    if (e.historical) return false;
+    // The user's own write is never news to them, even on a bead that is unseen for another reason.
+    if (e.historical || e.byPanel) return false;
     const at = this.seenAt.get(e.beadId);
     const b = this.index.get(e.beadId);
+    // A gate event is not a change of the bead itself (its version moves only through the link), so only the mark decides.
+    if (e.kind === 'gate_opened' || e.kind === 'gate_resolved') return b !== undefined && (at === undefined || e.observedAt > at);
     if (!b) return e.kind === 'deleted' && at !== undefined && e.observedAt > at;
     if (!this.isUnseen(b)) return false;
     return at === undefined || e.observedAt > at;
@@ -719,6 +872,7 @@ export class ProjectStore {
   private async write(): Promise<void> {
     const body: Persisted = {
       v: FILE_VERSION,
+      openGates: this.openGates,
       snapshot: this.snapshot,
       seen: Object.fromEntries(this.seen),
       seenAt: Object.fromEntries(this.seenAt),
@@ -750,6 +904,8 @@ const FORCE_EXPORT_MS = 60_000;
 /** Part of every cursor: a cursor from an earlier service process is never "unchanged". */
 const PROCESS_ID = randomUUID().slice(0, 8);
 const ACTIVITY_LIMIT = 200;
+/** Claim leases are read at most this often per root. */
+const LEASE_READ_MS = 60_000;
 
 type Clock = () => number;
 let clock: Clock = Date.now;
@@ -765,6 +921,9 @@ export function setStorageDir(dir: string | null): void {
   storageDirOverride = dir;
 }
 
+// The follower's pidfiles live beside the project state files.
+setLiveStorageDir(() => storageDirOverride ?? defaultStorageDir());
+
 const isoOf = (ms: number): string => new Date(ms).toISOString();
 
 type RootCache = {
@@ -772,11 +931,21 @@ type RootCache = {
   /** The panel's own actor, as of the last export. */
   panelActor: string;
   provider: BdProvider;
+  /** The installed bd writes event times in UTC (bd 1.3 on); refreshed with every detection. */
+  utcEvents: boolean;
   store: ProjectStore | null;
   beads: Bead[];
   statuses: StatusDef[] | null;
   types: string[] | null;
   readyIds: string[];
+  /** What the installed bd can do, as of the last detection. */
+  capabilities: Capabilities;
+  /** Open gates, every gate id, and claim leases, as of the last applied export. */
+  gates: Gate[];
+  gateIds: string[];
+  leases: Lease[];
+  /** Clock time of the last lease read, whether or not it worked. */
+  leasesAt: number | null;
   /** Short digest of the data held (beads, ready ids, statuses, types), so a cursor says what the panel has, not what was last read. */
   dataKey: string;
   /** True once an export has been applied. */
@@ -784,6 +953,8 @@ type RootCache = {
   localRefreshedAt: string | null;
   localError: string | null;
   localErrorDetail: string | null;
+  /** Set while the last read was refused because the store is on an older schema than the installed Beads expects. */
+  schemaSkew: SchemaSkew | null;
   /** Why the last save of the panel state failed; kept until a save works. */
   saveError: string | null;
   /** Why the panel could not note its own last write (so it may show as news); kept until a later note works. */
@@ -799,6 +970,8 @@ type RootCache = {
   /** The signal the applied export was taken under; unchanged by a failed export, so the next window retries. */
   exportedSignal: string | null;
   exportedAt: number | null;
+  /** The bd version the last snapshot was answered under; a change resets the signal above. */
+  bdVersion: string | null;
   inflight: Promise<void> | null;
   /** How many local commits the team remote has not seen. Null with no remote or before the first count; kept when a count fails. */
   unpublishedCount: number | null;
@@ -821,6 +994,8 @@ type RootCache = {
   exportedGen: number;
   /** `writeGen` as of the start of the last refresh attempt, so a failing read after a write is not retried on every poll. */
   attemptedGen: number;
+  /** A nudged export failed: it is still owed, but waits for the normal window (the nudge itself is spent, like `catchUp`). */
+  nudgeOwed: boolean;
 };
 
 const roots = new Map<string, RootCache>();
@@ -832,11 +1007,13 @@ const detections = new Map<string, Promise<KnownWorkspace>>();
 
 /** Forget every cache and workspace answer (state files stay). For tests. */
 export function resetSnapshotState(): void {
+  follower().stopAll();
   roots.clear();
   stores.clear();
   workspaces.clear();
   detections.clear();
   resetSyncState();
+  resetUpdateState();
 }
 
 /** Identity of the installed `bd`: its real path and modification time (an upgrade replaces the file). Null when there is none. */
@@ -901,6 +1078,8 @@ onTeamSynced((root, at) => {
     });
 });
 onSyncChange((root) => {
+  // A pull or merge is not journaled: the next refresh exports, whatever the events say.
+  follower().nudge(root);
   const known = roots.get(root);
   if (!known) return;
   known.attemptAt = null;
@@ -915,16 +1094,23 @@ function cacheFor(root: string, mode: 'embedded' | 'server'): RootCache {
     root,
     panelActor: '',
     provider: new BdProvider(root, mode),
+    utcEvents: false,
     store: null,
     beads: [],
     statuses: null,
     types: null,
     readyIds: [],
+    capabilities: capabilitiesFor(''),
+    gates: [],
+    gateIds: [],
+    leases: [],
+    leasesAt: null,
     dataKey: '',
     loaded: false,
     localRefreshedAt: null,
     localError: null,
     localErrorDetail: null,
+    schemaSkew: null,
     saveError: null,
     writeNoteError: null,
     noSignal: false,
@@ -933,6 +1119,7 @@ function cacheFor(root: string, mode: 'embedded' | 'server'): RootCache {
     conflictCheckAt: null,
     exportedSignal: null,
     exportedAt: null,
+    bdVersion: null,
     inflight: null,
     unpublishedCount: null,
     unpublishedError: null,
@@ -944,6 +1131,7 @@ function cacheFor(root: string, mode: 'embedded' | 'server'): RootCache {
     writeGen: 0,
     exportedGen: 0,
     attemptedGen: 0,
+    nudgeOwed: false,
   };
   roots.set(root, created);
   return created;
@@ -973,7 +1161,9 @@ async function lookupWorkspace(directory: string, refresh: boolean): Promise<{ w
   // Read after the await: a caller that waited here must see what a concurrent one detected meanwhile.
   const known = workspaces.get(directory);
   const stale = known !== undefined && known.bdKey !== bdKey;
-  if (known && !refresh && !stale) return { workspace: known.workspace };
+  // While the one-time update runs, bd is busy with the store: detecting again would only wait behind it, and the answer held is the right one.
+  const updating = known !== undefined && known.workspace.kind === 'ok' && updateRunning(known.workspace.root);
+  if (known && (updating || (!refresh && !stale))) return { workspace: known.workspace };
   let detecting = detections.get(directory);
   if (!detecting) {
     detecting = detectWithConsent(directory)
@@ -1020,17 +1210,46 @@ export function providerFor(root: string, mode: 'embedded' | 'server'): BdProvid
   return cacheFor(root, mode).provider;
 }
 
+/**
+ * The project was just updated to the newer schema: whatever a refused read left behind (the error, the schema note, the throttle
+ * that would make the next poll wait) is dropped, and the held data counts as out of date, so the very next snapshot reads again.
+ * A workspace detected while the store was old did not know its remote, so it is detected again too.
+ */
+export function readFailureDropped(root: string): void {
+  for (const [directory, known] of workspaces) if (known.workspace.kind === 'ok' && known.workspace.root === root) workspaces.delete(directory);
+  const c = roots.get(root);
+  if (!c) return;
+  clearError(c);
+  c.schemaSkew = null;
+  c.emptyExportPending = false;
+  c.attemptAt = null;
+  c.writeGen += 1;
+}
+
 /** The beads the root's cache holds as of its last applied export, or null before the first one. */
 export function cachedBeads(root: string): Bead[] | null {
   const known = roots.get(root);
   return known?.loaded ? known.beads : null;
 }
 
+/** The versions the root's last read was refused for (an older store), or null when it reads normally or was not read yet. */
+export function cachedSchemaSkew(root: string): SchemaSkew | null {
+  return roots.get(root)?.schemaSkew ?? null;
+}
+
 function recordError(c: RootCache, error: unknown): void {
   c.localError = readErrorText(error, true);
   c.localErrorDetail = errorDetail(error);
+  // Sticky: a failure that is not the refusal (a lock, a timeout) does not say the store was updated, so it leaves the flag as it was.
+  const skew = schemaSkewOf(error);
+  if (skew) c.schemaSkew = skew;
 }
 
+/**
+ * Clears the read error. Never the schema flag: the write guard and the panel both stand on it, and only a read that worked
+ * (`exportAndApply`) or the update itself (`readFailureDropped`) may say the store is no longer old. A shortcut that skipped a read
+ * (an unchanged change signal, a live-updates nudge that did not come) has not read anything.
+ */
 function clearError(c: RootCache): void {
   c.localError = null;
   c.localErrorDetail = null;
@@ -1052,7 +1271,7 @@ async function readAuditFor(c: RootCache, ids: string[]): Promise<AuditEvent[] |
   const events: AuditEvent[] = [];
   let anyRead = false;
   for (let i = 0; i < ids.length; i += AUDIT_BEAD_IDS_MAX) {
-    const batch = await withRootQueue(c.root, () => readAuditEvents(c.root, c.provider.mode, { beadIds: ids.slice(i, i + AUDIT_BEAD_IDS_MAX), limit: AUDIT_LIMIT_MAX }));
+    const batch = await withRootQueue(c.root, () => readAuditEvents(c.root, c.provider.mode, { beadIds: ids.slice(i, i + AUDIT_BEAD_IDS_MAX), limit: AUDIT_LIMIT_MAX, utcCreatedAt: c.utcEvents }));
     if (batch === null) continue;
     anyRead = true;
     events.push(...batch);
@@ -1060,9 +1279,23 @@ async function readAuditFor(c: RootCache, ids: string[]): Promise<AuditEvent[] |
   return anyRead ? events : null;
 }
 
+/** Leases ride the minute pass: read at most once a minute per root, and only where bd has them. Any failure is an empty list, never an error banner. */
+async function readLeases(c: RootCache, startedAt: number): Promise<Lease[]> {
+  if (!c.capabilities.leases) return [];
+  const due = c.leasesAt === null || startedAt < c.leasesAt || startedAt - c.leasesAt >= LEASE_READ_MS;
+  if (!due) return c.leases;
+  c.leasesAt = startedAt;
+  try {
+    return parseLeaseRows(await withRootQueue(c.root, () => runSql(c.root, c.provider.mode, 'SELECT issue_id, holder, lease_expires_at FROM leases', undefined)));
+  } catch {
+    return [];
+  }
+}
+
 /** One export, applied whole or not at all. Throws on any read failure; the caller keeps the last good data. */
 async function exportAndApply(c: RootCache, signal: string | null, startedAt: number, forced: boolean, gen: number): Promise<void> {
-  const next = await c.provider.export();
+  // Gate rows are taken out here, once, before the diff, counts, unseen state, activity or ready set can see them.
+  const { beads: next, gateRows } = splitGates(await c.provider.export());
   const store = c.store!;
   // An export with no beads while some are held is more likely a passing bad read than every bead deleted at once (that would show
   // as a deletion of each). Hold the old data and read again at the next window; a second empty read in a row is believed.
@@ -1070,31 +1303,45 @@ async function exportAndApply(c: RootCache, signal: string | null, startedAt: nu
     c.emptyExportPending = true;
     c.localError = EMPTY_EXPORT_NOTE;
     c.localErrorDetail = null;
+    c.schemaSkew = null;
     return;
   }
   const refetchVocabulary = c.statuses === null || c.types === null || forced;
   const statuses = refetchVocabulary ? await c.provider.statuses() : c.statuses!;
   const types = refetchVocabulary ? await c.provider.types() : c.types!;
-  const readyIds = await c.provider.ready();
+  const { gates, gateIds, closed } = deriveGates(gateRows, next);
+  const gateIdSet = new Set(gateIds);
+  const readyIds = (await c.provider.ready()).filter((id) => !gateIdSet.has(id));
+  const leases = await readLeases(c, startedAt);
 
   const actor = await panelActor(c.root);
   c.panelActor = actor;
   // The feed starts from the audit log on the very first read; `backfill` does nothing once a baseline exists, so it goes before the baseline.
-  if (!store.hasBaseline()) store.backfill((await withRootQueue(c.root, () => readAuditEvents(c.root, c.provider.mode, { limit: BACKFILL_MAX }))) ?? [], actor, statuses);
-  const audit = await readAuditFor(c, store.changedBeadIds(next));
-  store.apply(next, audit, actor, isoOf(clock()), statuses);
+  if (!store.hasBaseline()) {
+    const history = (await withRootQueue(c.root, () => readAuditEvents(c.root, c.provider.mode, { limit: BACKFILL_MAX, utcCreatedAt: c.utcEvents }))) ?? [];
+    store.backfill(history.filter((e) => !gateIdSet.has(e.beadId)), actor, statuses);
+  }
+  const gateState: GateState = { open: gates, ids: gateIds, closed };
+  const audit = await readAuditFor(c, [...store.changedBeadIds(next, gateState), ...store.resolvedGateIds(next, gateState)]);
+  store.apply(next, audit, actor, isoOf(clock()), statuses, gateState);
 
   c.beads = next;
   c.statuses = statuses;
   c.types = types;
   c.readyIds = readyIds;
-  c.dataKey = createHash('sha1').update(JSON.stringify([next, readyIds, statuses, types])).digest('hex').slice(0, 12);
+  c.gates = gates;
+  c.gateIds = gateIds;
+  c.leases = leases;
+  c.dataKey = createHash('sha1').update(JSON.stringify([next, readyIds, statuses, types, gates, gateIds, leases])).digest('hex').slice(0, 12);
   c.exportedSignal = signal;
   c.exportedAt = startedAt;
   c.exportedGen = gen;
   c.loaded = true;
   c.emptyExportPending = false;
   c.localRefreshedAt = isoOf(startedAt);
+  // A whole export just worked: the store reads fine, so it is not old any more.
+  c.schemaSkew = null;
+  forgetUpdateFailure(c.root);
   clearError(c);
   try {
     await store.save();
@@ -1109,41 +1356,65 @@ async function exportAndApply(c: RootCache, signal: string | null, startedAt: nu
 async function refresh(c: RootCache): Promise<void> {
   const startedAt = clock();
   const gen = c.writeGen;
+  const live = follower();
   // The panel wrote since the held data was read: export now, past the window and the signal, once per write.
   const written = gen !== c.exportedGen;
   const catchUp = written && gen !== c.attemptedGen;
+  // An event from the follower is the same kind of nudge: it skips the window once, and is taken below.
+  const nudgedNow = live.dirty(c.root);
   // One gate for everything below, so a failing read is retried once per window, never on every poll.
+  // The nudge passes it once; if its export fails the export stays owed (`nudgeOwed`) and waits for the next window.
   // A negative elapsed time means the wall clock went back: that counts as due, not as "just now".
-  if (!catchUp && c.attemptAt !== null && startedAt >= c.attemptAt && startedAt - c.attemptAt < SIGNAL_THROTTLE_MS) return;
+  if (!catchUp && !nudgedNow && c.attemptAt !== null && startedAt >= c.attemptAt && startedAt - c.attemptAt < SIGNAL_THROTTLE_MS) return;
   c.attemptAt = startedAt;
   c.attemptedGen = gen;
   // Forced only means "export even though the signal did not move". An empty read that was held back is read again the same way.
-  const forced = c.emptyExportPending || c.exportedAt === null || startedAt < c.exportedAt || startedAt - c.exportedAt >= FORCE_EXPORT_MS;
+  // A store known to be old is read for real every window: the change signal comes from a path that does not check the schema, so
+  // an unchanged signal says nothing about whether the store can be read.
+  const forced = c.emptyExportPending || c.schemaSkew !== null || c.exportedAt === null || startedAt < c.exportedAt || startedAt - c.exportedAt >= FORCE_EXPORT_MS;
+  // While the follower runs, its events stand in for the change signal: no signal is read, and the minute pass still exports.
+  const following = live.state(c.root).state === 'following';
+  if (nudgedNow) live.take(c.root);
+  const nudged = nudgedNow || c.nudgeOwed;
 
   try {
     c.store ??= await projectStore(c.root);
     let signal: string | null = null;
     let noSignalAtAll = false;
-    try {
-      signal = await c.provider.changeSignal();
+    if (nudged) {
+      // Something moved (an event, a finished sync): read the beads, whatever a signal would say.
+    } else if (following) {
       c.noSignal = false;
-    } catch (error) {
-      // A busy or failing read just means no signal this window: the beads are read anyway, as if it had moved.
-      // A missing tool (not-found) will not fix itself in a few seconds: then only the minute pass exports.
-      noSignalAtAll = error instanceof BdError && error.kind === 'not-found';
-      c.noSignal = noSignalAtAll;
-    }
-    if (noSignalAtAll && !forced && !written) return;
-    if (signal !== null && signal === c.exportedSignal && !forced && !written) {
-      c.localRefreshedAt = isoOf(startedAt);
-      clearError(c);
-      return;
+      if (!forced && !written) {
+        c.localRefreshedAt = isoOf(startedAt);
+        clearError(c);
+        return;
+      }
+    } else {
+      try {
+        signal = await c.provider.changeSignal();
+        c.noSignal = false;
+      } catch (error) {
+        // A busy or failing read just means no signal this window: the beads are read anyway, as if it had moved.
+        // A missing tool (not-found) will not fix itself in a few seconds: then only the minute pass exports.
+        noSignalAtAll = error instanceof BdError && error.kind === 'not-found';
+        c.noSignal = noSignalAtAll;
+      }
+      if (noSignalAtAll && !forced && !written) return;
+      if (signal !== null && signal === c.exportedSignal && !forced && !written) {
+        c.localRefreshedAt = isoOf(startedAt);
+        clearError(c);
+        return;
+      }
     }
     await exportAndApply(c, signal, startedAt, forced, gen);
+    c.nudgeOwed = false;
   } catch (error) {
     // A failed read breaks the "two empty reads in a row" run: the next empty read is held again.
     c.emptyExportPending = false;
     recordError(c, error);
+    // The event that asked for this read is still unread: owed at the next window, not at the next poll.
+    if (nudged) c.nudgeOwed = true;
   }
 }
 
@@ -1190,7 +1461,7 @@ async function refreshUnpublished(c: RootCache, workspace: Extract<WorkspaceStat
 }
 
 function emptyFreshness(): Freshness {
-  return { localRefreshedAt: null, localError: null, localErrorDetail: null, teamSyncedAt: null, unpublished: null };
+  return { localRefreshedAt: null, localError: null, localErrorDetail: null, schemaUpdate: null, teamSyncedAt: null, unpublished: null };
 }
 
 const IDLE: SyncState = { kind: 'idle' };
@@ -1206,6 +1477,8 @@ function respond(c: RootCache, workspace: WorkspaceState, cursor: string | undef
     localRefreshedAt: c.localRefreshedAt,
     localError: c.localError,
     localErrorDetail: detailOf(c),
+    schemaUpdate: c.schemaSkew,
+    ...(updateJob(c.root) ? { schemaUpdateJob: updateJob(c.root) } : {}),
     teamSyncedAt: lastTeamSync(c.root),
     unpublished: workspace.kind === 'ok' && workspace.hasRemote ? c.unpublishedCount : null,
   };
@@ -1214,21 +1487,28 @@ function respond(c: RootCache, workspace: WorkspaceState, cursor: string | undef
   // state, and the panel's actor name. `syncSignature` carries the writes-blocked flag, so the cursor moves with `writesBlocked`.
   const actor = createHash('sha1').update(c.panelActor).digest('hex').slice(0, 8);
   const current = `${PROCESS_ID}:${workspaceDigest(workspace)}:${store?.revision() ?? 0}:${c.dataKey}:${syncSignature(c.root)}:${actor}`;
-  if (c.loaded && cursor === current) return { unchanged: true, cursor: current, freshness, sync };
+  // Answered from the follower's held state, no bd call: the panel polls faster while this is true.
+  const following = follower().state(c.root).state === 'following';
+  if (c.loaded && cursor === current) return { unchanged: true, cursor: current, freshness, sync, following };
   return {
     unchanged: false,
     cursor: current,
+    following,
     workspace,
     beads: c.beads,
     statuses: c.statuses ?? [],
     types: c.types ?? [],
     readyIds: c.readyIds,
-    unseenIds: store ? [...store.unseenIds(), ...store.unseenDeletionIds()] : [],
+    unseenIds: store ? store.allUnseenIds() : [],
     activity: store ? store.activity(ACTIVITY_LIMIT).map((e) => ({ ...e, unseen: store.isEventUnseen(e) })) : [],
     freshness,
     sync,
     writesBlocked: writesBlocked(c.root),
     panelActor: c.panelActor,
+    capabilities: c.capabilities,
+    gates: c.gates,
+    gateIds: c.gateIds,
+    leases: c.leases,
   };
 }
 
@@ -1256,16 +1536,33 @@ export async function getSnapshot(directory: string, cursor?: string, refreshWor
       sync: IDLE,
       writesBlocked: false,
       panelActor: '',
+      capabilities: capabilitiesFor(''),
+      gates: [],
+      gateIds: [],
+      leases: [],
     };
   }
   const c = cacheFor(workspace.root, workspace.mode);
+  noteBdVersion(c.root, workspace.bdVersion);
+  // A different bd (an upgrade) may refuse a store the old one read: the held signal proves nothing for it, so the next refresh reads for real.
+  if (c.bdVersion !== null && c.bdVersion !== workspace.bdVersion) {
+    c.exportedSignal = null;
+    c.exportedAt = null;
+  }
+  c.bdVersion = workspace.bdVersion;
+  c.utcEvents = storeWritesUtc(workspace.bdVersion);
+  c.capabilities = capabilitiesFor(workspace.bdVersion);
   if (error !== undefined) recordError(c, error);
+  // Starts or keeps the events follower (bd 1.3 with the journal on); it only nudges the refresh below.
+  // Not while the one-time update runs: its setting read is a bd call outside the queue, and the update has the store.
+  if (!updateRunning(c.root)) follower().ensure(c.root, c.capabilities.eventsJournal);
   // Callers that arrive while a refresh runs wait for that one instead of starting another.
   // A refresh already running when `bd` is upgraded keeps going: its queued calls may run the new binary before the
   // next call here detects the change. Accepted window, one refresh long.
   // While a sync job runs it holds the project's queue for up to minutes: answer from what is held (with the running state)
   // instead of making every poll wait behind it. The first read still has to happen.
-  if (syncState(c.root).kind === 'running' && c.loaded) return respond(c, workspace, cursor);
+  // The one-time update holds the queue the same way, and nothing can be read until it ends: answer from what is held, loaded or not.
+  if (updateRunning(c.root) || (syncState(c.root).kind === 'running' && c.loaded)) return respond(c, workspace, cursor);
   const refreshOnce = async () => {
     c.inflight ??= refresh(c).finally(() => {
       c.inflight = null;
@@ -1276,7 +1573,7 @@ export async function getSnapshot(directory: string, cursor?: string, refreshWor
   // A panel write that landed while that refresh was reading may not be in what it read: one more, now.
   if (c.writeGen !== c.exportedGen && c.writeGen !== c.attemptedGen) await refreshOnce();
   // A job may have started while this poll was waiting: each step below would queue behind it, so answer from what is held.
-  const syncing = () => syncState(c.root).kind === 'running';
+  const syncing = () => syncState(c.root).kind === 'running' || updateRunning(c.root);
   if (syncing()) return respond(c, workspace, cursor);
   // A database left halfway through a merge keeps writes blocked until it is seen to be clear.
   if (writesBlocked(c.root) && checkDue(c, 'halfMergeAt', SIGNAL_THROTTLE_MS)) await checkHalfMerge(c.root, workspace.mode);

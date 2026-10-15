@@ -1,4 +1,4 @@
-import type { ConflictInfo, JsonValue, SyncState, UnpublishedChange } from '../shared/types';
+import type { ConflictInfo, JsonValue, SupersededEdit, SyncState, UnpublishedChange } from '../shared/types';
 import { panelActor, withRootQueue } from './bd/adapter';
 import { runSql, type AuditMode } from './bd/audit';
 import { BdError, runBd, type RunOptions, type RunResult } from './bd/exec';
@@ -268,12 +268,26 @@ function summaryOf(verb: string, ids: string[]): string {
 
 function describeCommit(message: string): Pick<UnpublishedChange, 'beadIds' | 'summary' | 'actor'> {
   const first = message.split('\n')[0] ?? '';
+  // A review request (a gate) is named as one, never as a bead of its own: the gate's id stays out of the list, the bead it blocks goes in.
+  const gateCreated = /^bd: create gate (\S+) blocking (\S+)/.exec(first);
+  if (gateCreated) return { beadIds: [gateCreated[2]!], summary: `Requested review on ${gateCreated[2]}`, actor: null };
+  const gateResolved = /^bd: resolve(?: \(auto-commit\))?(?: by (.+?))?\s*$/.exec(first);
+  if (gateResolved) return { beadIds: [], summary: 'Resolved a review', actor: gateResolved[1]?.trim() ?? null };
   // The verb can be two words: `comments add`, `dep add`, `label remove`.
   const embedded = /^bd: ([a-z-]+(?: [a-z-]+)?)(?: \(auto-commit\))? by (.+?) \[([^\]]*)\]\s*$/.exec(first);
   if (embedded) {
     const ids = embedded[3]!.split(',').map((id) => id.trim()).filter(Boolean);
     return { beadIds: ids, summary: summaryOf(embedded[1]!, ids), actor: embedded[2]!.trim() };
   }
+  // bd 1.3 embedded writes read like server ones, with no id on a create and no actor anywhere.
+  if (/^bd: create issue\s*$/.test(first)) return { beadIds: [], summary: 'Created a bead', actor: null };
+  const link = /^bd: dep (add|remove) (\S+) (\S+)\s*$/.exec(first);
+  if (link) {
+    const ids = [link[2]!, link[3]!];
+    return { beadIds: ids, summary: `${link[1] === 'add' ? 'Linked' : 'Unlinked'} ${ids[0]} and ${ids[1]}`, actor: null };
+  }
+  const removed = /^bd: delete (\d+) issue\(s\)\s*$/.exec(first);
+  if (removed) return { beadIds: [], summary: removed[1] === '1' ? 'Deleted a bead' : `Deleted ${removed[1]} beads`, actor: null };
   const server = /^bd: (\S+) (\S+)\s*$/.exec(first);
   if (server) return { beadIds: [server[2]!], summary: summaryOf(server[1]!, [server[2]!]), actor: null };
   const dependency = /^dependency: (add|remove) (\S+) (\S+) -> (\S+)/.exec(first);
@@ -281,7 +295,7 @@ function describeCommit(message: string): Pick<UnpublishedChange, 'beadIds' | 's
     const ids = [dependency[3]!, dependency[4]!];
     return { beadIds: ids, summary: `${dependency[1] === 'add' ? 'Linked' : 'Unlinked'} ${ids[0]} and ${ids[1]}`, actor: null };
   }
-  if (/^Merge /i.test(first)) return { beadIds: [], summary: 'Merged changes from the team', actor: null };
+  if (/^Merge /i.test(first) || /^auto-resolve merge conflicts/i.test(first)) return { beadIds: [], summary: 'Merged changes from the team', actor: null };
   return { beadIds: [], summary: 'Saved a change', actor: null };
 }
 
@@ -331,10 +345,36 @@ async function outgoingOf(root: string, mode: AuditMode): Promise<Outgoing | nul
 async function listOutgoing(root: string, mode: AuditMode, outgoing: Outgoing): Promise<UnpublishedChange[]> {
   const limit = outgoing.tracked ? UNPUBLISHED_LIMIT : UNPUBLISHED_FALLBACK_LIMIT;
   const rows = await runSql(root, mode, `SELECT commit_hash, committer, date, message FROM dolt_log('${outgoing.range}') ORDER BY date DESC LIMIT ${limit}`, undefined);
-  return rows.map((row) => {
+  const changes = rows.map((row) => {
     const message = String(row.message ?? '');
     return { commit: String(row.commit_hash ?? ''), message, at: isoOf(row.date), ...describeCommit(message) };
   });
+  await nameCreated(root, mode, changes);
+  return changes;
+}
+
+const COMMIT_HASH = /^[0-9a-z]{16,64}$/;
+/** Most create commits asked about in one query; older ones read "Created a bead". */
+const CREATED_LOOKUP_MAX = 50;
+
+/**
+ * bd 1.3 does not put the id in a create commit's message (`bd: create issue`), so the id is read from what the commit added
+ * to the issues table. One query for all of them; when it fails or finds nothing, the change stays "Created a bead".
+ */
+async function nameCreated(root: string, mode: AuditMode, changes: UnpublishedChange[]): Promise<void> {
+  const creates = changes.filter((c) => /^bd: create issue\s*$/.test(c.message.split('\n')[0] ?? '') && COMMIT_HASH.test(c.commit)).slice(0, CREATED_LOOKUP_MAX);
+  if (creates.length === 0) return;
+  const query = creates.map((c) => `SELECT '${c.commit}' AS commit_hash, to_id FROM dolt_diff('${c.commit}~', '${c.commit}', 'issues') WHERE diff_type = 'added'`).join(' UNION ALL ');
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await runSql(root, mode, query, undefined);
+  } catch {
+    return;
+  }
+  for (const change of creates) {
+    const ids = rows.filter((r) => r.commit_hash === change.commit).map((r) => r.to_id).filter((id): id is string => typeof id === 'string' && id !== '');
+    if (ids.length > 0) Object.assign(change, { beadIds: ids, summary: summaryOf('create', ids) });
+  }
 }
 
 async function readUnpublished(root: string, mode: AuditMode): Promise<UnpublishedChange[] | null> {
@@ -651,9 +691,44 @@ async function pullFailed(job: Job, result: RunResult): Promise<Outcome> {
   return { state: plainError(messageForText(text), job.log), hold: status === 'unknown' };
 }
 
-/** `expectedHead` is set for a publish (the head of the confirmed preview) and absent for a pull. */
+// bd 1.3 settles two edits to the same field of one bead on its own (the newer one wins) and says so on stderr, one line per bead.
+const AUTO_MERGED = /^Notice: auto-merged issue (\S+); (.+?) settled last-write-wins/gm;
+const FIELD_WORDS: Record<string, string> = { issue_type: 'type', acceptance_criteria: 'acceptance criteria' };
+
+/** The beads (and fields, in plain words) a pull's output says had an older edit replaced. Timestamps bd lists alongside are left out. */
+export function parseSupersededEdits(text: string): SupersededEdit[] {
+  const found = new Map<string, string[]>();
+  for (const match of text.matchAll(AUTO_MERGED)) {
+    const fields = match[2]!
+      .split(',')
+      .map((field) => field.trim())
+      .filter((field) => field !== '' && !field.endsWith('_at'))
+      .map((field) => FIELD_WORDS[field] ?? field.replace(/_/g, ' '));
+    const known = found.get(match[1]!) ?? [];
+    found.set(match[1]!, [...known, ...fields.filter((field) => !known.includes(field))]);
+  }
+  return [...found].map(([beadId, fields]) => ({ beadId, fields }));
+}
+
+function noteSuperseded(into: SupersededEdit[], result: RunResult): void {
+  for (const edit of parseSupersededEdits(`${result.stdout}\n${result.stderr}`)) {
+    const known = into.find((e) => e.beadId === edit.beadId);
+    if (known) known.fields.push(...edit.fields.filter((field) => !known.fields.includes(field)));
+    else into.push({ beadId: edit.beadId, fields: [...edit.fields] });
+  }
+}
+
+/** A job that ended well after merging same-field edits says which, so the person is told an older edit was replaced. */
 async function runJob(root: string, mode: AuditMode, op: 'pull' | 'publish', expectedHead?: string): Promise<Outcome> {
+  const superseded: SupersededEdit[] = [];
   const log = new JobLog();
+  const outcome = await runJobSteps(root, mode, op, log, superseded, expectedHead);
+  if (superseded.length === 0 || outcome.state.kind !== 'idle') return outcome;
+  return { ...outcome, state: { kind: 'idle', superseded, log: log.text() } };
+}
+
+/** `expectedHead` is set for a publish (the head of the confirmed preview) and absent for a pull. */
+async function runJobSteps(root: string, mode: AuditMode, op: 'pull' | 'publish', log: JobLog, superseded: SupersededEdit[], expectedHead?: string): Promise<Outcome> {
   try {
     // The route checked too; this closes the gap until the job's turn in the queue. Nothing runs if the head moved.
     /** What the team lacked when the job began: anything outside the preview that was already there is never a merge of ours. */
@@ -680,6 +755,7 @@ async function runJob(root: string, mode: AuditMode, op: 'pull' | 'publish', exp
     for (let attempt = 1; attempt <= MAX_PUSH_ATTEMPTS; attempt += 1) {
       const pull = await step(job, [...as, 'dolt', 'pull', ...selector]);
       if (pull.code !== 0) return await pullFailed(job, pull);
+      noteSuperseded(superseded, pull);
       if (mode === 'server') {
         // A pull can exit 0 and still leave the database halfway through a merge.
         const status = await mergeStatusOf(root, mode);

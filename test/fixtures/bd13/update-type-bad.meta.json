@@ -1,0 +1,1 @@
+{"cmd": "bd update <id> --type nonsense --json", "cwd_label": "scratch plan02-a (prefix pl)", "exit": 1}

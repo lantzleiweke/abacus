@@ -1,0 +1,2 @@
+✓ Gate resolved: pl-ox2
+  Reason: Looks good

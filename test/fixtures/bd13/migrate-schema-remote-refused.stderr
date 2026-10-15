@@ -1,0 +1,26 @@
+refusing to auto-apply 34 pending schema migrations to a remote-backed database (v32 -> v66): migrating clones independently forks the schema (#4259)
+
+  This database syncs with a remote. Applying schema migrations on more than
+  one clone independently forks the schema so `bd dolt pull` can no longer
+  merge — the break is silent and unrecoverable.
+
+  Choose one:
+    • You are the designated migrator (only ONE machine should be): migrate,
+      then publish the migrated database to the remote:
+        bd migrate --force
+        (or BD_ALLOW_REMOTE_MIGRATE=1 bd migrate in scripted/CI use)
+        bd dolt push
+    • Another machine has already migrated: adopt its database instead of
+      migrating here — re-clone from the remote so you receive the migrated
+      schema:
+        bd bootstrap
+      Re-cloning replaces your local database: any local issues you have not
+      pushed are LOST. Push first (`bd dolt push`) or save a copy
+      (`bd export --all -o backup.jsonl`) before re-cloning.
+
+  Several machines on one remote? Only ONE migrates. Get every other clone
+  fully in sync on its current binary, then after the migrator pushes run
+  `bd dolt pull` on each before upgrading it — its upgrade then has nothing
+  to migrate and needs no re-clone.
+
+  Smart gate (#4516): it could not read the remote's cached schema state (no cached ref, a stale/pre-content_hash one, or the cached remote is behind this clone).

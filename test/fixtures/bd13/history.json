@@ -1,0 +1,201 @@
+[
+  {
+    "CommitHash": "7qigkt99d7h21uldu4fs3sg02qa0ucoc",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:37:12.317-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "description": "Now with a description",
+      "notes": "first note",
+      "status": "in_progress",
+      "priority": 0,
+      "issue_type": "task",
+      "assignee": "agent",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:37:12Z"
+    }
+  },
+  {
+    "CommitHash": "2pr5afofu1o2r0j29fhqodvi934il7f2",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:37:10.936-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "notes": "first note",
+      "status": "in_progress",
+      "priority": 0,
+      "issue_type": "task",
+      "assignee": "agent",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:37:11Z"
+    }
+  },
+  {
+    "CommitHash": "l2vlc9o0bo3ur1mq7106fe1ihredsd75",
+    "Committer": "root",
+    "CommitDate": "2026-10-14T22:37:02.542-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "in_progress",
+      "priority": 2,
+      "issue_type": "task",
+      "assignee": "agent",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:37:02Z"
+    }
+  },
+  {
+    "CommitHash": "e3idem828v5injf1imfdlrmrjtru9b10",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:37:02.488-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "in_progress",
+      "priority": 2,
+      "issue_type": "task",
+      "assignee": "agent",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:37:02Z"
+    }
+  },
+  {
+    "CommitHash": "4tgc3lh597svlqhscp7sbqouceqpn84e",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:36:54.4-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "dqmh70vg1rdr36tdjupt6outb7g8k53f",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:36:53.623-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "8ihbee8lq3obic46bksumru4rl4m229q",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:36:42.962-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "pl15tkutgp6l5uesrl2p4s2esqrfvjlq",
+    "Committer": "root",
+    "CommitDate": "2026-10-14T22:36:41.815-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "udc418n9lq7i80938eaf0pchuve8mdbe",
+    "Committer": "root",
+    "CommitDate": "2026-10-14T22:36:41.23-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "u3nvhgt1j59q2o1jomdg23dhkjue9s5k",
+    "Committer": "root",
+    "CommitDate": "2026-10-14T22:36:40.791-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "pe3v9mfvsve70uotv8886362dnujibg8",
+    "Committer": "root",
+    "CommitDate": "2026-10-14T22:36:29.688-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  },
+  {
+    "CommitHash": "icns64h8e396d327cgll0glulvter4fs",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T22:36:24.324-07:00",
+    "Issue": {
+      "id": "pl-2n0",
+      "title": "Task B",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "owner": "user@example.com",
+      "created_at": "2026-10-15T05:36:24Z",
+      "created_by": "tester",
+      "updated_at": "2026-10-15T05:36:24Z"
+    }
+  }
+]

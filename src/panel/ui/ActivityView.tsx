@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { activityFeed, whenOf, type EntryMark, type FeedEntry } from '../activity';
+import type { Bead, HistoryChange, StatusDef } from '../../shared/types';
+import { activityFeed, rowChange, whenOf, type EntryMark, type FeedEntry } from '../activity';
+import { writesPaused } from '../edit';
+import { blockedMessage } from '../gates';
+import { restoreRequest, restoreState } from '../history';
+import { shortId } from '../list';
 import { listKey } from '../keyboard';
 import { useNow, useStore, useStoreApi } from '../store';
 import { EmptyState, NoBeads } from './EmptyState';
 import { describeFreshness } from './Header';
 import { useRowActions } from './AttachFooter';
-import { IconChat, IconEdit, IconLink, IconMore, IconPlus, IconTrash } from './icons';
+import { fieldWord, RestoreControl, useRestore, type RestoreKit } from './History';
+import { IconChat, IconEdit, IconLink, IconMore, IconPlus, IconRestore, IconTrash, IconWait, IconX } from './icons';
 import { focusOf, SEARCH } from './List';
-import { menuFor, RowMenu, StatusDot, type MenuAt, type MenuClose } from './Row';
+import { menuFor, RowMenu, StatusDot, type MenuAt, type MenuClose, type MenuExtra } from './Row';
 
 export const entryDomId = (eventId: string) => `bd-act-${eventId}`;
 
 function Mark({ mark }: { mark: EntryMark }) {
   if (mark.kind === 'status') return <StatusDot look={mark.look} marker={mark.marker} />;
-  const Icon = { created: IconPlus, deleted: IconTrash, comment: IconChat, link: IconLink, edit: IconEdit }[mark.kind];
+  const Icon = { created: IconPlus, deleted: IconTrash, comment: IconChat, link: IconLink, edit: IconEdit, gate: IconWait }[mark.kind];
   return (
     <span class="bd-act-ic" data-kind={mark.kind}>
       <Icon size={13} />
@@ -110,6 +116,39 @@ function SeenBar({ total, unseen, beadsUnseen }: { total: number; unseen: number
   );
 }
 
+/** A restore started from a row: which change, on which bead. Its key is the row's event id. */
+type Restoring = { key: string; beadId: string; change: HistoryChange };
+
+type RestoreBarProps = { target: Restoring; bead: Bead | null; kit: RestoreKit; statuses: StatusDef[]; paused: string | null; reword(message: string): string; onClose(): void };
+
+/**
+ * Above the feed (the rows are options, so nothing is pressed inside them): how a restore chosen from a row's menu went, and the
+ * person's choice when the field holds something else by now.
+ */
+function RestoreBar({ target, bead, kit, statuses, paused, reword, onClose }: RestoreBarProps) {
+  const label = `${fieldWord(target.change.field)} on ${shortId(target.beadId)}`;
+  return (
+    <div class="bd-act-rs" role="group" aria-label={`Restore ${label}`}>
+      <div class="bd-act-rs-top">
+        <IconRestore size={13} />
+        <span class="bd-act-rs-what">
+          {`Restore ${fieldWord(target.change.field)} on `}
+          <span class="bd-id">{shortId(target.beadId)}</span>
+          {bead && <span class="bd-title">{` ${bead.title}`}</span>}
+        </span>
+        <button type="button" class="bd-banner-x" aria-label="Close" disabled={kit.busy(target.key)} onClick={onClose}>
+          <IconX />
+        </button>
+      </div>
+      {bead ? (
+        <RestoreControl kit={kit} scope="a" rkey={target.key} bead={bead} change={target.change} statuses={statuses} paused={paused} reword={reword} grouped onKeep={onClose} />
+      ) : (
+        <p class="bd-rs-msg">This bead is no longer in the project.</p>
+      )}
+    </div>
+  );
+}
+
 /**
  * The Activity view: every change the service saw or Beads' history recorded, newest first and grouped by day, with
  * unseen ones highlighted. Search narrows it; the list's filters do not apply. Keys work as in the list.
@@ -121,8 +160,10 @@ export function ActivityView() {
   const [cursor, setCursor] = useState<string | null>(null);
   /** The entry last opened, marked selected while its bead stays the selected one. */
   const [opened, setOpened] = useState<string | null>(null);
-  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [menu, setMenu] = useState<{ at: MenuAt; eventId: string } | null>(null);
   const actions = useRowActions();
+  const kit = useRestore('a', { focusChoice: true });
+  const [restoring, setRestoring] = useState<Restoring | null>(null);
   const scrollTo = useRef(false);
   const box = useRef<HTMLDivElement>(null);
   const snapshot = state.snapshot;
@@ -147,7 +188,7 @@ export function ActivityView() {
 
   const showMenu = (entry: FeedEntry, at: MenuAt) => {
     setCursor(entry.event.id);
-    setMenu(at);
+    setMenu({ at, eventId: entry.event.id });
   };
   const closeMenu = useCallback((why: MenuClose) => {
     setMenu(null);
@@ -162,7 +203,7 @@ export function ActivityView() {
     const onKey = (e: KeyboardEvent) => {
       const { ids: order, cursor: at, entries: list, state: s, open: go, menu: opened, showMenu: openMenu } = live.current;
       // Under a bead's detail the feed keeps still; the detail has its own keys.
-      if (s.detail || s.overlays.length > 0 || opened || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (s.detail || s.page !== 'list' || s.overlays.length > 0 || opened || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       const focus = focusOf(e.target);
       const key = e.key === 'F10' && e.shiftKey ? 'ContextMenu' : e.key;
       const action = listKey({ key, ids: order, cursor: at, focus });
@@ -234,9 +275,45 @@ export function ActivityView() {
 
   const stale = describeFreshness(state, now)?.stale ?? false;
   const unseen = entries.filter((e) => e.event.unseen).length;
+  const paused = writesPaused(snapshot);
+  const beadOf = (id: string) => beads?.find((b) => b.id === id) ?? null;
+  const reword = (message: string) => (restoring ? blockedMessage(message, { id: restoring.beadId }, state.gates) : message);
+
+  /** A row's Restore, when it has one: a whole short field value, on a bead the project still has. */
+  const restoreItem = (entry: FeedEntry | undefined): MenuExtra[] => {
+    const change = entry && !entry.gone ? rowChange(entry.event) : null;
+    const bead = entry ? beadOf(entry.event.beadId) : null;
+    if (!entry || !change || !bead || !restoreRequest(bead, change)) return [];
+    const where = restoreState(bead, change);
+    const key = entry.event.id;
+    const run = () => {
+      setRestoring({ key, beadId: bead.id, change });
+      // Moved on since: the bar shows what it holds now and the person decides; nothing is sent.
+      if (where === 'changed') kit.hold(key, bead);
+      else kit.restore(key, bead, change);
+    };
+    const off = paused ?? (where === 'unchanged' ? 'Already the earlier value' : kit.busy(key) ? 'Restoring' : undefined);
+    return [{ label: 'Restore previous value', icon: <IconRestore />, run, ...(off ? { off } : {}) }];
+  };
   return (
     <div class="bd-list bd-act" data-stale={stale || undefined}>
       <SeenBar total={entries.length} unseen={unseen} beadsUnseen={snapshot.unseenIds.length} />
+      {restoring && (
+        <RestoreBar
+          key={restoring.key}
+          target={restoring}
+          bead={beadOf(restoring.beadId)}
+          kit={kit}
+          statuses={snapshot.statuses}
+          paused={paused}
+          reword={reword}
+          onClose={() => {
+            kit.dismiss(restoring.key);
+            setRestoring(null);
+            box.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       <div role="listbox" aria-label="Activity" tabIndex={0} ref={box} {...(shown ? { 'aria-activedescendant': entryDomId(shown) } : {})}>
         {days.map((day) => (
           <div key={day.key} role="group" class="bd-day-grp" aria-labelledby={`bd-day-${day.key}`}>
@@ -257,7 +334,7 @@ export function ActivityView() {
           </div>
         ))}
       </div>
-      {menu && <RowMenu at={menu} actions={actions} onClose={closeMenu} />}
+      {menu && <RowMenu at={menu.at} actions={actions} extra={restoreItem(entries.find((e) => e.event.id === menu.eventId))} onClose={closeMenu} />}
     </div>
   );
 }

@@ -270,6 +270,39 @@ describe('team line controls', () => {
     expect(routes(fake.calls, 'sync-publish')).toHaveLength(0);
   });
 
+  it('says which beads and fields had an older edit replaced when the sync merged same-field edits, with Copy details', async () => {
+    const w = world();
+    const fake = await panel(service(w));
+    await click(screen.getByRole('button', { name: 'Sync' }));
+    w.sync = {
+      kind: 'idle',
+      superseded: [{ beadId: 'p-a1', fields: ['title', 'acceptance criteria'] }, { beadId: 'p-zz9', fields: [] }],
+      log: "$ bd dolt pull\nNotice: auto-merged issue p-a1; title settled last-write-wins (the older side's edit was superseded)",
+    };
+    await fake.poll();
+    const toast = fake.toasts.find((t) => t.message.startsWith('Synced.'))!;
+    expect(toast).toBeTruthy();
+    expect(toast.kind).toBe('info');
+    expect(toast.message).toContain('"Fix login timeout" (title, acceptance criteria)');
+    expect(toast.message).toContain('zz9');
+    expect(toast.message).toMatch(/newer edit was kept/);
+    expect(toast.message).not.toMatch(/\bpull\b|\bpush\b|dolt|merge|—/i);
+    expect(toast.copy).toMatchObject({ text: expect.stringContaining('auto-merged issue p-a1') });
+    expect(fake.toasts.filter((t) => t.message.startsWith('Synced.'))).toHaveLength(1);
+  });
+
+  it('a publish that merged same-field edits says Published and names them', async () => {
+    const w = world();
+    const fake = await panel(service(w));
+    await click(screen.getByRole('button', { name: 'Publish 3 changes' }));
+    await confirm();
+    w.sync = { kind: 'idle', superseded: [{ beadId: 'p-b2', fields: ['status'] }], log: 'raw' };
+    await fake.poll();
+    const toast = fake.toasts.find((t) => t.message.startsWith('Published 3 changes.'))!;
+    expect(toast).toBeTruthy();
+    expect(toast.message).toContain('"Cut over DNS" (status)');
+  });
+
   it('pauses editing as soon as Sync starts', async () => {
     await panel(service(world()));
     await click(document.getElementById('bd-row-p-a1')!);

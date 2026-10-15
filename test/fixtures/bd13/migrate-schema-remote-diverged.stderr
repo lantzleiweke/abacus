@@ -1,0 +1,1 @@
+Error: refusing to migrate a remote-backed database (v32 -> v66): this clone and the remote applied different content for migration(s) 12, 40

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "074b5f40-549e-5ea3-834f-e22ee9eb1b3d",
+    "issue_id": "pl-2n0",
+    "event_type": "updated",
+    "actor": "agent",
+    "old_value": "{\"id\":\"pl-2n0\",\"title\":\"Task B\",\"notes\":\"first note\",\"status\":\"in_progress\",\"priority\":0,\"issue_type\":\"task\",\"assignee\":\"agent\",\"owner\":\"user@example.com\",\"created_at\":\"2026-10-15T05:36:24Z\",\"created_by\":\"tester\",\"updated_at\":\"2026-10-15T05:37:11Z\",\"started_at\":\"2026-10-15T05:37:02Z\"}",
+    "new_value": "{\"description\":\"Now with a description\"}",
+    "created_at": "2026-10-15T05:37:12Z"
+  },
+  {
+    "id": "9c8b21aa-fc4f-5dfe-a7bc-da972906397b",
+    "issue_id": "pl-2n0",
+    "event_type": "updated",
+    "actor": "Tester (panel)",
+    "old_value": "{\"id\":\"pl-2n0\",\"title\":\"Task B\",\"status\":\"in_progress\",\"priority\":2,\"issue_type\":\"task\",\"assignee\":\"agent\",\"owner\":\"user@example.com\",\"created_at\":\"2026-10-15T05:36:24Z\",\"created_by\":\"tester\",\"updated_at\":\"2026-10-15T05:37:02Z\",\"started_at\":\"2026-10-15T05:37:02Z\"}",
+    "new_value": "{\"notes\":\"first note\",\"priority\":0}",
+    "created_at": "2026-10-15T05:37:10Z"
+  },
+  {
+    "id": "26127433-3e4d-545d-917d-462d0cf6c1ca",
+    "issue_id": "pl-2n0",
+    "event_type": "status_changed",
+    "actor": "agent",
+    "old_value": "{\"id\":\"pl-2n0\",\"title\":\"Task B\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"user@example.com\",\"created_at\":\"2026-10-15T05:36:24Z\",\"created_by\":\"tester\",\"updated_at\":\"2026-10-15T05:36:24Z\"}",
+    "new_value": "{\"assignee\":\"agent\",\"status\":\"in_progress\"}",
+    "created_at": "2026-10-15T05:37:02Z"
+  },
+  {
+    "id": "0c4a84a7-5986-54f4-92a8-2b7a0ff446db",
+    "issue_id": "pl-2n0",
+    "event_type": "created",
+    "actor": "tester",
+    "old_value": "",
+    "new_value": "",
+    "created_at": "2026-10-15T05:36:24Z"
+  }
+]

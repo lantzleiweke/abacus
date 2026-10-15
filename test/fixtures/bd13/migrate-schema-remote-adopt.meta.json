@@ -1,0 +1,1 @@
+{"cmd": "bd --actor X migrate schema", "cwd_label": "NOT captured live: the message is the format string found in the bd 1.3.1 binary (`strings /opt/homebrew/bin/bd`), placeholders filled in (v32 -> v66, 34 migrations, migration(s) 12, 40); the Error: prefix follows the captured refusal", "exit": 1}

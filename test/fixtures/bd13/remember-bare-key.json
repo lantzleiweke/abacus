@@ -1,0 +1,6 @@
+{
+  "action": "remembered",
+  "key": "other",
+  "schema_version": 1,
+  "value": "use-pnpm-not-npm"
+}

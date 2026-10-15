@@ -1,0 +1,15 @@
+[
+  {
+    "id": "pl-sex",
+    "title": "Task A",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:36:24Z",
+    "created_by": "tester",
+    "updated_at": "2026-10-15T05:36:43Z",
+    "closed_at": "2026-10-15T05:36:43Z",
+    "close_reason": "Closed"
+  }
+]

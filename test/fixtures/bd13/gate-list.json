@@ -1,0 +1,15 @@
+[
+  {
+    "id": "pl-ox2",
+    "title": "Gate: human",
+    "description": "Ad-hoc gate blocking pl-sex\n\nReason: Review before closing",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "gate",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:36:30Z",
+    "created_by": "Tester (panel)",
+    "updated_at": "2026-10-15T05:36:30Z",
+    "await_type": "human"
+  }
+]

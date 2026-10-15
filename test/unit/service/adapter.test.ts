@@ -312,7 +312,7 @@ describe('getSnapshot', () => {
     expect(res.types).toEqual(['task', 'bug']);
     expect(res.readyIds).toEqual(['a']);
     expect(res.unseenIds).toEqual([]);
-    expect(res.freshness).toEqual({ localRefreshedAt: new Date(T0).toISOString(), localError: null, localErrorDetail: null, teamSyncedAt: null, unpublished: null });
+    expect(res.freshness).toEqual({ localRefreshedAt: new Date(T0).toISOString(), localError: null, localErrorDetail: null, schemaUpdate: null, teamSyncedAt: null, unpublished: null });
     expect(res.sync).toEqual({ kind: 'idle' });
     expect(res.cursor).toEqual(expect.any(String));
   });
@@ -1027,10 +1027,18 @@ describe('getSnapshot', () => {
       auditRead.mockResolvedValueOnce([event('a', 'created', 'Old Actor')]);
       const res = full(await getSnapshot(root));
       expect(auditRead).toHaveBeenCalledTimes(1);
-      expect(auditRead).toHaveBeenCalledWith(root, 'embedded', { limit: 50 });
+      expect(auditRead).toHaveBeenCalledWith(root, 'embedded', { limit: 50, utcCreatedAt: false });
       expect(res.activity).toHaveLength(1);
       expect(res.activity[0]).toMatchObject({ beadId: 'a', kind: 'created', historical: true, unseen: false, actor: 'Old Actor' });
       expect(res.unseenIds).toEqual([]);
+    });
+
+    it('asks for the audit log as UTC on bd 1.3 and later, and dates a UUIDv5 event from its created_at', async () => {
+      detect.mockResolvedValue({ kind: 'ok', root, mode: 'embedded', bdVersion: '1.3.1', hasRemote: false, projectName: 'demo' });
+      auditRead.mockResolvedValueOnce([{ ...event('a', 'created', 'New Actor'), id: 'e60585b7-e041-5e39-a552-237e9a1481c1', rawCreatedAt: '2026-10-10 10:00:00', utcCreatedAt: true }]);
+      const res = full(await getSnapshot(root));
+      expect(auditRead).toHaveBeenCalledWith(root, 'embedded', { limit: 50, utcCreatedAt: true });
+      expect(res.activity[0]).toMatchObject({ beadId: 'a', kind: 'created', observedAt: '2026-10-10T10:00:00.000Z' });
     });
 
     it('still takes a baseline when the audit log is unavailable', async () => {

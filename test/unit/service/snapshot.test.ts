@@ -181,6 +181,29 @@ describe('diffSnapshots', () => {
     expect(changes[0]).toMatchObject({ kind: 'comment', beadId: 'a', actor: 'Claude Code', to: 'looks good' });
   });
 
+  it('does not report a comment bd gave a new id (1.2.2 ids are UUIDv7, 1.3 ids UUIDv5): a comment is the same comment by author, time and text', () => {
+    const old = { ...comment('01a13da9-3045-74de-8303-f1953340f5ac', 'Ann Lee', 'Same words'), createdAt: '2026-10-15T03:44:21Z' };
+    const renumbered = { ...old, id: '0cea8e3f-76ca-5007-a0d7-35cd2fb70ff9' };
+    expect(diffSnapshots([bead('a', { comments: [old] })], [bead('a', { comments: [renumbered] })], T0)).toEqual([]);
+    // A genuinely new comment with the same words later is still new, and so is a second identical one.
+    const later = { ...renumbered, id: 'x', createdAt: '2026-10-15T04:00:00Z' };
+    expect(diffSnapshots([bead('a', { comments: [old] })], [bead('a', { comments: [renumbered, later] })], T0).map((c) => c.kind)).toEqual(['comment']);
+    const twin = { ...renumbered, id: 'y' };
+    expect(diffSnapshots([bead('a', { comments: [old] })], [bead('a', { comments: [renumbered, twin] })], T0).map((c) => c.kind)).toEqual(['comment']);
+  });
+
+  it('does not report claim lease bookkeeping (heartbeat_at, lease_expires_at): beads 1.3 rewrites them while an agent works', () => {
+    const claimed = bead('a', { status: 'in_progress', assignee: 'Claude Code', extra: { started_at: '2026-10-15T18:24:21Z', heartbeat_at: '2026-10-15T18:24:21Z', lease_expires_at: '2026-10-15T18:29:21Z' } });
+    const beat = bead('a', { ...claimed, extra: { ...claimed.extra, heartbeat_at: '2026-10-15T18:26:21Z', lease_expires_at: '2026-10-15T18:31:21Z' } });
+    expect(diffSnapshots([claimed], [beat], T0)).toEqual([]);
+    // The claim itself is still news: the status and assignee rows show, the lease times do not.
+    const open = bead('a');
+    const names = diffSnapshots([open], [claimed], T0).map((c) => c.field);
+    expect(names).toEqual(['status', 'assignee']);
+    // A release drops both keys: nothing either.
+    expect(diffSnapshots([claimed], [bead('a', { ...claimed, extra: { started_at: '2026-10-15T18:24:21Z' } })], T0)).toEqual([]);
+  });
+
   it('leaves byPanel to attributeChanges, which knows the panel actor', () => {
     const [e] = diffSnapshots([bead('a')], [bead('a', { comments: [comment('1', PANEL)] })], T0);
     expect(e).toMatchObject({ actor: PANEL, byPanel: false });
@@ -507,6 +530,22 @@ describe('ProjectStore', () => {
     s.apply([bead('a', { title: 'by agent', updatedAt: 'u1' })], null, PANEL, T0, statuses);
     s.apply([bead('a', { title: 'by agent', priority: 0, updatedAt: 'u2' })], [updated('a', { priority: 0 }, PANEL)], PANEL, T1, statuses);
     expect(s.unseenIds()).toEqual(['a']);
+  });
+
+  it('a panel write is never an unseen row, even on a bead that was already unseen for another reason', async () => {
+    const s = await store();
+    s.apply([bead('a')], null, PANEL, T0, statuses);
+    // An agent's change leaves the bead unseen; then the panel comments and sets the priority in a later refresh.
+    s.apply([bead('a', { title: 'by agent', updatedAt: 'u1' })], [updated('a', { title: 'by agent' }, 'Claude Code')], PANEL, T1, statuses);
+    s.recordPanelWrite('a', { comment: true });
+    const later = '2026-10-14T10:10:00.000Z';
+    s.apply([bead('a', { title: 'by agent', updatedAt: 'u2', comments: [comment('1', PANEL, 'Response: yes')] })], null, PANEL, later, statuses);
+    expect(s.unseenIds()).toEqual(['a']);
+    const [panelRow, agentRow] = s.activity(10);
+    expect(panelRow).toMatchObject({ kind: 'comment', byPanel: true });
+    expect(s.isEventUnseen(panelRow!)).toBe(false);
+    expect(agentRow).toMatchObject({ kind: 'field', actor: 'Claude Code' });
+    expect(s.isEventUnseen(agentRow!)).toBe(true);
   });
 
   it('auto-sees a bead the panel created', async () => {
@@ -1161,6 +1200,30 @@ describe('ProjectStore', () => {
       await writeFile(file(), JSON.stringify({ v: 1, snapshot: null, seen: {}, activity: [good, { id: 5 }, 'x', null], usedAuditIds: ['u', 7], firstContactConfirmedFor: null }));
       const s = await store();
       expect(s.activity(10)).toEqual([good]);
+    });
+
+    it('a saved baseline with gate rows reports no deletions (0.1 state files held them as beads)', async () => {
+      const gateRow = bead('g1', { type: 'gate', title: 'Gate: human', extra: { await_type: 'human' } });
+      await writeFile(
+        file(),
+        JSON.stringify({ v: 1, snapshot: [bead('a'), gateRow], seen: { a: beadVersion(bead('a')), g1: beadVersion(gateRow) }, seenAt: {}, activity: [], usedAuditIds: [], firstContactConfirmedFor: null }),
+      );
+      const s = await store();
+      expect(s.hasBaseline()).toBe(true);
+      expect(s.beadCount()).toBe(1);
+      // The first 0.2 read has the gate row split out: nothing is gone, nothing is news.
+      expect(s.apply([bead('a')], null, PANEL, T1, statuses)).toEqual([]);
+      expect(s.unseenDeletionIds()).toEqual([]);
+      expect(s.unseenIds()).toEqual([]);
+      expect(s.activity(10)).toEqual([]);
+    });
+
+    it('keeps gate events, with their gate id, across a save and load', async () => {
+      const opened: ChangeEvent = { id: 'o', beadId: 'a', kind: 'gate_opened', gateId: 'g1', actor: 'Ann', byPanel: false, observedAt: T0, reason: 'Review before closing' };
+      const resolved: ChangeEvent = { id: 'r', beadId: 'a', kind: 'gate_resolved', gateId: 'g1', actor: null, byPanel: false, observedAt: T1 };
+      await writeFile(file(), JSON.stringify({ v: 1, snapshot: null, seen: {}, activity: [opened, resolved, { ...opened, id: 'bad', gateId: 7 }], usedAuditIds: [], firstContactConfirmedFor: null }));
+      const s = await store();
+      expect(s.activity(10)).toEqual([resolved, opened]);
     });
 
     it('does not mistake a file written only for first-contact consent for a baseline', async () => {

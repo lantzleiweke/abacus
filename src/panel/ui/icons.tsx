@@ -197,3 +197,11 @@ export function TypeIcon({ type, size }: { type: string; size?: number }) {
   const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
   return <Icon size={size}>{known ? TYPE_PATHS[type] : <rect x="3" y="3" width="10" height="10" rx="2.2" stroke-dasharray="2 1.8" />}</Icon>;
 }
+
+/** Put back: an arrow curling back to the left. */
+export const IconRestore = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 6.5h6.2a3.3 3.3 0 0 1 0 6.6H6" />
+    <path d="M6 3.8L3.3 6.5 6 9.2" />
+  </Icon>
+);

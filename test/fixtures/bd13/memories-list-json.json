@@ -1,0 +1,5 @@
+{
+  "race-flag": "Always run tests with the --race flag",
+  "schema_version": 1,
+  "use-pnpm-not-npm": "Use pnpm, not npm"
+}

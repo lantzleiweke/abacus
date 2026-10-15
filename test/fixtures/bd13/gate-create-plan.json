@@ -1,0 +1,14 @@
+{
+  "await_type": "human",
+  "created_at": "2026-10-15T05:36:41.096032Z",
+  "created_by": "Tester (panel)",
+  "description": "Ad-hoc gate blocking pl-b9p\n\nReason: Approve the plan before work starts",
+  "id": "pl-e2e",
+  "issue_type": "gate",
+  "owner": "user@example.com",
+  "priority": 2,
+  "schema_version": 1,
+  "status": "open",
+  "title": "Gate: human",
+  "updated_at": "2026-10-15T05:36:41.096032Z"
+}

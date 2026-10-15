@@ -1,5 +1,7 @@
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { ago, folderName } from '../format';
+import { needsOf } from '../needs';
+import { ProjectMenu } from './ProjectMenu';
 import { filtersActive, firstLoadError, useNow, useStore, useStoreApi, type PanelError, type State, type View } from '../store';
 import { Filters } from './Filters';
 import { NewBeadButton } from './CreateForm';
@@ -26,6 +28,8 @@ export function describeFreshness(state: State, now: number): FreshnessView | nu
   const snapshot = state.snapshot;
   if (!snapshot || snapshot.workspace.kind !== 'ok') return null;
   const f = snapshot.freshness;
+  // A project that needs the one-time update has nothing read to be fresh about; the body says why, with its button.
+  if (f.schemaUpdate) return null;
   const parsed = f.localRefreshedAt === null ? NaN : Date.parse(f.localRefreshedAt);
   const refreshedAt = Number.isFinite(parsed) ? parsed : null;
   // Staleness never counts from before the panel started watching (opened, or shown again after being hidden).
@@ -49,6 +53,7 @@ export function describeFreshness(state: State, now: number): FreshnessView | nu
 }
 
 const VIEW_LABELS: Array<[View, string]> = [
+  ['needs', 'Needs me'],
   ['epic', 'Epic'],
   ['status', 'Status'],
   ['activity', 'Activity'],
@@ -99,10 +104,13 @@ function StaleBanner({ problem }: { problem: PanelError }) {
   );
 }
 
-type ToolsProps = { state: State; loading: boolean; filtersOpen: boolean; toggleFilters(): void };
+type ToolsProps = { state: State; now: number; loading: boolean; filtersOpen: boolean; toggleFilters(): void };
 
-function Tools({ state, loading, filtersOpen, toggleFilters }: ToolsProps) {
+function Tools({ state, now, loading, filtersOpen, toggleFilters }: ToolsProps) {
   const store = useStoreApi();
+  // On the tab only: the rail badge keeps its meaning (beads changed since you last looked).
+  const minute = Math.floor(now / 60_000) * 60_000;
+  const needs = useMemo(() => needsOf(state, minute).count, [state.snapshot, state.settings, state.keep, minute]);
   const count = state.snapshot?.beads.length ?? 0;
   const unseen = state.snapshot?.unseenIds.length ?? 0;
   // The count is for screen readers only: the placeholder stays short at every width.
@@ -124,8 +132,14 @@ function Tools({ state, loading, filtersOpen, toggleFilters }: ToolsProps) {
       </label>
       <div class="bd-seg" role="group" aria-label="View">
         {VIEW_LABELS.map(([id, text]) => (
-          <button key={id} type="button" aria-pressed={state.view === id} disabled={loading} onClick={() => store.setView(id)}>
+          <button key={id} type="button" aria-pressed={state.view === id} disabled={loading} onClick={() => store.setView(id)} data-view={id}>
             {text}
+            {id === 'needs' && needs > 0 && (
+              <>
+                {' '}
+                <span class="bd-seg-n">{needs > 99 ? '99+' : needs}</span>
+              </>
+            )}
           </button>
         ))}
       </div>
@@ -135,7 +149,7 @@ function Tools({ state, loading, filtersOpen, toggleFilters }: ToolsProps) {
         aria-label="Filters"
         aria-expanded={filtersOpen}
         disabled={loading}
-        data-active={(filtersActive(state.filters) && state.view !== 'activity') || undefined}
+        data-active={(filtersActive(state.filters) && (state.view === 'epic' || state.view === 'status')) || undefined}
         onClick={toggleFilters}
       >
         <IconFilter />
@@ -168,21 +182,26 @@ export function Header() {
   return (
     <header class="bd-head" inert={state.overlays.length > 0}>
       <div class="bd-top">
-        <div class="bd-proj" title={state.directory ?? undefined}>
-          <IconFolder />
-          <span class="bd-proj-name">{name}</span>
-        </div>
+        {/* The project menu needs a project that answered; before that the name is only a name. */}
+        {workspace?.kind === 'ok' && state.directory !== null ? (
+          <ProjectMenu key={state.directory} name={name} title={state.directory} />
+        ) : (
+          <div class="bd-proj" title={state.directory ?? undefined}>
+            <IconFolder />
+            <span class="bd-proj-name">{name}</span>
+          </div>
+        )}
         {fresh && <Freshness view={fresh} />}
         {loading && <FreshnessPlaceholder />}
       </div>
       {/* Its own line, so local and team freshness are never read as one fact. */}
       {fresh?.team != null && <TeamBar team={fresh.team} unpublished={fresh.unpublished} />}
       {fresh?.problem && <StaleBanner problem={fresh.problem} />}
-      {/* A bead's detail has its own top bar; the list's tools come back with the list. */}
-      {(fresh || loading) && !state.detail && (
-        <Tools state={state} loading={loading} filtersOpen={filtersOpen && !loading} toggleFilters={() => setFiltersOpen((open) => !open)} />
+      {/* A bead's detail and the memories have their own top bar; the list's tools come back with the list. */}
+      {(fresh || loading) && !state.detail && state.page === 'list' && (
+        <Tools state={state} now={now} loading={loading} filtersOpen={filtersOpen && !loading} toggleFilters={() => setFiltersOpen((open) => !open)} />
       )}
-      {fresh && filtersOpen && !state.detail && <Filters />}
+      {fresh && filtersOpen && !state.detail && state.page === 'list' && <Filters />}
     </header>
   );
 }

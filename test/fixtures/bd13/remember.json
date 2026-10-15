@@ -1,0 +1,6 @@
+{
+  "action": "remembered",
+  "key": "race-flag",
+  "schema_version": 1,
+  "value": "Always run tests with the --race flag"
+}

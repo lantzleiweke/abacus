@@ -203,6 +203,13 @@ type Prepared = {
   kids: Map<string, Bead[]>;
 };
 
+/** Whether a bead not done is due before now (`overdue`) or in the next 7 days (`week`). A done bead or an unreadable date never is. */
+function dueMatches(b: Bead, filter: 'overdue' | 'week', done: boolean, now: number): boolean {
+  const due = typeof b.extra.due_at === 'string' ? Date.parse(b.extra.due_at) : NaN;
+  if (done || !Number.isFinite(due)) return false;
+  return filter === 'overdue' ? due < now : due >= now && due <= now + WEEK_MS;
+}
+
 function prepare(input: ListInput): Prepared {
   const classify = classifier(input);
   const ready = new Set(input.readyIds);
@@ -213,6 +220,7 @@ function prepare(input: ListInput): Prepared {
     if (assignee === 'unassigned' ? !!b.assignee : assignee !== 'any' && b.assignee !== assignee.name) return false;
     if (priorities.length > 0 && (b.priority === null || !priorities.includes(b.priority))) return false;
     if (input.filters.ready && !ready.has(b.id)) return false;
+    if (input.filters.due !== 'any' && !dueMatches(b, input.filters.due, classify(b).look === 'done', input.now)) return false;
     return q === '' || b.id.toLowerCase().includes(q) || b.title.toLowerCase().includes(q);
   };
   const byId = new Map(input.beads.map((b) => [b.id, b]));

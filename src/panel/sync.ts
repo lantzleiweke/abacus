@@ -1,12 +1,26 @@
 import { createContext } from 'preact';
 import { useContext, useEffect, useState } from 'preact/hooks';
 import type { HostClient } from '@openchamber/sdk';
-import type { SyncState, UnpublishedChange } from '../shared/types';
+import type { Bead, SupersededEdit, SyncState, UnpublishedChange } from '../shared/types';
 import { ANSWER_LOST, asRequestError, COPY_MAX, TOAST_MAX, type BeadsClient } from './client';
+import { shortId } from './list';
 import type { FullSnapshot, PanelError, Store } from './store';
 
 /** A sync problem the panel shows as a card: a conflict, a failed job, or a project Beads cannot sync as it is. */
 export type SyncProblem = Extract<SyncState, { kind: 'conflict' | 'error' | 'paused-upgrade' }>;
+
+const SUPERSEDED_NAMED_MAX = 3;
+
+/** Says which beads had an older edit replaced by a newer one to the same fields, in plain words. */
+function supersededText(edits: SupersededEdit[], beads: Bead[]): string {
+  const named = edits.slice(0, SUPERSEDED_NAMED_MAX).map((edit) => {
+    const title = beads.find((bead) => bead.id === edit.beadId)?.title;
+    const who = title ? `"${title}"` : shortId(edit.beadId);
+    return edit.fields.length > 0 ? `${who} (${edit.fields.join(', ')})` : who;
+  });
+  const more = edits.length - named.length;
+  return `Both sides edited the same thing, so the newer edit was kept: ${named.join(', ')}${more > 0 ? `, and ${more} more` : ''}.`;
+}
 
 /** The shown sync problem, or null when there is none (or the project has no shared copy). */
 export function syncProblem(snapshot: FullSnapshot | null): SyncProblem | null {
@@ -103,7 +117,11 @@ export function createSync({ client, host, store }: SyncDeps): Sync {
     awaiting = null;
     // A problem shows as its own card; only a clean end gets a word. A Publish the job stopped because new changes arrived
     // shows the preview again, as it is now.
-    if (sync.kind === 'idle') toast('success', done.op === 'pull' ? 'Synced.' : `Published ${changesText(done.count)}.`);
+    if (sync.kind === 'idle') {
+      const lead = done.op === 'pull' ? 'Synced.' : `Published ${changesText(done.count)}.`;
+      if (sync.superseded && sync.superseded.length > 0) toast('info', `${lead} ${supersededText(sync.superseded, state.snapshot?.beads ?? [])}`, sync.log);
+      else toast('success', lead);
+    }
     else if (done.op === 'publish' && sync.kind === 'error' && sync.code === 'preview-stale') void openPreview(sync.message);
   });
 

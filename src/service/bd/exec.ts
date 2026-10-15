@@ -76,7 +76,10 @@ export function searchDirs(): string[] {
 
 // Host variables that would point bd or git at a different database or repo than `cwd`.
 // Password variables are kept: they authenticate, they do not redirect.
+// The two BD_ switches are named in bd's own refusals; inherited, they would let bd migrate a store without the person pressing Update project.
 const LEAKY_ENV = [
+  'BD_IGNORE_SCHEMA_SKEW',
+  'BD_ALLOW_REMOTE_MIGRATE',
   'BEADS_DIR',
   'BEADS_DB',
   'BEADS_DOLT_SERVER_HOST',
@@ -116,7 +119,9 @@ export async function resolveExecutable(name: ToolName, dirs: string[] = searchD
 // `lock` must stand alone: not inside "blocked", and not joined to a path, id or
 // word by `-`, `/`, or `_` (`smart-lock/.beads`, `lock-a1`).
 // "locks" and "locking" are left out on purpose: they show up in bead titles, real lock errors do not use them.
-const LOCK_PATTERN = /(?<![\w/-])lock(?:ed)?(?![\w/-])/i;
+// "lock out" is not a lock error either: bd's refusal to migrate a shared server database says it would "lock out every
+// co-resident bd client", which is a refusal to be shown, not a busy database to try again.
+const LOCK_PATTERN = /(?<![\w/-])lock(?:ed)?(?![\w/-])(?!\s+out\b)/i;
 
 /** Pass the error text only (stderr, or the `error` field of a JSON error), never a result body. */
 export function isLockError(errorText: string): boolean {

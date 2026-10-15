@@ -1,0 +1,2 @@
+Error updating pl-mcj: validation failed: invalid issue type nonsense
+{"error":"1 of 1 issues failed to update","failed":[{"id":"pl-mcj","error":"updating issue: validation failed: invalid issue type nonsense"}],"schema_version":1}

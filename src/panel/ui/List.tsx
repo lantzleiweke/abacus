@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { listKey, type KeyFocus } from '../keyboard';
+import { writesPaused } from '../edit';
 import { epicView, matchesWithAll, rowOrder, statusView, type ListInput } from '../list';
+import { eligibleEpics } from '../needs';
 import { filtersActive, useNow, useStore, useStoreApi, DEFAULT_FILTERS } from '../store';
 import { EmptyState, NoBeads } from './EmptyState';
 import { EpicView, type BoxAttrs } from './EpicView';
@@ -16,7 +18,8 @@ export function focusOf(target: EventTarget | null): KeyFocus {
   if (!(target instanceof HTMLElement)) return 'list';
   if (target.matches(SEARCH)) return 'search';
   if (target.isContentEditable || target.closest('input, textarea, select')) return 'field';
-  if (target.closest('button, a, [role="menuitem"]')) return 'control';
+  // A refusal that took focus (Restore): Enter there must not open the cursor row and lose what it says.
+  if (target.closest('button, a, [role="menuitem"], [data-refused]')) return 'control';
   return 'list';
 }
 
@@ -48,6 +51,9 @@ export function List() {
     return { kind: 'epic' as const, groups, keyed: groups.map((g) => ({ key: g.key, ids: rowOrder([g]) })), ids: rowOrder(groups), input };
   }, [beads, statuses, readyIds, unseenIds, state.filters, state.query, state.collapsed, state.view, expanded, minute]);
 
+  const gates = state.gates;
+  const ready = useMemo(() => new Set(beads && statuses ? eligibleEpics(beads, statuses, gates).map((b) => b.id) : []), [beads, statuses, gates]);
+
   // The cursor counts only while its row is on screen.
   const shown = cursor !== null && (model?.ids.includes(cursor) ?? false) ? cursor : null;
   // A new bead goes under the epic the cursor is in.
@@ -76,8 +82,8 @@ export function List() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { ids, cursor: at, menu: open, state: s } = live.current;
-      // Under a bead's detail the list keeps still; the detail has its own keys.
-      if (s.detail || s.overlays.length > 0 || open || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Under a bead's detail or the memories the list keeps still; they have their own keys.
+      if (s.detail || s.page !== 'list' || s.overlays.length > 0 || open || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key === 'F10' && e.shiftKey ? 'ContextMenu' : e.key;
       const focus = focusOf(e.target);
       const action = listKey({ key, ids, cursor: at, focus });
@@ -174,7 +180,7 @@ export function List() {
   return (
     <div class="bd-list" role="group" aria-label={model.kind === 'epic' ? 'Beads by epic' : 'Beads by status'} data-stale={stale || undefined} data-view={model.kind}>
       {model.kind === 'epic' ? (
-        <EpicView groups={model.groups} toggle={(key) => store.toggleCollapsed(key)} box={box} {...events} />
+        <EpicView groups={model.groups} toggle={(key) => store.toggleCollapsed(key)} box={box} ready={ready} paused={writesPaused(snapshot)} {...events} />
       ) : (
         <StatusView sections={model.sections} toggle={(key) => store.toggleCollapsed(key)} expand={(key) => setExpanded((list) => [...list, key])} box={box} {...events} />
       )}

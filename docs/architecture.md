@@ -26,7 +26,7 @@ OpenChamber window
 
 **The service** is a Node process the host starts (`service/main.js`). It is the only part that touches the project. It listens on `127.0.0.1` at the port the host passes in `OPENCHAMBER_SERVICE_PORT`, and requires the token in `OPENCHAMBER_SERVICE_TOKEN`. The panel reaches it through `host.serviceRequest`. Every route is `POST /api/<name>` with a JSON body. Every body carries an absolute `directory` that must exist.
 
-Routes: `workspace`, `snapshot`, `bead`, `update`, `create`, `comment`, `dependency`, `seen`, `context`, `sync-preview`, `sync-pull`, `sync-publish`, `conflict-context`. Request bodies are capped at 64,000 characters.
+Routes: `workspace`, `snapshot`, `bead`, `update`, `deferBead`, `undeferBead`, `supersede`, `duplicate`, `explain`, `create`, `comment`, `dependency`, `gateCreate`, `gateResolve`, `humanRespond`, `humanDismiss`, `history`, `memories`, `memoryRemember`, `memoryForget`, `seen`, `eventsStatus`, `enableEvents`, `context`, `sync-preview`, `sync-pull`, `sync-publish`, `conflict-context`. Request bodies are capped at 64,000 characters.
 
 Errors share one envelope, `{ error: { code, message, detail?, workspace?, saved? } }`, defined once in `src/shared/types.ts` so the service and the panel cannot disagree about it. `src/shared` holds only types and the one function both sides need to work out a bead's relationships (`related.ts`).
 
@@ -109,6 +109,7 @@ Panel side:
 | Situation | Poll |
 |---|---|
 | Panel visible | every 2 s |
+| Panel visible, events follower running (the answer says `following`) | every 500 ms |
 | After a failure | backs off up to 30 s |
 | Panel hidden in the rail, window visible | every 60 s |
 | Window hidden (`document.visibilityState`) | none |
@@ -139,7 +140,7 @@ Another process can write the same bead between the panel reading and saving. Th
 
 Write error codes: `invalid` 400, `not-found` 404, `blocked` 409, `dep-exists` 409, `merge-conflict` 409, `busy` 503, `uncertain` 504, `no-bd` 500, `failed` 500.
 
-The panel never calls `bd dolt remote add` or anything else that writes `.beads/config.yaml`. In many projects that file is tracked in Git and shared.
+The panel never calls `bd dolt remote add` or anything else that writes `.beads/config.yaml`, with one exception: `enableEvents`, which runs `bd config set events-journal true` after the person confirms it in the project menu. In many projects that file is tracked in Git and shared, so a static test in the suite fails if any other call can write a setting.
 
 ## Sync and Publish
 
@@ -166,6 +167,54 @@ The panel never resolves a conflict. It builds a record (both sides, what failed
 
 A project with uncommitted settings rows cannot pull. The panel reports it and does not clean it up.
 
+## Reviews, history and memories (0.2)
+
+Three features read and write Beads state the 0.1 snapshot did not model. Each has one module in `src/service/` and a route pair, and each follows the write rules above.
+
+### Gates
+
+Beads stores a review or a plan approval as a bead of its own with type `gate`, linked to the bead it holds. `gates.ts` takes those rows out of an export (`splitGates`) before anything else sees the list, so they never reach the Epic or Status views, the counts or the feed. The snapshot carries what is left as `gateIds` and each gate with its kind, reason, who asked and when, and which beads it blocks. A change event for a gate carries a `gateId`. There is no flag on a bead.
+
+- **Kinds.** A human gate is a review or a plan approval. A plan approval is a human gate whose reason starts with the fixed text in `src/shared/gates.ts` (`PLAN_APPROVAL_REASON`). Timer, GitHub run, GitHub pull request, bead and check gates are read-only here.
+- **Writes.** `gateCreate` and `gateResolve` re-read the bead and the gate inside the root queue. A gate that is already resolved is answered with who resolved it, not an error. A create for a bead that already waits on one of that kind is refused with a message that says so.
+- **Closing.** A close, and `humanRespond` and `humanDismiss`, check the bead's blockers the way `bd close` does (stored blocked state plus at least one live direct blocker, including waits-for links and a parent that waits). They refuse with `blocked` and name what holds the bead. Comment-and-close adds the comment first and relies on Beads' own refusal.
+- **Needs me** is derived on the panel from the snapshot (`src/panel/needs.ts`): reviews and plans waiting, `human` beads that are open, in-progress beads past the stuck threshold or with an expired lease, and unseen beads. The service sends the gate and lease data in the snapshot and does not compute the sections.
+- **Upgrade.** The saved 0.1 baseline is run through `splitGates` when 0.2 first reads it, so the change feed does not report each review as a deleted bead. The gates open at that last 0.1 read are taken from the gate rows it kept among its beads, so a review opened or resolved since shows its row; only a file with no readable snapshot takes a gate baseline.
+
+### History
+
+`history.ts` builds a bead's versions from `bd history` and, on Beads 1.3, joins audit events to say who made each one. It runs only when the History section is opened. The first read asks for 200 versions and a request for older ones doubles it up to 1,000. A text is cut at 20,000 characters for transport and marked, and is never offered for restore.
+
+- **Actor join.** An audit event is attached to a version only when its written value matches the one the version holds. Anything else is "unknown". The audit table is local to each copy of the project in Beads 1.3, so a change from another computer has no row here.
+- **Gate events** in History come from the gates' own audit rows. A close and a reopen carry no name.
+- **Restore** goes through the same `update` route as every edit. The panel sends the value it showed as `expected`, so a field changed again since is refused, and the panel shows the current value and the diff before a second, confirmed write.
+
+### Memories
+
+`memories.ts` lists, adds, edits and forgets `bd remember` memories. Beads keeps each as a config row named `kv.memory.<key>`, read with SQL (`audit.ts`), newest change first. `bd` reads a short text that equals a memory's name as that memory, so a new text that matches a key is refused. `schema_version` is refused as a key. A text over 4,000 characters is refused, not cut. An edit or a forget sends the text the person saw, and the service writes only when the stored text still equals it. Undo after a forget is a new add of the same key and text through the same route.
+
+## The events follower (0.2)
+
+Beads 1.3 can keep a log of changes on this computer (`events-journal`, off by default). When it is on, `live.ts` runs one child per project root, `bd events tail --since <seq> --follow --readonly`, and each line it prints marks the root dirty. The next snapshot request sees that, skips the 4-second throttle and refreshes. The log is a nudge. The data still comes from the export, because pulls, merges, other computers and direct SQL are not in it.
+
+- **When it runs.** `ensure(root, capable)` is called by every snapshot request. The child starts only when Beads is 1.3 or later (`capabilitiesFor`), the setting is on, and the panel has been asking. The setting is read once with `bd config get events-journal` and kept for 60 seconds. `journalChanged` drops that reading after `enableEvents`. The `eventsStatus` route reports `on`, `off` or `unknown` for the project menu, and `off` for a Beads older than 1.3.
+- **States.** The panel shows Following (child running), Starting, Reconnecting (in backoff after a failure) and Not working (`failed`). Backoff waits are 2, 5, 15 and 60 seconds. After 5 failures with no event in between the follower is `failed` and polling carries on. It tries once more after 5 minutes.
+- **Position.** The child starts from the last sequence number seen. When Beads has pruned past it (the log keeps 7 days), the child prints an error that carries the head, and the follower parses it from stderr. If the text does not carry it, one non-follow `bd events tail --since 0 --limit 1 --json` reads the head. Either way the follower carries on from the head.
+- **Idle.** With no snapshot request for 30 seconds the child is stopped (a hidden panel polls once a minute). `SIGTERM` is followed by `SIGKILL` after 2 seconds. A timer runs only while a child exists.
+- **Pidfile.** Each child has a file `live-<hash of the root>.pid` in the storage folder, holding the child's pid, the service's pid and the root. It is removed when the child ends. When a service starts, `reapStale` reads those files. If the service that wrote one is gone and the pid still belongs to a `bd events tail` command line, it kills that process group. A pid that has been reused by anything else is left alone, and a file whose owner is alive is not touched, since another window's service may own it. This stops a crashed service from leaving followers behind.
+- **Fast poll.** Every snapshot answer, full or unchanged, carries `following` (the follower's held state, no bd call). While it is true and the panel is visible, the panel asks every 500 ms instead of 2 s; a poll between events reads nothing. Without it the panel's own interval would put a floor under the wait.
+- **Fallback.** The panel's poll and the service's change signal never stop. Live updates shorten the wait for a change from a few seconds to the time a refresh takes. When the follower is off, failed or not capable, nothing else changes, including on Beads 1.2.2.
+
+## The one-time schema update
+
+Beads 1.3 refuses a read-only open of a store written by an older Beads, so a project made with 1.2 or earlier cannot be read until its schema is updated. The service recognises that refusal (`schemaSkewOf`) and keeps the project's state as needing the update (`freshness.schemaUpdate`, answered as `needs-schema-update`). Nothing sets `BD_IGNORE_SCHEMA_SKEW`, and `childEnv` drops it and `BD_ALLOW_REMOTE_MIGRATE` from the environment bd inherits, so a person's shell cannot start an update the panel did not ask for.
+
+- **One call site.** `migrateSchema` is the only route that runs `bd migrate schema`, through the write guard. It needs `confirm: true` in the request. It never passes `--force`.
+- **A background job.** `schema-update.ts` holds the job per root. The route starts it and answers at once. The snapshot carries its state in `freshness.schemaUpdateJob` (`running`, or `failed` with when it ended, a code, a message and a detail). The update has its own 120 s budget (`MIGRATE_BUDGET_MS`), outside the host's 20 s request cut and the usual write limit, so a long migration is never killed partway.
+- **While it runs or is pending.** Reads answer from the cache, polls do not touch the store, and every other bead, memory and settings write answers 409 `needs-schema-update`. Sync and Publish do not check this themselves; the panel does not offer them in this state.
+- **Afterwards.** The service reads the statuses again. A read that still shows an old schema is a failure ("Beads ran the update but the project still reads as out of date."), and any other read failure is uncertain ("The project may be updated now, but Beads didn't confirm it."), which the panel settles with a new read.
+- **Shared projects.** A store with a team copy or a server is refused by Beads itself. The service maps that refusal, and Beads' other shared-store wording, to `update-blocked-shared` with plain copy and no retry.
+
 ## Attaching to a chat
 
 The attach dialog (`src/panel/attach.tsx`) and the `/bd` command are separate panel entries. The host holds one chip per dialog open, so the picker attaches one bead at a time. Starting a session uses `host.startSession`, which links the new session to the bead. Starting in a worktree links the session and prints a `/bd <id>` tip instead of a chip, because the host unmounts the panel when the worktree opens.
@@ -174,7 +223,9 @@ The attach dialog (`src/panel/attach.tsx`) and the `/bd` command are separate pa
 
 ```
 src/panel/    UI: store.ts (state, polling), client.ts (typed service client), ui/*.tsx
-src/service/  main.ts (HTTP), routes.ts, snapshot.ts, sync.ts, workspace.ts, errors.ts, bd/*
+src/service/  main.ts (HTTP), routes.ts, snapshot.ts, sync.ts, workspace.ts, errors.ts,
+              gates.ts, history.ts, memories.ts, live.ts, explain.ts, capabilities.ts,
+              schema-update.ts, bd/*
 src/shared/   types.ts, api.ts, related.ts
 panel/        built bundles and HTML, committed
 service/      built bundle, committed

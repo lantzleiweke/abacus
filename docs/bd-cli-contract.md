@@ -1,4 +1,4 @@
-# bd CLI contract (beads 1.2.2, dolt 2.3.2)
+# bd CLI contract (beads 1.2.2, dolt 2.3.2; 1.3.1 differences below)
 
 Captured 2026-10-14 against two scratch projects (never a real project):
 
@@ -227,3 +227,164 @@ Measured with mtime/size snapshots (`side-effects-*.txt`):
 | `dolt sql` CLI in embedded dir | 0.12-0.16 s | n/a |
 | write (update/create/comment/dep) | 0.2-0.5 s | 0.17-0.32 s |
 | `dolt pull` / `push` | 0.4-0.9 s / 0.35-0.4 s | 0.2-0.75 s / 0.28-0.3 s |
+
+## bd 1.3.1 differences (verified 2026-10-14)
+
+**Adapter status (Phase 0): every BREAKS item below is handled, the integration suites pass on 1.3.1, and 1.2.2 behavior is covered by unit tests built on captured 1.2.2 output (no 1.2.2 binary has been installed since the 2026-10-14 upgrade).** Close-blocked text: `adapter.ts` reads both messages. Claimed beads: new write error code `claimed`, and a status move out of In progress runs as its own `update` before the assignee change. Commit messages: `describeCommit` reads the server-style forms, and `nameCreated` gets a created id from one `dolt_diff` query. Auto-merge: `parseSupersededEdits` turns the `Notice: auto-merged` lines into `SyncState.idle.superseded`. Audit: `storeWritesUtc(bdVersion)` (1.3 and later) lets `eventTimeMs` read `created_at` as UTC for ids without a time.
+
+Captured with `bd version 1.3.1 (Homebrew)` against fresh **embedded** scratch projects under `~/.cache/openchamber-beads-scratch/bd13-*` (`bd init`, then the adapter's own commands). The `dolt` CLI on PATH is 2.4.2 (Homebrew keeps 2.3.2 beside it, unlinked). Schema of a freshly initialised embedded store is `schema_migrations` v66 (the 1.2.2 contract above was v53). **Not verified:** server mode, a v53 -> v66 migration of an existing store (no 1.2.2 binary or old store was available), a real `git+https` remote. The six integration failures seen on 1.3.1 (`audit` 1, `sync` 2, `writes` 3) all trace to the items marked **BREAKS** below. Everything not listed behaved as in 1.2.2 (export/list/ready/statuses/types/comments/`dep list`/`vc status`/`dolt remote list` shapes, `list --all --id` hiding nothing and returning `[]` for an unknown id, `--limit 0`, `dolt push`/`pull` text and exit 0).
+
+### BREAKS: close refused by a blocker, new message text
+
+`bd close --json -- <id>` on a bead with an open blocker: exit 1, stdout empty, stderr (plain text, no JSON):
+
+```
+cannot close blocked issue: wr-3fm is blocked by [wr-cw3] (use --force to override)
+```
+
+1.2.2 said `cannot close <id>: blocked by open issues [<ids>] (use --force to override)`. The adapter's `/blocked by open issues\s*\[([^\]]*)\]/i` no longer matches, so the failure maps to `code: 'failed'` instead of `'blocked'`. Match both: `/(?:blocked by open issues|is blocked by)\s*\[([^\]]*)\]/i`.
+
+`bd update --json --status=<done status or closed> -- <id>` on a blocked bead now **also enforces the close policy** (it did not in 1.2.2). Exit 1, stdout empty, stderr two lines: `Error updating <id>: cannot close blocked issue: <id> is blocked by [<ids>]` then `{"error":"1 of 1 issues failed to update","failed":[{"id":"...","error":"updating issue: cannot close blocked issue: ... is blocked by [...]"}],"schema_version":1}`. `--force` overrides (also for open children); the adapter never passes it. An unblocked bead still moves to a custom done status with a plain `update --status=shipped` (exit 0, no `closed_at` or reason on the bead, as before). The adapter closes first, so it hits the `close` message above.
+
+### BREAKS: changing or clearing the assignee of a claimed (in_progress) bead
+
+`bd update --json --assignee= -- <id>` (or `--assignee=<someone else>`) on a bead that is `in_progress` and assigned to someone other than the actor: exit 1, stdout empty, stderr:
+
+```
+cannot reassign wr-2m4: held by "Dana" (in_progress); coordinate with the holder (bd mail Dana) — pass --force only if their claim is abandoned (crashed agent, expired lease), or use bd reclaim
+{"error":"1 of 1 issues failed to update","failed":[{"id":"wr-2m4","error":"cannot reassign ... "}],"schema_version":1}
+```
+
+- Same command in one call with `--status=open` is still refused (the guard looks at the stored status). Two calls work: `update --status=open`, then `update --assignee=`.
+- Setting the same assignee again (`--assignee=Dana`) passes; running as the holder (`--actor Dana --assignee=`) passes; on an `open` bead any reassign passes. Assigning while moving to `in_progress` in the same call passes (the bead was not held yet).
+- `--force` overrides it; never pass it. `bd reclaim` and `bd unclaim` are the intended paths.
+- No lease fields appear in `export`/`list`. Leases live in the new `leases` table (`issue_id, holder, granted_at, lease_expires_at, heartbeat_at, granted_node`), which is dolt-ignored (local only) and was empty after `update --status=in_progress --assignee=...`.
+- Not a real error to retry. The adapter should map `cannot reassign` / `held by` to its own code (for example `claimed`) with plain language, and/or order the steps so a status move out of `in_progress` runs before the assignee change.
+- New exit code **13**: `update --if-assignee <v>` / `--if-status <v>` guards (a stale precondition writes nothing). Not used by the adapter yet; usable as an atomic compare-and-set for status/assignee.
+
+### BREAKS: embedded commit messages changed
+
+Embedded writes now commit as committer `beads` with **server-style** messages, no actor, no id list:
+
+| Write | Commit message |
+|---|---|
+| create | `bd: create issue` (**no id**) |
+| update | `bd: update <id>` (a multi-id `update` makes one commit per id) |
+| comment | `bd: comment <id>` |
+| close / reopen | `bd: close <id>` / `bd: reopen <id>` |
+| dep add / remove | `bd: dep add <from> <to>` / `bd: dep remove <from> <to>` |
+| label add | `bd: update <id>` (it is an update commit) |
+| pull merge | `Merge branch ...` (non-conflicting), or `auto-resolve merge conflicts: metadata, dependencies, schema_migrations, config, issues (field-level three-way merge), labels/comments/events (union)` (committer `root`) |
+| init | `bd init`, then `schema: apply migrations` (committer `root`), plus one `schema: apply migration NNNN_<name>.up.sql` commit per migration (0001 to 0066 on 1.3.1) |
+
+The 1.2.2 embedded form `bd: update (auto-commit) by <actor> [<ids>]` is gone. In `describeCommit` (`src/service/sync.ts`) the server regex `/^bd: (\S+) (\S+)\s*$/` now matches `bd: create issue` and returns `beadIds: ['issue']`, so a created bead is not in the unpublished list's `beadIds`, and `bd: dep add A B` falls through to "Saved a change". Fix direction: treat `create` (no id) and `dep add|remove <a> <b>` explicitly; for the created id read `SELECT to_id FROM dolt_diff('<hash>~','<hash>','issues')` (works, `diff_type`, `to_id`) or accept "Created a bead" without an id. Keep the 1.2.2 regex first so both versions work. "Who" for unpublished commits is no longer in the message at all in embedded mode.
+
+### BREAKS: pull auto-settles same-field conflicts (last-write-wins)
+
+`bd dolt pull` now runs an auto-resolver. Two clones editing the **same field of the same bead** (title; description and status; priority all tried) no longer conflict: exit 0, stdout `Pulling from Dolt remote...\nPull complete.`, one stderr line per bead:
+
+```
+Notice: auto-merged issue sx-g0z; title, updated_at settled last-write-wins (the older side's edit was superseded)
+```
+
+The side with the later `updated_at` wins; a merge commit `auto-resolve merge conflicts: ...` (committer `root`) is made, `dolt_merge_status.is_merging` is 0, `dolt_conflicts` is empty, and the pull is reported as success. In the sync test the second clone (B, later edit) kept `B title`, and A's earlier edit was silently overwritten. Labels, comments and events are unioned; dependencies, metadata and config are auto-settled. The adapter sees `kind: 'idle'` where 1.2.2 gave a backed-out conflict.
+
+Conflicts the resolver declines still abort exactly as in 1.2.2. Verified: one clone **deletes** a bead (`bd delete --force`) and pushes, the other edits it then pulls: exit 1, stderr `Error: merge origin/main: merge conflicts in issues require operator resolution; merge aborted and working set restored`, working set clean, `DOLT_PREVIEW_MERGE_CONFLICTS_SUMMARY` -> `[{table:'issues', num_data_conflicts:1, num_schema_conflicts:0}]`, and `SELECT * FROM DOLT_PREVIEW_MERGE_CONFLICTS('main','remotes/origin/main','issues')` still lists `base_/our_/their_` columns (no `diff_type` column, but `conflictOf` does not need one). So the existing detection (`ABORTED`/`CONFLICT_TEXT` match) stays valid; a delete-vs-edit is the reproducible decline case for tests. Also new: `bd dolt pull --strategy ours|theirs` (embedded only), `bd conflicts list|show|resolve`, and `bd sync` (pull, conflict check, `is_blocked` repair, push; exits 2 on unresolved conflicts, 4 on a stuck working set). The panel should consider showing the `Notice: auto-merged` lines (stderr of a successful pull) as "older edit superseded", since a user's change can now be lost without any prompt.
+
+### BREAKS: audit `events` ids are UUIDv5 and `created_at` is real UTC
+
+Every `events` row written by 1.3.1 has a UUIDv5 id (version nibble `5`, `id[14] === '5'`), none v7 (16 of 16 and 5 of 5 rows in two clones). `eventTimeMs` returns null for all of them, so the audit test "dates UUIDv7 events in real UTC" fails (`times.every(t => t !== null)`). The id no longer carries time. But `events.created_at` (now `datetime`, was `timestamp`) is **real UTC**, not local time labeled UTC: with `TZ=Asia/Tokyo` and `TZ=UTC` it equals `date -u` to the second (PDT machine: `2026-10-15 05:26:38` for a write made at 22:26:38 PDT), and matches the bead's own `updated_at`. dolt JSON output is `YYYY-MM-DD HH:MM:SS`, no zone. Fix direction: keep v7 decoding first; for a non-v7 id fall back to `created_at` read as UTC **only when the store is known to write UTC** (bd >= 1.3, or the row is newer than the 0062 migration commit in `dolt_log`). Rows from 1.2.2 (v7 ids written with local `created_at`, v5 imports) must stay untimed or v7-timed. A migrated store (made by 1.2.2, opened by 1.3.1; the demo pantry) keeps its 1.2.2 rows as they were: local-time `created_at` (a bead made 03:45Z has a `created` event at 20:45 on the day before, in PDT), UUIDv5 ids in that store, so neither the id nor the stamp dates them. Opening it applies migrations 0054 to 0066, each its own `schema: apply migration ...` commit in `dolt_log`, dated in real UTC. The panel reads the **newest** `0062_events_dolt_ignore` commit date as the start of UTC stamps (`readUtcSince`; newest, because clones upgraded on different days merge several), and dates a non-v7 row only when its stamp is not before it. A store whose history was squashed (`bd flatten`, `bd compact`) has no such commit: its non-v7 event rows stay untimed (History shows them without a time, label changes made with the bead at the bead's creation), never wrong.
+
+Other `events` changes: columns are `issue_id, event_type, actor, old_value, new_value, comment, created_at, id` (same set, `id` now last; the guard is order independent), and `events` is now in `dolt_ignore` (migration `0062_events_dolt_ignore`): it is **local to each clone and does not travel on push/pull**. After A made edits and B pulled, B's `events` lacked A's rows (A 16 rows, B 5). The audit view therefore only knows changes made on this machine; `Beads` also added `bd_events_journal` (opt-in, `bd config set events-journal true`, per replica, empty by default), `provenance_events`, `leases`, `interactions`, all dolt-ignored or local.
+
+### BREAKS: a store from an older bd refuses every read-only open (L8)
+
+A project last opened by bd 1.2.x or older holds an older schema (v32 in the pre-1.3 backup; 1.3.1 expects v66). Every `--readonly` call on it, including the workspace probe `bd --readonly dolt remote list --json`, exits 1 with this on stderr (`test/fixtures/bd13/schema-skew.stderr`): `Error: failed to open database: schema version mismatch: database is at v32, binary expects v66, and the read-only open cannot migrate it; run any bd write command in that workspace to migrate, or set BD_IGNORE_SCHEMA_SKEW=1 to read anyway (queries touching newer schema may fail)`. The panel never sets `BD_IGNORE_SCHEMA_SKEW` (reads that touch the newer schema would fail in odd ways). It recognises the text (`schemaSkewOf`, which needs both the "database is at vN, binary expects vM" and the "read-only open cannot migrate" parts), shows the project as needing a one-time update (`freshness.schemaUpdate`, error code `needs-schema-update`), and runs the update only when the person confirms: the `migrateSchema` route, the one call site of `bd migrate schema`, which goes through the write guard and needs a literal `confirm: true`. Two quirks (`migrate-schema.txt`): `bd migrate schema --json` prints plain text (`✓ Schema already at v66` once current), so the exit code is the only signal; and the **open itself** performs the migration (any write-mode open does), so a project that did not need it still answers exit 0. The panel therefore reads statuses again after the command and treats a still-skewed answer as failed and any other read failure as uncertain. A store with a Dolt remote is gated: `bd migrate schema --json` exits 1 with a stderr line "refusing to auto-apply N pending schema migrations to a remote-backed database" (`migrate-schema-remote-refused.stderr`, captured on the pre-1.3 backup plus `dolt remote add`), and the store stays at v32. The panel maps it to `update-blocked-shared` (409, `isRemoteMigrateGate`), shows plain copy that a teammate who shares the project has to update it first, keeps Details, and offers no retry button. It never passes `--force` and never sets `BD_ALLOW_REMOTE_MIGRATE`. The update has its own 120 s budget (`MIGRATE_BUDGET_MS`), not the 15 s write limit. It runs as a background job: the route answers `{ ok: true }` at once (started), and the snapshot carries its state in `freshness.schemaUpdateJob` (`running`, or `failed` with `at`, code, message, detail, saved); while it runs, polls answer from cache and nothing else touches the store, which keeps the 120 s outside the host's 20 s request cut. bd's other shared or remote refusals (remote-adopt, remote-diverged, shared-server wording; the server-mode "lock out" wording is not a busy lock) map to the same `update-blocked-shared` result. While a project needs the update, every other write route answers 409 `needs-schema-update`. The route answers 400 `BAD_REQUEST` ("confirm must be true.") when `confirm` is not literally `true`. First contact applies first: a store last opened by an older bd asks for the person's consent before anything runs, then shows the update prompt.
+
+### Other differences (no failing test)
+
+- `bd init` now also writes agent integration files into the working directory (`CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.agents/skills/beads/`, Codex and Cursor hooks/rules). Harmless in the temp test projects; never run it in a real project from the extension.
+- `bd create --json` prints microsecond timestamps (`2026-10-15T05:26:08.480189Z`); `export`, `list`, `update` print second precision (`...:08Z`). The adapter reads beads back with `list`, so `updatedAt` comparisons stay second-based.
+- `bd close` with no `--reason` sets `close_reason: "Closed"`; closing an already closed bead exits 0 and is a no-op.
+- `dep add --type=blocks` from a task onto an **epic** now succeeds (exit 0); 1.2.2 rejected it (`tasks can only block other tasks, not epics`). The adapter's mapping for that text is now dead code but harmless.
+- `bd comments <unknown> --json` and `bd close <unknown> --json` print `{"error":"resolving <id>: no issue found matching \"<id>\"","schema_version":1}` on **stdout**, exit 1 (the text still matches `no issue found matching`). `bd update <unknown>` keeps the plain `Error resolving <id>: ...` line on stderr plus a JSON `failed[]` line.
+- Batch `update`/`close` with a failing id exits non-zero and still applies the others (the adapter only sends one id per call).
+- `bd dolt status --json` -> `{data_dir, data_dir_exists, mode:"embedded", schema_version:1, server_running:false}`. `bd sql` is still unsupported in embedded mode (`Error: 'bd sql' is not yet supported in embedded mode`, exit 1), so the `dolt sql` CLI route in `audit.ts` is still required.
+- `bd --readonly vc status --json` -> `{branch, commit, schema_version}` unchanged; `bd --readonly info --json` gains `mode:"direct"`, `config{}` and `issue_count`.
+- New global flags `--database` (proxied-server mode only), `--ignore-schema-skew`, `--sandbox`, `--global`; new commands `heartbeat`, `reclaim`, `unclaim`, `batch`, `events`, `provenance`, `serve`, `schema`. No proxied-server topology showed up for `bd init` in a plain directory (it created an embedded store, `dolt_mode: "embedded"`).
+- `bd dep add` / `remove` / `list`, `comments add`, `label add`, `statuses`, `types`, `ready --limit 0`, `list --all --flat --limit 0` JSON shapes and fields match the 1.2.2 contract above.
+
+## bd 1.3.1 capabilities for 0.2 (verified 2026-10-14)
+
+Captured by the Abacus 0.2 plan, Task 1, in a scratch project (prefix `pl`, embedded Dolt). Fixtures are in `test/fixtures/bd13/` (`<name>.json|txt|jsonl`, `.stderr`, `.meta.json`). No 1.2.2 binary was available for these commands, so **every claim below is bd 1.3.1 only; 1.2.2 behavior is unverified** and the service must treat each command as "may not exist" (see the capability set in the 0.2 plan).
+
+### Gates
+
+- `bd gate create --type=human --blocks <id> --reason <r> --json` prints one object (`gate-create`). `issue_type` is `gate`, `await_type` is `human` (or `timer` with `timeout` in nanoseconds, `gate-create-timer`). The reason is the text after `\n\nReason: ` in `description`. The title is `Gate: human`.
+- `bd gate list --json` prints an array of OPEN gates, or the literal `null` when there are none (`gate-list-empty`). `--all` adds closed gates (`closed_at`, `close_reason` is the resolve reason).
+- `bd gate resolve <gate> --reason <r>` prints text only (`✓ Gate resolved: <id>`), no JSON. Judge it by exit code and re-read.
+- A gate is a normal row in `bd export` and `bd list` with `issue_type: "gate"`. The blocked bead carries `dependencies: [{depends_on_id: <gate>, type: "blocks"}]`. That edge **persists after the gate closes**, so "gated" means: has a `blocks` edge to a gate whose `status` is not `closed`.
+- Creating or resolving a gate does not change the blocked bead's `updated_at`.
+- `bd close <gated>` exits 1 with stderr `cannot close blocked issue: <id> is blocked by [<gate>] (use --force to override)`. We never pass `--force`. After resolving, close works.
+- Gate rows also appear in `bd ready`, `bd list` and export counts. Every consumer must exclude `issue_type: "gate"` (counts, epic progress, Status buckets, activity feed, unseen set).
+
+### Human
+
+- `bd human list --json` prints an array of non-closed beads labelled `human`, or `null` when empty. No `--all`.
+- `bd human respond <id> --response <t>` prints text only. It adds the comment `Response: <t>` (by the actor) and closes with `close_reason: "Responded"`.
+- `bd human dismiss <id> --reason <r>` prints text only. It closes with `close_reason: "Dismissed: <r>"`.
+- `bd human respond` and `dismiss` close a bead even when it is not labelled `human` or has an open blocker, so the panel checks first, by the rule of `bd close` on 1.3.1 (read from the v1.3.1 source, confirmed in a scratch project). `bd close` refuses for two separate reasons. (1) A child (`parent-child`) whose status is not exactly `closed` (a custom done status, `pinned` and `deferred` all count as open): `cannot close X: N open child issue(s); close children first or use --force to override`, no ids. (2) The bead's stored, transitive `is_blocked` is set AND at least one direct `blocks`, `conditional-blocks` or `waits-for` target is neither `closed` nor `pinned`: `cannot close blocked issue: X is blocked by [t (waits-for)]`, naming only those live targets (a kind other than `blocks` is printed in parentheses after the id). `is_blocked` is not in `bd export`, `list` or `show`; bd sets it from a live `blocks` or `conditional-blocks` target (custom done statuses are live), from a parent that is blocked itself, and from a `waits-for` target of any status that holds a child that is neither `closed` nor `pinned`. So a `waits-for` link alone does nothing for a target without such a child, yet the same link is refused when the bead is blocked another way (a blocked parent, or a pinned target with an open child that is also waited on). A blocked bead whose direct targets are all closed or pinned closes. `related`, `discovered-from`, `tracks`, `caused-by`, `validates`, `supersedes`, `replies-to`, `relates-to`, `duplicates`, an open parent, and the blocker side of a link are not blockers. The panel derives `is_blocked` from the export (`closeBlockers`). Known gaps: the `any-children` and `also_blocks` metadata of a `waits-for` link (the panel does not read link metadata; `also_blocks` blocks while the target is live, with or without children), and ephemeral wisps (a wisp child or a link to a wisp is not in the export, so it never counts). Not checked by the panel, because `bd human` skips them: a pinned or template request, and one assigned to someone other than the actor.
+- A `human` bead that is already closed does not appear in `list`. Derive the set from export (`labels` has `human`, `status` not closed) so there is no extra call.
+
+### History
+
+- `bd history <id> --json` prints `[{CommitHash, Committer, CommitDate, Issue}]`, newest first, one row per **database commit** that touched anything (12 rows for 4 real changes). The service must collapse consecutive identical `Issue` snapshots. `Issue` has no labels, dependencies or comments. `Committer` is `beads` or `root`, never the actor. A missing id prints `null`.
+- `bd history <id> --events --json` prints `[{id, issue_id, event_type, actor, old_value, new_value, created_at}]`. `old_value` is the whole previous issue as a JSON string, `new_value` the changed fields as a JSON string. Join to a snapshot where `created_at` equals the snapshot's `updated_at` to name the actor. Label changes appear only here. On 1.3 the events table is clone-local.
+- `--limit N` is supported.
+
+### Memories
+
+- `bd memories --json` prints a flat map `{"<key>": "<text>", ..., "schema_version": 1}`, alphabetical, no timestamps. No memories gives `{"schema_version":1}`. `bd memories <keyword> --json` filters. The key `schema_version` collides with the metadata field: reject it, and drop that key when reading.
+- `bd remember "<text>" [--key k] --json` prints `{action: "remembered" | "updated" | "recalled", key, value}`. With an existing key it updates in place. **Without `--key`, text equal to an existing key recalls instead of storing** (`remember-bare-key`): always pass `--key` and treat `action: "recalled"` as a failure.
+- `bd forget <key> --json` prints `{deleted: "true", key}`. A missing key exits 1 with `{found: "false", key}`.
+- Memories are config rows `kv.memory.<key>`. Commit messages are `bd: remember|forget (auto-commit) by <actor>`. For timestamps and per-memory history use `dolt_diff_config` through `runSql` (works in embedded and server mode): `SELECT diff_type, from_key, to_key, from_value, to_value, to_commit_date, to_commit FROM dolt_diff_config WHERE to_key LIKE 'kv.memory.%' OR from_key LIKE 'kv.memory.%' ORDER BY COALESCE(to_commit_date, from_commit_date) DESC LIMIT 50`. (`dolt_history_config` has a row per commit per key, so it is not usable.)
+
+### Defer, dates, move, retype, supersede, duplicate
+
+- `bd defer <id> --until=<date> [--reason r] --json` prints an array with the issue: `status: "deferred"`, `defer_until` in UTC. A bad date exits 1, stderr `Error: invalid --until format "blorp". Examples: +1h, tomorrow, next monday, 2025-01-15`.
+- `bd defer <id>` with no date on an already snoozed bead **keeps the old `defer_until`**. To clear: `bd undefer <id>` (status back to `open`) or `bd update <id> --defer "" --json`.
+- `bd update <id> --defer "2030-01-02"` sets `status: deferred` and `defer_until` at local midnight in UTC. `--due "+2d"` sets `due_at`. `--due ""` clears it. A bad `--due` exits 1 with `{"error":"invalid --due format ...","schema_version":1}` on **stdout**.
+- **Date forms, captured 2026-10-15 on bd 1.3.1** (`test/fixtures/bd13/date-forms.json`: 150 runs in five zones, `--due` and `defer --until`, which read alike). `tomorrow`, `+Nd`, `+Nw` and `next <weekday>` are calendar days from now in the machine's zone at the same wall clock time as now (`+20d` across a daylight saving change keeps the wall clock). `next friday` on a Thursday is tomorrow, on a Friday in 7 days; the weekday is the one in the machine's zone. `+Nh` is hours from now. `YYYY-MM-DD` is local midnight. `YYYY-MM-DDTHH:MM:SS` is local time, with a trailing `Z` that instant. Case-insensitive for `tomorrow` and `next <weekday>`; `+2D` and `+1M` are refused. **Traps the preview never guesses:** `+30m` is 30 *months* (stored 2029-04-15), `+1y` is a year, `2026-10-20 14:30` (a space) is stored as something unrelated (now plus a few hours), and bare `monday`, `today` and `in 2 days` are accepted but are not modelled. `panel/dates.ts` parses only the forms above; anything else previews as "Beads will read this when you save".
+- There is no dry run for date parsing. The panel's "what will this mean" preview needs its own parser for the common forms (`+Nh`, `+Nd`, `tomorrow`, `next monday`, `YYYY-MM-DD`) and must say "bd decides" for anything else.
+- `bd update <id> --parent <epic>` adds a `parent-child` dependency. `--parent ""` removes it (`parent-clear2`). `bd update <id> --type bug` works. A bad type exits 1, stderr `Error updating <id>: validation failed: invalid issue type nonsense`. Children created with `--parent` get dotted ids (`pl-b9p.1`); moving an existing bead keeps its id.
+- `bd duplicate <id> --of <canonical> --json` prints `{canonical, duplicate, status: "closed"}`. `bd supersede <id> --with <new> --json` prints `{replacement, superseded, status: "closed"}`. Both close the bead and add a dependency of type `duplicates` / `supersedes` to the other bead (`close_reason` stays empty).
+- `--if-assignee` / `--if-status` guards exist (exit 13). `--force` exists and is never used.
+
+### Ready, epics, stale
+
+- `bd ready --explain --json` prints `{ready: [...], blocked: [{...bead, blocked_by: [{id, title, status, priority}], blocked_by_count}], ...}` (global, not per bead). The text form says `no blocking dependencies` or `← blocked by <id>: <title> [<status>]`. Gates show up as blockers titled `Gate: human`.
+- `bd epic status --eligible-only --json` prints `[]` when no epic has all children closed. When one does (captured 2026-10-15 on bd 1.3.1, `test/fixtures/bd13/epic-eligible-nonempty.json`) it prints an array of `{epic: {id, title, status, priority, issue_type, owner, created_at, created_by, updated_at}, total_children, closed_children, eligible_for_close: true}`. Without `--eligible-only` it also lists epics that are not eligible (`eligible_for_close: false`, e.g. `closed_children` 0 of 1). An epic with no children is not listed. The panel does not call it: `eligibleEpics` (`panel/needs.ts`) derives the same set from the export (an open epic with at least one child, every child done), and `test/integration/gates.test.ts` checks the two agree.
+- `bd stale --days N` needs N >= 1 (`--days 0` is a JSON error). Only the empty result was captured; the stale path against an old bead could not be exercised (`bd sql` is not supported in embedded mode). **Derive the stale set from `updated_at` in the export** rather than calling `bd stale`.
+
+### Events journal
+
+- `bd config get events-journal` prints `true` or `false`. `bd config set events-journal true` prints `Set events-journal = true (in config.yaml)` and **modifies the tracked `.beads/config.yaml`**. Only an explicit button may do that. The panel's Settings button is the only caller (`BdProvider.enableEventsJournal`): `bd --actor "<name> (panel)" config set events-journal true` is accepted (`--actor` is a global flag), and a real run on 1.3.1 added `events-journal: true` to `.beads/config.yaml` (verified in `test/integration/live.test.ts`). A project that commits that file shares the setting with the team. `bd config get events-journal` reads it back and is what the route trusts, not the printed text.
+- `bd events tail --since <seq> [--limit N] [--follow]` prints JSON lines `{seq, ts, op, issue_id, actor, issue, dep?, comment?}` with `op` in create, update, close, delete, dep_add, dep_remove, comment. `seq` is gapless and per clone. `--follow` keeps the process alive and prints new records as other `bd` processes commit them (`events-follow`); it does not exit on its own, so a follower must be killed on teardown.
+- With the journal off, `tail` prints a note on stderr and exits 0 with no records. `--since` above the head also exits 0 with no records (it "reads as caught up"). A `--since` below the retention floor fails (exit 1, forms below): re-baseline with a full export.
+- Pull and merge do not journal, and `bd sql` writes are not journaled. After a sync the panel re-baselines from a full export. The journal is a nudge to refresh, not the data source.
+- **Follow process lifetime (verified on 1.3.1, Task 8).** A `bd events tail --follow` child spawned detached with piped stdio does **not** die when its parent is SIGKILLed. With `--since 0` it was still running 6 s later; a journaled write by another `bd` then made it print into the closed pipe and it died (EPIPE). With `--since` above the head (nothing is ever printed) it was alive 8 s after the parent died and still alive after a further journaled write, and the same with `stdio: ignore`. So an orphaned follower lives until it next has a record to print, which can be hours or forever. The pidfile and the shutdown kill are needed, not belt and braces. SIGTERM ends the child at once.
+- Another `bd` writes to the same embedded project while a follower runs without blocking (create, update, close all succeeded, and the follower printed each record).
+- **`--json` on `tail --follow` changes the output**: it pretty-prints each record over several lines instead of one JSON line. The follower therefore does not pass `--json`, so failures are plain text on stderr.
+- **Truncation, captured on 1.3.1 (Task 8 fix round 1).** Scratch project with `events-journal-retain-days 0`, `events-journal-retain-rows 2`, six creates, `bd events prune --before 5` (window `[5..6]`). `bd events tail --since 0`, with or without `--follow`, prints nothing on stdout and exits 1 with, on stderr (`test/fixtures/bd13/events-tail-truncated.stderr`):
+  ```
+  Error: events journal truncated: checkpoint 0 is below the retained window [5..6]; records 1..4 were pruned
+  Hint: resume with --since 4 to continue from the oldest retained record (accepting the gap), or re-import from scratch
+  ```
+  The plain text carries no `events_journal_truncated` code. The head is the second number in `retained window [floor..head]`. With `--json` the same refusal goes to **stdout** as the pretty-printed `{"code":"events_journal_truncated","error":...,"floor":5,"head":6,"schema_version":1,"since":0}` (`events-tail-truncated.json`), exit 1. The follower parses the plain form (and the JSON form if it ever sees it); if the text carries no head it asks once with a non-follow `bd --readonly events tail --since 0 --limit 1 --json`, which refuses the same way and carries `head`. `--since <floor-1>` resumes, and prints the retained records. The retention floors can be lowered with `bd config set events-journal-retain-days/-rows` (scratch projects only).
+- The follower is spawned as `bd events tail --since <seq> --follow --readonly` (first start: `--since 0`, which replays the retained journal once; that replay is one nudge). The setting is read with `bd --readonly config get events-journal`.
+
+### Leases (Stuck, 1.3 only)
+
+- `bd update <id> --claim` creates a row in the dolt-ignored `leases` table (`issue_id, holder, granted_at, lease_expires_at, heartbeat_at, granted_node`, UTC datetimes without a zone). The lease runs **5 minutes** from the claim (`leases-after-claim`). `bd update <id> --status in_progress --assignee <x>` creates **no** lease (the table stayed empty), so a bead whose claim was made that way has no lease to expire.
+- The table is readable with `dolt sql` inside the embedded database folder (`runSql` already does this). Reading it through `bd sql` in server mode was **not verified**; treat a read failure as "no lease information" and leave the lease reason out of Stuck.
+- "Lease expired" therefore means: the bead is `in_progress`, has a lease row, and `lease_expires_at` is in the past. It is a weaker signal than "no update for N days" and is shown as a reason on the same Stuck row, not as a separate section.

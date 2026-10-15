@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { checkAuditSchema, eventTimeMs, readAuditEvents, resetAuditSchemaCache } from '../../src/service/bd/audit';
+import { checkAuditSchema, eventTimeMs, readAuditEvents, readUtcSince, resetAuditSchemaCache, storeWritesUtc } from '../../src/service/bd/audit';
 import { childEnv, runBd, runBdJson } from '../../src/service/bd/exec';
 import { readMetadata } from '../../src/service/workspace';
 
@@ -64,11 +64,23 @@ describe.skipIf(process.env.BD_INTEGRATION !== '1')('audit log (embedded bd)', (
     expect([...raw].sort().reverse()).toEqual(raw);
   });
 
-  it('dates UUIDv7 events in real UTC', async () => {
-    const events = (await readAuditEvents(root, 'embedded', { limit: 50 }))!;
+  // bd 1.2 ids carry the time (UUIDv7); bd 1.3 ids do not (UUIDv5), but it writes created_at in UTC.
+  it('dates events in real UTC', async () => {
+    const version = (await runBd(root, ['--version'])).stdout;
+    const events = (await readAuditEvents(root, 'embedded', { limit: 50, utcCreatedAt: storeWritesUtc(version) }))!;
     const times = events.map(eventTimeMs);
     expect(times.every((time) => time !== null)).toBe(true);
     for (const time of times) expect(Math.abs(Date.now() - time!)).toBeLessThan(10 * 60_000);
+  });
+
+  // The real binary writes per-migration commits at init, so the 0062 commit is there; a bd that stopped would untime every 1.3 event.
+  it('finds the 0062 migration commit, dated no later than the first event', async () => {
+    const since = await readUtcSince(root, 'embedded');
+    expect(since).not.toBeNull();
+    const events = (await readAuditEvents(root, 'embedded', { limit: 50, utcCreatedAt: true }))!;
+    const first = Math.min(...events.map((event) => eventTimeMs(event)!));
+    expect(since!).toBeLessThanOrEqual(first + 1000);
+    expect(events.every((event) => eventTimeMs(event) !== null)).toBe(true);
   });
 
   it('scopes to one bead and keeps its newest event when the page is full', async () => {

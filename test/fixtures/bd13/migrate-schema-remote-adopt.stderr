@@ -1,0 +1,1 @@
+Error: refusing to migrate a remote-backed database (v32 -> v66): the remote is already migrated and this clone can fast-forward to it losslessly (no unpushed commits, clean working set)

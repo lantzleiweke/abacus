@@ -10,7 +10,7 @@ vi.mock('../../../src/service/bd/exec', async (importOriginal) => ({
   runDolt: vi.fn(),
 }));
 
-import { AUDIT_BEAD_IDS_MAX, AUDIT_LIMIT_MAX, checkAuditSchema, eventTimeMs, readAuditEvents, resetAuditSchemaCache, type AuditEvent } from '../../../src/service/bd/audit';
+import { AUDIT_BEAD_IDS_MAX, AUDIT_LIMIT_MAX, checkAuditSchema, eventTimeMs, isUtcStamp, noteBdVersion, readAuditEvents, readUtcSince, resetAuditSchemaCache, storeWritesUtc, type AuditEvent } from '../../../src/service/bd/audit';
 import { BdError, runBd, runDolt } from '../../../src/service/bd/exec';
 
 const bd = vi.mocked(runBd);
@@ -325,5 +325,165 @@ describe('eventTimeMs', () => {
   it('is null for anything that is not a UUID', () => {
     expect(eventTimeMs(event('1234'))).toBeNull();
     expect(eventTimeMs(event(''))).toBeNull();
+  });
+
+  describe('a store that writes UTC (bd 1.3), where every event id is a UUIDv5', () => {
+    const v5 = 'e60585b7-e041-5e39-a552-237e9a1481c1';
+    const utc = (rawCreatedAt: string, id = v5): AuditEvent => ({ ...event(id), rawCreatedAt, utcCreatedAt: true });
+    const zone = process.env.TZ;
+    afterEach(() => {
+      process.env.TZ = zone;
+    });
+
+    it('reads created_at as UTC whatever zone the machine is in', () => {
+      for (const tz of ['UTC', 'Asia/Tokyo', 'America/Los_Angeles']) {
+        process.env.TZ = tz;
+        expect(new Date(eventTimeMs(utc('2026-10-14 08:31:03'))!).toISOString()).toBe('2026-10-14T08:31:03.000Z');
+        expect(new Date(eventTimeMs(utc('2026-10-14T08:31:03Z'))!).toISOString()).toBe('2026-10-14T08:31:03.000Z');
+      }
+    });
+
+    it('still prefers the time inside a UUIDv7 id', () => {
+      expect(new Date(eventTimeMs(utc('2020-01-01 00:00:00', '01a13989-534f-7288-bce3-267994d4b2ae'))!).toISOString()).toBe('2026-10-14T08:31:03.503Z');
+    });
+
+    it('is null for a time that cannot be read, or that lies in the future', () => {
+      expect(eventTimeMs(utc('yesterday'))).toBeNull();
+      expect(eventTimeMs(utc(new Date(Date.now() + 3_600_000).toISOString()))).toBeNull();
+    });
+  });
+
+  it('never trusts created_at on its own: a UUIDv5 event from a store not known to write UTC stays undated', () => {
+    expect(eventTimeMs({ ...event('e60585b7-e041-5e39-a552-237e9a1481c1'), rawCreatedAt: '2026-10-14 08:31:03' })).toBeNull();
+  });
+});
+
+describe('storeWritesUtc', () => {
+  it('is true from bd 1.3.0 on, false before and for what cannot be read', () => {
+    expect(storeWritesUtc('1.3.1')).toBe(true);
+    expect(storeWritesUtc('1.3.0')).toBe(true);
+    expect(storeWritesUtc('v1.10.0')).toBe(true);
+    expect(storeWritesUtc('2.0.0')).toBe(true);
+    expect(storeWritesUtc('1.2.2')).toBe(false);
+    expect(storeWritesUtc('1.2.99')).toBe(false);
+    expect(storeWritesUtc('')).toBe(false);
+    expect(storeWritesUtc('nonsense')).toBe(false);
+  });
+});
+
+/** Answers the migration-date query with `date` (or an empty result), DESCRIBE with the fixture and the events query with `events`. */
+function storeAnswers(date: string | null, events: string): void {
+  bd.mockImplementation(async (_dir, args) => {
+    const query = String(args.at(-1));
+    if (query === 'DESCRIBE events') return ok(describeJson);
+    if (query.includes('dolt_log')) return ok(JSON.stringify(date === null ? [] : [{ date }]));
+    return ok(events);
+  });
+}
+
+const v5Id = (n: number) => `e60585b7-e041-5e39-a552-23${String(n).padStart(10, '0')}`;
+const rowsJson = (...stamps: string[]) => JSON.stringify(stamps.map((created_at, n) => ({ id: v5Id(n), issue_id: 'a', event_type: 'created', actor: 'x', old_value: '', new_value: '', created_at })));
+
+describe('readUtcSince', () => {
+  it('is the date of the 0062 migration commit, read as UTC', async () => {
+    storeAnswers('2026-10-15 18:24:10.785', '[]');
+    expect(await readUtcSince('/p', 'server')).toBe(Date.parse('2026-10-15T18:24:10.785Z'));
+    expect(bd.mock.calls.some(([, args]) => String(args.at(-1)).includes('0062'))).toBe(true);
+  });
+
+  it('is null when the commit is not there (a store bd 1.3 never opened), or the date is not a date, or the read fails', async () => {
+    storeAnswers(null, '[]');
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+    resetAuditSchemaCache();
+    storeAnswers('', '[]');
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+    resetAuditSchemaCache();
+    bd.mockRejectedValue(new BdError('exit', 'boom'));
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+  });
+
+  const migrationReads = () => bd.mock.calls.filter(([, args]) => String(args.at(-1)).includes('dolt_log')).length;
+
+  it('takes the newest 0062 commit: a history merged from clones upgraded on different days holds several', async () => {
+    storeAnswers('2026-10-15 18:24:10.785', '[]');
+    await readUtcSince('/p', 'server');
+    const query = String(bd.mock.calls.find(([, args]) => String(args.at(-1)).includes('dolt_log'))![1].at(-1));
+    expect(query).toContain('MAX(date)');
+    expect(query).not.toContain('MIN(');
+  });
+
+  it('keeps what it found, "not found" included: a second read runs no process', async () => {
+    storeAnswers('2026-10-15 18:24:10.785', '[]');
+    expect(await readUtcSince('/p', 'server')).toBe(Date.parse('2026-10-15T18:24:10.785Z'));
+    expect(await readUtcSince('/p', 'server')).toBe(Date.parse('2026-10-15T18:24:10.785Z'));
+    expect(migrationReads()).toBe(1);
+
+    resetAuditSchemaCache();
+    bd.mockClear();
+    storeAnswers(null, rowsJson());
+    expect(await readUtcSince('/q', 'server')).toBeNull();
+    expect(await readUtcSince('/q', 'server')).toBeNull();
+    // Audit reads go through it too: still no second query.
+    await readAuditEvents('/q', 'server', { limit: 10, utcCreatedAt: true });
+    await readAuditEvents('/q', 'server', { limit: 10, utcCreatedAt: true });
+    expect(migrationReads()).toBe(1);
+  });
+
+  it('does not keep a read that failed', async () => {
+    bd.mockRejectedValueOnce(new BdError('exit', 'locked'));
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+    storeAnswers('2026-10-15 18:24:10.785', '[]');
+    expect(await readUtcSince('/p', 'server')).toBe(Date.parse('2026-10-15T18:24:10.785Z'));
+  });
+
+  it('asks again when the bd version for the root changes, and not when it is the same', async () => {
+    noteBdVersion('/p', '1.3.1');
+    storeAnswers(null, '[]');
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+    noteBdVersion('/p', '1.3.1');
+    expect(await readUtcSince('/p', 'server')).toBeNull();
+    expect(migrationReads()).toBe(1);
+    storeAnswers('2026-10-15 18:24:10.785', '[]');
+    noteBdVersion('/p', '1.4.0');
+    expect(await readUtcSince('/p', 'server')).toBe(Date.parse('2026-10-15T18:24:10.785Z'));
+    expect(migrationReads()).toBe(2);
+  });
+});
+
+describe('isUtcStamp', () => {
+  const since = Date.parse('2026-10-15T18:24:10.785Z');
+  it('is true from the migration on (to the second), false before it, and false when nothing is known', () => {
+    expect(isUtcStamp('2026-10-15 18:24:13', since)).toBe(true);
+    expect(isUtcStamp('2026-10-15T18:24:10Z', since)).toBe(true);
+    expect(isUtcStamp('2026-10-14T20:45:00Z', since)).toBe(false);
+    expect(isUtcStamp('2026-10-15T18:24:13Z', null)).toBe(false);
+    expect(isUtcStamp('not a time', since)).toBe(false);
+  });
+});
+
+describe('readAuditEvents with utcCreatedAt', () => {
+  const rows = rowsJson;
+
+  it('marks the events written since the migration, and only when asked', async () => {
+    storeAnswers('2026-10-15 18:24:10.785', rows('2026-10-15 18:24:13', '2026-10-15 19:00:00'));
+    const marked = (await readAuditEvents('/p', 'server', { limit: 10, utcCreatedAt: true }))!;
+    expect(marked.length).toBe(2);
+    expect(marked.every((e) => e.utcCreatedAt === true)).toBe(true);
+    const plain = (await readAuditEvents('/p', 'server', { limit: 10 }))!;
+    expect(plain.some((e) => 'utcCreatedAt' in e)).toBe(false);
+  });
+
+  it('leaves a 1.2.x row before the migration unmarked, so it has no time', async () => {
+    // The shape the bd 1.2.2 pantry store has under 1.3.1: a bead made 03:45Z whose created event says 20:45 (PDT labeled Z).
+    storeAnswers('2026-10-15 18:24:10.785', rows('2026-10-15 18:24:13', '2026-10-14 20:45:00'));
+    const events = (await readAuditEvents('/p', 'server', { limit: 10, utcCreatedAt: true }))!;
+    expect(events.map((e) => e.utcCreatedAt === true)).toEqual([true, false]);
+    expect(events.map((e) => eventTimeMs(e) !== null)).toEqual([true, false]);
+  });
+
+  it('marks nothing when the migration date cannot be found', async () => {
+    storeAnswers(null, rows('2026-10-15 18:24:13'));
+    const events = (await readAuditEvents('/p', 'server', { limit: 10, utcCreatedAt: true }))!;
+    expect(events.every((e) => !('utcCreatedAt' in e))).toBe(true);
   });
 });

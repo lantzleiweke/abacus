@@ -1,7 +1,8 @@
 // Preview page: mounts the real panel against a fake host and service. `?scenario=<id>&theme=light|dark&bare=1`
 // (bare hides the controls, for screenshots). `surface=dialog` mounts the + menu picker instead (`item=<bead id>`: as
 // opened from that bead's chip); `chat=none` starts with no open chat; `start=<mode>` sets how starting a session
-// answers; `sync=<mode>` sets where the last team sync left the project; `toasts=1` shows toasts over the frame in bare mode.
+// answers; `sync=<mode>` sets where the last team sync left the project; `events=<mode>` sets what the project says about live
+// updates; `old=1` simulates a Beads too old for the newest features; `toasts=1` shows toasts over the frame in bare mode.
 import { applyHostReady } from '@openchamber/sdk/ui';
 import type { AttachIssueRequest, ToastRequest } from '@openchamber/sdk';
 import { createClient } from '../src/panel/client';
@@ -9,7 +10,7 @@ import { resolveCommand } from '../src/panel/resolve';
 import { mountPanel, type MountedPanel } from '../src/panel/ui/App';
 import { mountAttachDialog } from '../src/panel/ui/Picker';
 import { createFakeHost, PREVIEW_SESSION, START_MODES, type StartMode } from './fake-host';
-import { createFakeService, directoryOf, SCENARIOS, SYNC_MODES, WRITE_MODES, type Paused, type ScenarioId, type SyncMode, type WriteMode } from './fake-service';
+import { createFakeService, directoryOf, EVENTS_MODES, SCENARIOS, SYNC_MODES, WRITE_MODES, type EventsMode, type Paused, type ScenarioId, type SyncMode, type WriteMode } from './fake-service';
 
 const params = new URLSearchParams(location.search);
 const known = (id: string | null): id is ScenarioId => SCENARIOS.some((s) => s.id === id);
@@ -20,6 +21,13 @@ let writeMode: WriteMode = WRITE_MODES.some((m) => m.id === params.get('write'))
 let paused: Paused = params.get('paused') === 'blocked' || params.get('paused') === 'sync' ? (params.get('paused') as Paused) : 'none';
 // `sync=<mode>` is where the last sync left a project with a shared copy ("With team").
 let syncMode: SyncMode = SYNC_MODES.some((m) => m.id === params.get('sync')) ? (params.get('sync') as SyncMode) : 'idle';
+// `events=<mode>` is what the project says about live updates; `old=1` is a Beads too old for the 0.2 features.
+let eventsMode: EventsMode = EVENTS_MODES.find((m) => m.id === params.get('events'))?.id ?? 'unavailable';
+let oldBeads = params.get('old') === '1';
+// `schema=old` is a project whose store the installed Beads cannot read until the person updates it; `schema=shared` is one that also
+// syncs with the team, which Beads will not update in place.
+let oldSchema = params.get('schema') === 'old' || params.get('schema') === 'shared';
+let sharedSchema = params.get('schema') === 'shared';
 let startMode: StartMode = START_MODES.some((m) => m.id === params.get('start')) ? (params.get('start') as StartMode) : 'ok';
 let chatOpen = params.get('chat') !== 'none';
 const dialog = params.get('surface') === 'dialog';
@@ -70,7 +78,7 @@ function showToast(request: ToastRequest) {
 }
 
 const host = createFakeHost(
-  createFakeService({ beadWait: params.get('beadwait') === '1', writes: () => writeMode, paused: () => paused, sync: () => syncMode }),
+  createFakeService({ beadWait: params.get('beadwait') === '1', writes: () => writeMode, paused: () => paused, sync: () => syncMode, events: () => eventsMode, oldBeads: () => oldBeads, oldSchema: () => oldSchema, sharedSchema: () => sharedSchema }),
   {
     onToast: showToast,
     onBadge: (count) => {
@@ -114,6 +122,11 @@ function syncUrl() {
   next.set('paused', paused);
   next.set('start', startMode);
   next.set('sync', syncMode);
+  next.set('events', eventsMode);
+  if (oldBeads) next.set('old', '1');
+  else next.delete('old');
+  if (oldSchema) next.set('schema', sharedSchema ? 'shared' : 'old');
+  else next.delete('schema');
   if (chatOpen) next.delete('chat');
   else next.set('chat', 'none');
   history.replaceState(null, '', `?${next}`);
@@ -205,6 +218,45 @@ group(
   ),
 );
 
+group(
+  'Live updates',
+  EVENTS_MODES.map((m) =>
+    button(m.label, () => eventsMode === m.id, () => {
+      eventsMode = m.id;
+      syncUrl();
+    }),
+  ),
+);
+
+group('Beads version', [
+  button('Current', () => !oldBeads, () => {
+    oldBeads = false;
+    syncUrl();
+  }),
+  button('Too old for new features', () => oldBeads, () => {
+    oldBeads = true;
+    syncUrl();
+  }),
+]);
+
+group('Project store', [
+  button('Current', () => !oldSchema, () => {
+    oldSchema = false;
+    sharedSchema = false;
+    syncUrl();
+  }),
+  button('Needs an update', () => oldSchema && !sharedSchema, () => {
+    oldSchema = true;
+    sharedSchema = false;
+    syncUrl();
+  }),
+  button('Needs an update, team copy', () => sharedSchema, () => {
+    oldSchema = true;
+    sharedSchema = true;
+    syncUrl();
+  }),
+]);
+
 group('Chat', [
   button('Open chat', () => chatOpen, () => {
     chatOpen = true;
@@ -244,10 +296,10 @@ group(
 }
 
 // `do=` drives the panel after the list appears, for screenshots of interactive states. Steps are separated by |:
-// `view:status`, `filters`, `q:<text>`, `keys:<keys>` (j, k, e for Enter), `menu:<bead id>`, `scroll:bottom`,
+// `view:status` (needs, epic, status, activity), `filters`, `q:<text>`, `keys:<keys>` (j, k, e for Enter), `menu:<bead id>`, `scroll:bottom`,
 // `open:<bead id>` (clicks its row), `click:<css selector>`, `back`, `dscroll:<px|bottom>` (scrolls the detail),
 // `type:<css selector>=><text>` (types into a field; `\n` is a line break), `press:<Shift+Enter>` (a key to the focused
-// element).
+// element), `see:<css selector>` (scrolls it into view), `wait:<ms>`.
 const steps = (params.get('do') ?? '').split('|').filter(Boolean);
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -262,12 +314,12 @@ async function waitFor(selector: string): Promise<HTMLElement | null> {
 }
 
 async function drive() {
-  await waitFor(dialog ? '.bdp, .bd-empty' : '.bd-list');
+  await waitFor(dialog ? '.bdp, .bd-empty' : '.bd-list, .bd-upd');
   // The picker focuses its search box just after it paints; keys sent before that would be lost.
   if (dialog) await pause(200);
   for (const step of steps) {
     const [name, arg = ''] = step.split(/:(.*)/s);
-    if (name === 'view') root.querySelector<HTMLButtonElement>(`.bd-seg button:nth-child(${['epic', 'status', 'activity'].indexOf(arg) + 1})`)?.click();
+    if (name === 'view') root.querySelector<HTMLButtonElement>(`.bd-seg button[data-view="${arg}"]`)?.click();
     if (name === 'filters') root.querySelector<HTMLButtonElement>('button[aria-label="Filters"]')?.click();
     if (name === 'q') {
       const input = root.querySelector<HTMLInputElement>('.bd-search input')!;
@@ -301,6 +353,10 @@ async function drive() {
       const body = await waitFor('.bd-dbody');
       if (body) body.scrollTop = arg === 'bottom' ? body.scrollHeight : Number(arg);
     }
+    // `see:<css selector>` scrolls that element to the middle of its scroller.
+    if (name === 'see') (await waitFor(arg))?.scrollIntoView({ block: 'center' });
+    // `wait:<ms>` lets an answer from the fake service arrive before the next step.
+    if (name === 'wait') await pause(Number(arg) || 300);
     // `press:<key>` with optional Shift+ / Ctrl+ prefixes, sent to whatever has focus (the picker's search box).
     if (name === 'press') {
       // A `+` in the URL arrives as a space.

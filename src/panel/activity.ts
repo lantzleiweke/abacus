@@ -1,12 +1,13 @@
-import type { Bead, ChangeEvent, JsonValue, StatusDef } from '../shared/types';
+import type { Bead, ChangeEvent, HistoryChange, JsonValue, StatusDef } from '../shared/types';
 import { isKnownLinkKind, kindLabel, recordedDay } from './detail';
 import { ago, dayText, fullText, isDateOnly, recordedDate } from './format';
+import { gateEventOf, gateEventWords } from './gates';
 import { humanize, looker, markerOf, shortId, statusLabel, type Look, type Marker } from './list';
 
 export type ActivityEvent = ChangeEvent & { unseen: boolean };
 
 /** What the entry's leading mark draws: a status dot for status moves, otherwise an icon for the kind of change. */
-export type EntryMark = { kind: 'status'; look: Look; marker: Marker } | { kind: 'created' | 'deleted' | 'comment' | 'link' | 'edit' };
+export type EntryMark = { kind: 'status'; look: Look; marker: Marker } | { kind: 'created' | 'deleted' | 'comment' | 'link' | 'edit' | 'gate' };
 
 /** One line of the feed, ready to draw. `gone`: the bead is no longer in the project, so there is no detail to open. */
 export type FeedEntry = {
@@ -136,8 +137,37 @@ export function changeWhat(e: ChangeEvent, statuses: StatusDef[]): string {
     }
     case 'field':
       return fieldWhat(e, statuses);
+    case 'gate_opened':
+    case 'gate_resolved': {
+      // The who column names whoever asked; a resolve by someone else says who in the line itself.
+      const { head, by } = gateEventWords(gateEventOf(e));
+      return by ? `${head} by ${by}` : head;
+    }
   }
   return humanize(String(e.kind));
+}
+
+// ------------------------------------------------------------------------------------------------- restore
+
+/** The fields an Activity row can put back: the short ones. Long text goes through History, which carries the whole value. */
+const ROW_RESTORABLE: ReadonlySet<string> = new Set(['title', 'status', 'priority', 'assignee', 'labels']);
+/**
+ * The service cuts a text value in the feed past this many characters and marks the cut with "…" (its `FIELD_TEXT_MAX`). A longer
+ * value is not the real one, so it is never written back.
+ */
+const ROW_TEXT_MAX = 2000;
+
+const whole = (v: JsonValue | undefined): v is JsonValue => v !== undefined && !(typeof v === 'string' && v.length > ROW_TEXT_MAX);
+
+/**
+ * An Activity row as a change that can be put back, or null: only a field change to one of the short fields, with both values
+ * known and whole. Labels count only when both sets were recorded (a row from Beads' history may know neither).
+ */
+export function rowChange(e: ChangeEvent): HistoryChange | null {
+  if (e.kind !== 'field' || !e.field || !ROW_RESTORABLE.has(e.field)) return null;
+  if (!whole(e.from) || !whole(e.to)) return null;
+  if (e.field === 'labels' && (strings(e.from) === null || strings(e.to) === null)) return null;
+  return { field: e.field, from: e.from, to: e.to, text: false };
 }
 
 /** Who made it: "you (panel)" for this panel's own writes, the recorded name, or "unknown". */
@@ -171,6 +201,9 @@ function markOf(e: ChangeEvent, look: (status: string) => Look): EntryMark {
     case 'dep_added':
     case 'dep_removed':
       return { kind: 'link' };
+    case 'gate_opened':
+    case 'gate_resolved':
+      return { kind: 'gate' };
     case 'closed':
       return { kind: 'status', look: 'done', marker: isText(e.to) ? markerOf(e.to) : 'builtin' };
     case 'reopened':

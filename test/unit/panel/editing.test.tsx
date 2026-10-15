@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { HostRequestError } from '@openchamber/sdk';
 import { createClient } from '../../../src/panel/client';
 import { createStore, StoreContext, type FullSnapshot } from '../../../src/panel/store';
+import { BEADS_READS } from '../../../src/panel/ui/DateInput';
 import { assigneeOptions, defaultParent, labelProblem, LINK_KINDS, linkRequest, linkTargets, writesPaused } from '../../../src/panel/edit';
 import { App } from '../../../src/panel/ui/App';
 import { relatedFor } from '../../../src/shared/related';
@@ -70,6 +71,7 @@ describe('when writes pause', () => {
   it('says why for a half-merged project and while a sync runs, and nothing otherwise', () => {
     expect(writesPaused(null)).toBeNull();
     expect(writesPaused(snapshot())).toBeNull();
+    expect(writesPaused(snapshot({ freshness: freshness({ schemaUpdate: { from: 32, to: 66 } }) }))).toBe('Editing is paused until the project is updated.');
     expect(writesPaused(snapshot({ writesBlocked: true }))).toBe('Editing is paused until the sync problem is resolved.');
     expect(writesPaused(snapshot({ sync: { kind: 'running', op: 'pull', startedAt: iso(0) } }))).toMatch(/Sync runs/);
     expect(writesPaused(snapshot({ sync: { kind: 'running', op: 'publish', startedAt: iso(0) } }))).toMatch(/Publish runs/);
@@ -131,7 +133,7 @@ function world(initial: Bead[], snapOver: () => Partial<FullSnapshot> = () => ({
   const keep = (call: Call, a: Answer): Answer => {
     if (!db.persist || a.status !== 200) return a;
     const body = JSON.parse(a.body) as Record<string, unknown>;
-    if (call.route === 'update') {
+    if (call.route === 'update' || call.route === 'deferBead' || call.route === 'undeferBead') {
       const r = body as WriteResult;
       if (r.ok) upsert(r.bead);
       else if ('conflict' in r) upsert(r.current);
@@ -1558,5 +1560,641 @@ describe('project changes', () => {
     await later(2_000);
     expect(store(t).snapshot?.beads.find((b) => b.id === 'p-a')?.description).toBe('Old words');
     expect(document.querySelector('[data-section="description"] .bd-md')?.textContent).toContain('Old words');
+  });
+});
+
+describe('move and retype', () => {
+  const menuItems = () => within(screen.getByRole('menu')).getAllByRole('menuitemradio');
+
+  it("type menu lists the project's types", async () => {
+    const t = await opened([bead('p-a', { type: 'incident' })], 'p-a', () => ({ types: [...TYPES, 'incident'] }));
+    t.w.handlers.update = (call) => json({ ok: true, bead: bead('p-a', { type: (call.body.patch as { type: string }).type, updatedAt: iso(0) }) } satisfies WriteResult);
+    await click(button('Type: Incident'));
+    expect(menuItems().map((m) => m.textContent)).toEqual(['Task', 'Bug', 'Feature', 'Epic', 'Chore', 'Incident']);
+    expect(screen.getByRole('menuitemradio', { name: 'Incident' }).getAttribute('aria-checked')).toBe('true');
+    await click(screen.getByRole('menuitemradio', { name: 'Bug' }));
+    // Sent with the type as shown, so a type changed in the same second still counts as changed.
+    expect(t.routed('update')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), patch: { type: 'bug' }, expected: { type: 'incident' } });
+    expect(button('Type: Bug')).toBeTruthy();
+    // Focus goes back to the button that opened the menu, once it is on again.
+    await later(50);
+    expect(document.activeElement).toBe(button('Type: Bug'));
+  });
+
+  it('a refused type change says why in Beads\' words', async () => {
+    const t = await opened([bead('p-a')], 'p-a');
+    t.w.handlers.update = () => envelope(400, { code: 'invalid', message: 'Beads does not know the type "chore" in this project.' });
+    await click(button('Type: Task'));
+    await click(screen.getByRole('menuitemradio', { name: 'Chore' }));
+    expect(t.routed('update')).toHaveLength(1);
+    expect(screen.getByText('Beads does not know the type "chore" in this project.')).toBeTruthy();
+    expect(button('Type: Task')).toBeTruthy();
+  });
+
+  it('move sends parent null for No parent', async () => {
+    const beads = [bead('p-e', { type: 'epic', title: 'Billing' }), bead('p-f', { type: 'epic', title: 'Payments' }), bead('p-a', { parentId: 'p-e' })];
+    const t = await opened(beads, 'p-a');
+    t.w.handlers.update = (call) => json({ ok: true, bead: bead('p-a', { parentId: (call.body.patch as { parent: string | null }).parent, updatedAt: iso(0) }) } satisfies WriteResult);
+    await click(button('Parent: Billing'));
+    // No parent first, then the epics; the current one is checked.
+    expect(menuItems().map((m) => m.textContent)).toEqual(['No parent', 'Billinge', 'Paymentsf']);
+    expect(screen.getByRole('menuitemradio', { name: /Billing/ }).getAttribute('aria-checked')).toBe('true');
+    await click(screen.getByRole('menuitemradio', { name: 'No parent' }));
+    expect(t.routed('update')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), patch: { parent: null }, expected: { parentId: 'p-e' } });
+    expect(button('Parent: No parent')).toBeTruthy();
+    expect(t.toast).toHaveBeenCalledWith(expect.objectContaining({ message: 'Moved out of Billing.' }));
+    await click(button('Parent: No parent'));
+    await click(screen.getByRole('menuitemradio', { name: /Payments/ }));
+    expect(t.routed('update')[1]?.body).toMatchObject({ patch: { parent: 'p-f' }, expected: { parentId: null } });
+    expect(button('Parent: Payments')).toBeTruthy();
+  });
+
+  it('never offers the bead itself or anything inside it', async () => {
+    const beads = [bead('p-e', { type: 'epic', title: 'Billing' }), bead('p-e.1', { type: 'epic', parentId: 'p-e', title: 'Invoices' }), bead('p-e.1.1', { type: 'epic', parentId: 'p-e.1', title: 'Deep' }), bead('p-f', { type: 'epic', title: 'Payments' })];
+    await opened(beads, 'p-e');
+    await click(button('Parent: No parent'));
+    expect(menuItems().map((m) => m.textContent)).toEqual(['No parent', 'Paymentsf']);
+  });
+
+  it('move refuses its own child with the service message', async () => {
+    // The list has not caught up: Payments was moved inside this epic since it was read. Beads refuses; nothing changes here.
+    const beads = [bead('p-e', { type: 'epic', title: 'Billing' }), bead('p-f', { type: 'epic', title: 'Payments' })];
+    const t = await opened(beads, 'p-e');
+    t.w.handlers.update = () => envelope(400, { code: 'invalid', message: 'An epic cannot go inside its own child.' });
+    await click(button('Parent: No parent'));
+    await click(screen.getByRole('menuitemradio', { name: /Payments/ }));
+    expect(t.routed('update')[0]?.body).toMatchObject({ patch: { parent: 'p-f' }, expected: { parentId: null } });
+    expect(screen.getByRole('alert').textContent).toContain('An epic cannot go inside its own child.');
+    expect(button('Parent: No parent')).toBeTruthy();
+  });
+
+  it('a stale parent is a conflict shown with where the bead is now, sent again only on Re-apply', async () => {
+    const beads = [bead('p-e', { type: 'epic', title: 'Billing' }), bead('p-f', { type: 'epic', title: 'Payments' }), bead('p-g', { type: 'epic', title: 'Growth' }), bead('p-a', { parentId: 'p-e' })];
+    const t = await opened(beads, 'p-a');
+    const theirs = bead('p-a', { parentId: 'p-g', updatedAt: iso(MIN) });
+    t.w.handlers.update = (call) =>
+      t.routed('update').length === 1 ? json({ ok: false, conflict: true, current: theirs } satisfies WriteResult) : json({ ok: true, bead: { ...theirs, parentId: 'p-f', updatedAt: iso(0) } } satisfies WriteResult);
+    await click(button('Parent: Billing'));
+    await click(screen.getByRole('menuitemradio', { name: /Payments/ }));
+    expect(screen.getByText('Changed while you were editing')).toBeTruthy();
+    expect(screen.getByText('Now in Growth.')).toBeTruthy();
+    await later(5_000);
+    expect(t.routed('update')).toHaveLength(1);
+    await click(button('Re-apply'));
+    expect(t.routed('update')[1]?.body).toMatchObject({ expectedUpdatedAt: iso(MIN), patch: { parent: 'p-f' }, expected: { parentId: 'p-g' } });
+  });
+});
+
+describe('due and defer dates', () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+  const dates = () => document.querySelector<HTMLElement>('[data-section="more"] .bd-dates')!;
+  const row = (kind: 'due' | 'defer') => document.querySelector<HTMLElement>(`[data-date="${kind}"]`)!;
+  const preview = () => document.querySelector('.bd-date-preview')!.textContent;
+
+  it('preview shows the parsed date in the local zone', async () => {
+    await opened([bead('p-a')], 'p-a');
+    expect(within(dates()).getByText('No due date')).toBeTruthy();
+    await click(button('Set due date'));
+    const box = textbox('Due date');
+    expect(document.activeElement).toBe(box);
+    await type(box, 'tomorrow');
+    expect(preview()).toBe('Due Thu, Oct 15, 12:00 PM');
+    await type(box, '2026-10-20');
+    expect(preview()).toBe('Due Tue, Oct 20');
+  });
+
+  it('unknown input says Beads will read it on save', async () => {
+    const t = await opened([bead('p-a')], 'p-a');
+    t.w.handlers.update = () => json({ ok: true, bead: bead('p-a', { extra: { due_at: at(DAY - 3 * 3_600_000) }, updatedAt: iso(0) }) } satisfies WriteResult);
+    await click(button('Set due date'));
+    // A clock time, and a phrase the panel does not read: no date is claimed for either.
+    await type(textbox('Due date'), '9:00');
+    expect(preview()).toBe(BEADS_READS);
+    await type(textbox('Due date'), 'end of next sprint');
+    expect(preview()).toBe(BEADS_READS);
+    await type(textbox('Due date'), '9:00');
+    await click(button('Save'));
+    // Sent as typed, with the due date as shown (none), and what Beads stored is what shows.
+    expect(t.routed('update')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), patch: { due: '9:00' }, expected: { due: null } });
+    expect(screen.queryByRole('textbox', { name: 'Due date' })).toBeNull();
+    expect(row('due').textContent).toContain('Thu, Oct 15, 9:00 AM');
+    expect(t.toast).toHaveBeenCalledWith(expect.objectContaining({ message: 'Due Thu, Oct 15, 9:00 AM.' }));
+    await later(50);
+    expect(document.activeElement).toBe(button('Change due date'));
+  });
+
+  it('clearing a due date is a plain Clear, sent with the date as shown', async () => {
+    const t = await opened([bead('p-a', { extra: { due_at: at(-DAY) } })], 'p-a');
+    t.w.handlers.update = () => json({ ok: true, bead: bead('p-a', { updatedAt: iso(0) }) } satisfies WriteResult);
+    // Past due on a bead not done says so.
+    expect(row('due').textContent).toContain('Overdue');
+    const clear = button('Clear due date');
+    expect(clear.textContent).toBe('Clear');
+    await click(clear);
+    expect(t.routed('update')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), patch: { due: null }, expected: { due: at(-DAY) } });
+    expect(row('due').textContent).toContain('No due date');
+    await later(50);
+    expect(document.activeElement).toBe(button('Set due date'));
+  });
+
+  it('a stale due date is a conflict, not an overwrite', async () => {
+    const shown = bead('p-a', { extra: { due_at: at(2 * DAY) } });
+    const t = await opened([shown], 'p-a');
+    const theirs = { ...shown, extra: { due_at: at(5 * DAY) }, updatedAt: iso(MIN) };
+    t.w.handlers.update = (call) =>
+      t.routed('update').length === 1
+        ? json({ ok: false, conflict: true, current: theirs } satisfies WriteResult)
+        : json({ ok: true, bead: { ...theirs, extra: { due_at: at(3 * DAY) }, updatedAt: iso(0) } } satisfies WriteResult);
+    await click(button('Change due date'));
+    await type(textbox('Due date'), '+3d');
+    await click(button('Save'));
+    expect(t.routed('update')[0]?.body).toMatchObject({ patch: { due: '+3d' }, expected: { due: at(2 * DAY) } });
+    const note = within(row('due')).getByRole('alert');
+    expect(note.textContent).toContain('Changed while you were editing');
+    expect(note.textContent).toContain('Now due Mon, Oct 19, 12:00 PM.');
+    // What was typed stays; nothing is sent again until Re-apply.
+    expect(textbox('Due date').value).toBe('+3d');
+    await later(5_000);
+    expect(t.routed('update')).toHaveLength(1);
+    await click(within(row('due')).getByRole('button', { name: 'Re-apply' }));
+    expect(t.routed('update')[1]?.body).toMatchObject({ expectedUpdatedAt: iso(MIN), patch: { due: '+3d' }, expected: { due: at(5 * DAY) } });
+    expect(screen.queryByRole('textbox', { name: 'Due date' })).toBeNull();
+  });
+
+  it('a due date changed elsewhere while typing is a conflict before anything is sent', async () => {
+    const t = await opened([bead('p-a', { extra: { due_at: at(2 * DAY) } })], 'p-a');
+    await click(button('Change due date'));
+    await type(textbox('Due date'), '+3d');
+    // Another change to the bead that leaves the due date alone is followed quietly.
+    t.w.db.beads = [bead('p-a', { title: 'Renamed', extra: { due_at: at(2 * DAY) }, updatedAt: iso(2 * MIN) })];
+    t.w.db.cursor = 2;
+    await later(2_000);
+    expect(within(row('due')).queryByRole('alert')).toBeNull();
+    t.w.db.beads = [bead('p-a', { title: 'Renamed', extra: { due_at: at(6 * DAY) }, updatedAt: iso(MIN) })];
+    t.w.db.cursor = 3;
+    await later(2_000);
+    expect(within(row('due')).getByRole('alert').textContent).toContain('Now due Tue, Oct 20, 12:00 PM.');
+    expect(t.routed('update')).toHaveLength(0);
+  });
+
+  it('defer with a date calls deferBead', async () => {
+    const t = await opened([bead('p-a')], 'p-a');
+    t.w.handlers.deferBead = () => json({ ok: true, bead: bead('p-a', { status: 'deferred', extra: { defer_until: at(5 * DAY) }, updatedAt: iso(0) }) } satisfies WriteResult);
+    expect(within(row('defer')).getByText('Not deferred')).toBeTruthy();
+    await click(button('Defer until a date'));
+    await type(textbox('Defer until'), 'next monday');
+    expect(preview()).toBe('Until Mon, Oct 19, 12:00 PM');
+    await click(within(row('defer')).getByRole('button', { name: 'Defer' }));
+    expect(t.routed('deferBead')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), until: 'next monday' });
+    expect(t.routed('update')).toHaveLength(0);
+    expect(row('defer').textContent).toContain('Until Mon, Oct 19, 12:00 PM');
+    expect(t.toast).toHaveBeenCalledWith(expect.objectContaining({ message: 'Deferred until Mon, Oct 19, 12:00 PM.' }));
+  });
+
+  it('indefinitely and undefer are separate actions', async () => {
+    const t = await opened([bead('p-a')], 'p-a');
+    t.w.handlers.deferBead = () => json({ ok: true, bead: bead('p-a', { status: 'deferred', updatedAt: iso(MIN) }) } satisfies WriteResult);
+    t.w.handlers.undeferBead = () => json({ ok: true, bead: bead('p-a', { updatedAt: iso(0) }) } satisfies WriteResult);
+    // Undefer is not offered for a bead that is not deferred.
+    expect(within(row('defer')).queryByRole('button', { name: 'Undefer' })).toBeNull();
+    await click(button('Defer indefinitely'));
+    expect(t.routed('deferBead')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), until: null });
+    expect(row('defer').textContent).toContain('Until someone brings it back');
+    expect(within(row('defer')).queryByRole('button', { name: 'Defer indefinitely' })).toBeNull();
+    await later(50);
+    expect(document.activeElement).toBe(within(row('defer')).getAllByRole('button')[0]);
+    await click(button('Undefer'));
+    expect(t.routed('undeferBead')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(MIN) });
+    expect(row('defer').textContent).toContain('Not deferred');
+    expect(t.routed('update')).toHaveLength(0);
+  });
+
+  it('a defer that met a newer bead shows it and sends again only on Re-apply', async () => {
+    const shown = bead('p-a');
+    const t = await opened([shown], 'p-a');
+    const theirs = { ...shown, status: 'deferred', extra: { defer_until: at(9 * DAY) }, updatedAt: iso(MIN) };
+    t.w.handlers.deferBead = () => (t.routed('deferBead').length === 1 ? json({ ok: false, conflict: true, current: theirs } satisfies WriteResult) : json({ ok: true, bead: { ...theirs, extra: {}, updatedAt: iso(0) } } satisfies WriteResult));
+    await click(button('Defer indefinitely'));
+    const note = within(row('defer')).getByRole('alert');
+    expect(note.textContent).toContain('Now deferred until Fri, Oct 23, 12:00 PM.');
+    await click(within(row('defer')).getByRole('button', { name: 'Re-apply' }));
+    expect(t.routed('deferBead')[1]?.body).toMatchObject({ expectedUpdatedAt: iso(MIN), until: null });
+  });
+
+  it('asks before typed text goes, and keeps it on Keep editing', async () => {
+    await opened([bead('p-a')], 'p-a');
+    await click(button('Set due date'));
+    await type(textbox('Due date'), 'next friday');
+    await click(within(row('due')).getByRole('button', { name: 'Cancel' }));
+    expect(within(row('due')).getByRole('alertdialog', { name: 'Discard your changes?' })).toBeTruthy();
+    await click(button('Keep editing'));
+    expect(textbox('Due date').value).toBe('next friday');
+    await key(textbox('Due date'), 'Escape');
+    await click(within(row('due')).getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('textbox', { name: 'Due date' })).toBeNull();
+    await later(50);
+    expect(document.activeElement).toBe(button('Set due date'));
+    // Nothing typed: Cancel just closes.
+    await click(button('Set due date'));
+    await key(textbox('Due date'), 'Escape');
+    expect(screen.queryByRole('textbox', { name: 'Due date' })).toBeNull();
+  });
+
+  it('leaving the bead with a typed date asks first', async () => {
+    const t = await opened([bead('p-a'), bead('p-b')], 'p-a');
+    await click(button('Defer until a date'));
+    await type(textbox('Defer until'), '+2d');
+    await click(button('Back'));
+    expect(screen.getByRole('alertdialog', { name: 'Discard your changes?' })).toBeTruthy();
+    expect(store(t).detail).not.toBeNull();
+  });
+
+  it('holds the box read-only while saving, with only that row busy', async () => {
+    const t = await opened([bead('p-a')], 'p-a');
+    const pending = deferred<Answer>();
+    t.w.handlers.update = () => pending.promise;
+    await click(button('Set due date'));
+    await type(textbox('Due date'), '+2d');
+    await click(button('Save'));
+    expect(textbox('Due date').readOnly).toBe(true);
+    expect(within(row('due')).getByRole('button', { name: 'Saving…' })).toBeTruthy();
+    expect((button('Defer indefinitely') as HTMLButtonElement).disabled).toBe(false);
+    await run(() => pending.resolve(json({ ok: true, bead: bead('p-a', { extra: { due_at: at(2 * DAY) }, updatedAt: iso(0) }) } satisfies WriteResult)));
+    expect(screen.queryByRole('textbox', { name: 'Due date' })).toBeNull();
+  });
+
+  it('offers no snooze for a finished bead', async () => {
+    await opened([bead('p-a', { status: 'closed', closedAt: iso(DAY), extra: { due_at: at(-DAY) } })], 'p-a');
+    expect(document.querySelector('[data-date="defer"]')).toBeNull();
+    expect(row('due').textContent).not.toContain('Overdue');
+  });
+
+  it('a refusal shows in plain words with a gate worded as a review', async () => {
+    const gate = { id: 'p-gate1', kind: 'human' as const, reason: null, blocks: ['p-a'], createdBy: 'Bob', createdAt: iso(DAY), timeoutMs: null, planApproval: false };
+    const t = await opened([bead('p-a', { status: 'deferred' })], 'p-a', () => ({ gates: [gate], gateIds: ['p-gate1'] }));
+    t.w.handlers.undeferBead = () => envelope(409, { code: 'blocked', message: "This bead can't be closed yet. It is still waiting on a review." });
+    await click(button('Undefer'));
+    const alert = within(row('defer')).getByRole('alert');
+    expect(alert.textContent).toContain('Resolve the review first.');
+    expect(alert.textContent).not.toMatch(/p-gate1|\bgate\b/);
+  });
+});
+
+describe('date actions sent once', () => {
+  it('two presses of Undefer in one frame send one undefer', async () => {
+    const t = await opened([bead('p-a', { status: 'deferred' })], 'p-a');
+    const pending = deferred<Answer>();
+    t.w.handlers.undeferBead = () => pending.promise;
+    await run(() => {
+      const undo = button('Undefer');
+      fireEvent.click(undo);
+      fireEvent.click(undo);
+    });
+    expect(t.routed('undeferBead')).toHaveLength(1);
+    await run(() => pending.resolve(json({ ok: true, bead: bead('p-a', { updatedAt: iso(0) }) } satisfies WriteResult)));
+  });
+});
+
+describe('date rows, fix round 1', () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+  const row = (kind: 'due' | 'defer') => document.querySelector<HTMLElement>(`[data-date="${kind}"]`)!;
+
+  it('holds the typed date while a conflict shows, so Re-apply sends what the preview says', async () => {
+    const shown = bead('p-a', { extra: { due_at: at(2 * DAY) } });
+    const t = await opened([shown], 'p-a');
+    const theirs = { ...shown, extra: { due_at: at(5 * DAY) }, updatedAt: iso(MIN) };
+    t.w.handlers.update = () => (t.routed('update').length === 1 ? json({ ok: false, conflict: true, current: theirs } satisfies WriteResult) : json({ ok: true, bead: { ...theirs, updatedAt: iso(0) } } satisfies WriteResult));
+    await click(button('Change due date'));
+    await type(textbox('Due date'), '+3d');
+    await click(button('Save'));
+    expect(textbox('Due date').readOnly).toBe(true);
+    const preview = document.querySelector('.bd-date-preview')!.textContent;
+    expect(preview).toBe('Due Sat, Oct 17, 12:00 PM');
+    await click(within(row('due')).getByRole('button', { name: 'Re-apply' }));
+    expect(t.routed('update')[1]?.body).toMatchObject({ patch: { due: '+3d' } });
+  });
+
+  it('a conflict found while typing also holds the box', async () => {
+    const t = await opened([bead('p-a', { extra: { due_at: at(2 * DAY) } })], 'p-a');
+    await click(button('Change due date'));
+    await type(textbox('Due date'), '+3d');
+    t.w.db.beads = [bead('p-a', { extra: { due_at: at(6 * DAY) }, updatedAt: iso(MIN) })];
+    t.w.db.cursor = 2;
+    await later(2_000);
+    expect(within(row('due')).getByRole('alert')).toBeTruthy();
+    expect(textbox('Due date').readOnly).toBe(true);
+  });
+
+  it('Escape after a date action goes back to the list', async () => {
+    const t = await opened([bead('p-a', { extra: { due_at: at(-DAY) } })], 'p-a');
+    t.w.handlers.update = () => json({ ok: true, bead: bead('p-a', { updatedAt: iso(0) }) } satisfies WriteResult);
+    await click(button('Clear due date'));
+    await later(50);
+    expect(row('due').contains(document.activeElement)).toBe(true);
+    await key(document.activeElement!, 'Escape');
+    expect(document.querySelector('[data-date="due"]')).toBeNull();
+    expect(store(t).detail).toBeNull();
+  });
+
+  it('a refused one-click date action leaves focus on the note, never Re-apply, and says when only something else changed', async () => {
+    const shown = bead('p-a', { status: 'deferred' });
+    const t = await opened([shown], 'p-a');
+    // A comment or title changed: the defer state is as shown.
+    t.w.handlers.undeferBead = () => json({ ok: false, conflict: true, current: { ...shown, title: 'Renamed', updatedAt: iso(MIN) } } satisfies WriteResult);
+    await click(button('Undefer'));
+    await later(50);
+    const note = within(row('defer')).getByRole('alert');
+    expect(note.textContent).toContain('Something else on this bead changed; this date did not.');
+    const focused = document.activeElement as HTMLElement;
+    expect(focused).toBe(note);
+    // A double Enter presses nothing, so the older date is not written over the newer one.
+    const sent = () => t.routed('undeferBead').length;
+    const before = sent();
+    for (let i = 0; i < 2; i++) {
+      fireEvent.keyDown(focused, { key: 'Enter' });
+      if (focused.tagName === 'BUTTON') fireEvent.click(focused);
+    }
+    await later(50);
+    expect(sent()).toBe(before);
+  });
+});
+
+describe('names hold what is shown', () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+  const named = (el: HTMLElement) => el.getAttribute('aria-label') ?? el.textContent ?? '';
+  const visible = (el: HTMLElement) => (el.textContent ?? '').replace('…', '').trim();
+
+  it('every date, type and parent control is named with its visible words first', async () => {
+    const t = await opened([bead('p-e', { type: 'epic', title: 'Billing' }), bead('p-a', { status: 'deferred' }), bead('p-b', { parentId: 'p-e', extra: { due_at: at(DAY) } }), bead('p-c')], 'p-a');
+    const check = () => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('.bd-datebtn, .bd-didrow .bd-chipbtn'));
+      expect(controls.length).toBeGreaterThan(3);
+      for (const el of controls) expect(named(el).toLowerCase()).toContain(visible(el).toLowerCase());
+    };
+    check();
+    expect(button('Set a date to defer until')).toBeTruthy();
+    expect(button('Parent: No parent')).toBeTruthy();
+    for (const id of ['p-b', 'p-c']) {
+      await run(() => t.store.select(id));
+      check();
+    }
+    expect(button('Set due date').textContent).toBe('Set due date');
+  });
+
+  it('a parent that is not an epic is not shown as one', async () => {
+    const beads = [bead('p-t', { title: 'Parent task' }), bead('p-a', { parentId: 'p-t' }), bead('p-e', { type: 'epic', title: 'Billing' })];
+    await opened(beads, 'p-a');
+    const trigger = button('Parent: Parent task');
+    expect(trigger.getAttribute('title')).toBe('Move to an epic');
+    // Only the chevron: no epic mark beside a task.
+    expect(trigger.querySelectorAll('svg')).toHaveLength(1);
+    await click(trigger);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitemradio').filter((m) => m.getAttribute('aria-checked') === 'true')).toHaveLength(0);
+  });
+
+  it('says so inside the menu when there is no other epic, as an item that cannot be chosen', async () => {
+    await opened([bead('p-a')], 'p-a');
+    await click(button('Parent: No parent'));
+    const note = within(screen.getByRole('menu')).getByRole('menuitem', { name: 'No other open epics in this project.' }) as HTMLButtonElement;
+    expect(note.disabled).toBe(true);
+    expect(screen.getByRole('menu').querySelector('p')).toBeNull();
+  });
+});
+
+describe('undefer for any date still ahead', () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+  const row = () => document.querySelector<HTMLElement>('[data-date="defer"]')!;
+
+  it('an open bead that still carries a future date offers Undefer, and it calls undeferBead', async () => {
+    const t = await opened([bead('p-a', { extra: { defer_until: at(3 * DAY) } })], 'p-a');
+    t.w.handlers.undeferBead = () => json({ ok: true, bead: bead('p-a', { updatedAt: iso(0) }) } satisfies WriteResult);
+    expect(row().textContent).toContain('Until Sat, Oct 17, 12:00 PM');
+    expect(within(row()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Change', 'Defer indefinitely', 'Undefer']);
+    await click(within(row()).getByRole('button', { name: 'Undefer' }));
+    expect(t.routed('undeferBead')[0]?.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY) });
+    expect(row().textContent).toContain('Not deferred');
+  });
+
+  it('a bead deferred until a date can be deferred indefinitely in one step', async () => {
+    await opened([bead('p-a', { status: 'deferred', extra: { defer_until: at(3 * DAY) } })], 'p-a');
+    expect(within(row()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Change', 'Defer indefinitely', 'Undefer']);
+  });
+
+  it('a date that already came due on an open bead is not shown as deferred', async () => {
+    await opened([bead('p-a', { extra: { defer_until: at(-DAY) } })], 'p-a');
+    expect(row().textContent).toContain('Not deferred');
+    expect(within(row()).queryByRole('button', { name: 'Undefer' })).toBeNull();
+  });
+});
+
+describe('date preview in the person\'s zone', () => {
+  it('shows the parsed date in the local zone, not UTC', async () => {
+    const zone = process.env.TZ;
+    process.env.TZ = 'America/Chicago';
+    try {
+      await opened([bead('p-a')], 'p-a');
+      await click(button('Set due date'));
+      await type(textbox('Due date'), 'tomorrow');
+      // 12:00 UTC is 7:00 in Chicago (daylight time in October).
+      expect(document.querySelector('.bd-date-preview')!.textContent).toBe('Due Thu, Oct 15, 7:00 AM');
+      await type(textbox('Due date'), '2026-10-20');
+      expect(document.querySelector('.bd-date-preview')!.textContent).toBe('Due Tue, Oct 20');
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+});
+
+// ------------------------------------------------------------------------------------------------- task 16
+
+describe('comment and close', () => {
+  const COMMENT_REFUSED = "Your comment was added, but the bead could not be closed. This bead can't be closed yet. It has sub-tasks that are not closed yet: p-c. Close those first.";
+  async function closing(answer: (call: Call) => Answer) {
+    const t = await opened([bead('p-a', { status: 'in_progress' })], 'p-a');
+    t.w.handlers.update = answer;
+    await click(button('Status: In progress'));
+    await click(screen.getByRole('menuitemradio', { name: 'Closed' }));
+    await type(textbox('Close reason (optional)'), 'Done');
+    await type(textbox('Comment (optional)'), 'All merged.');
+    return t;
+  }
+  const reopen = async () => {
+    await click(button('Status: In progress'));
+    await click(screen.getByRole('menuitemradio', { name: 'Closed' }));
+  };
+
+  it('close dialog sends closeComment', async () => {
+    const t = await closing((call) => json({ ok: true, bead: bead('p-a', { status: (call.body.patch as { status: string }).status, updatedAt: iso(0) }) } satisfies WriteResult));
+    await click(button('Mark closed'));
+    expect(t.routed('update').map((c) => c.body)).toEqual([
+      { directory: '/p/a', id: 'p-a', expectedUpdatedAt: iso(DAY), patch: { status: 'closed', closeReason: 'Done', closeComment: 'All merged.' }, expected: { status: 'in_progress' } },
+    ]);
+    expect(button('Status: Closed')).toBeTruthy();
+  });
+
+  it('Cmd/Ctrl+Enter in the comment closes; plain Enter is a new line', async () => {
+    const t = await closing((call) => json({ ok: true, bead: bead('p-a', { status: (call.body.patch as { status: string }).status, updatedAt: iso(0) }) } satisfies WriteResult));
+    await key(textbox('Comment (optional)'), 'Enter');
+    expect(t.routed('update')).toHaveLength(0);
+    await key(textbox('Comment (optional)'), 'Enter', { metaKey: true });
+    expect(t.routed('update')).toHaveLength(1);
+  });
+
+  it('comment added but close refused is shown as such', async () => {
+    const t = await closing(() => envelope(409, { code: 'blocked', message: COMMENT_REFUSED }));
+    await click(button('Mark closed'));
+    expect(t.routed('update')).toHaveLength(1);
+    expect(screen.getByText(COMMENT_REFUSED)).toBeTruthy();
+    // The comment is in: it is not offered again. The reason, which did not go anywhere, is.
+    await reopen();
+    expect(textbox('Comment (optional)').value).toBe('');
+    expect((textbox('Close reason (optional)') as unknown as HTMLInputElement).value).toBe('Done');
+  });
+
+  it('a comment typed after a "comment was added" refusal survives leaving the bead and coming back', async () => {
+    const t = await opened([bead('p-a', { status: 'in_progress' }), bead('p-b')], 'p-a');
+    t.w.handlers.update = () => envelope(409, { code: 'blocked', message: COMMENT_REFUSED });
+    await click(button('Status: In progress'));
+    await click(screen.getByRole('menuitemradio', { name: 'Closed' }));
+    await type(textbox('Comment (optional)'), 'All merged.');
+    await click(button('Mark closed'));
+    expect(screen.getByText(COMMENT_REFUSED)).toBeTruthy();
+    await reopen();
+    await type(textbox('Comment (optional)'), 'A second thought.');
+    // Away and back: the old answer shows again, and must not take the new comment with it.
+    await run(() => t.store.select('p-b'));
+    await run(() => t.store.select('p-a'));
+    if (!screen.queryByRole('textbox', { name: 'Comment (optional)' })) await reopen();
+    expect(textbox('Comment (optional)').value).toBe('A second thought.');
+  });
+
+  it('a refused close that added nothing keeps the comment', async () => {
+    await closing(() => envelope(503, { code: 'busy', message: 'Beads is busy. Nothing was saved. Try again in a moment.' }));
+    await click(button('Mark closed'));
+    expect(screen.getByText('Beads is busy. Nothing was saved. Try again in a moment.')).toBeTruthy();
+    await reopen();
+    expect(textbox('Comment (optional)').value).toBe('All merged.');
+  });
+
+  /** The comment goes in, the close does not answer: what the service does when `bd close` times out after the comment. */
+  const commentLands = (t: Awaited<ReturnType<typeof opened>>) => {
+    const b = t.w.db.beads[0]!;
+    t.w.db.beads = [{ ...b, comments: [...b.comments, { id: `c${b.comments.length + 1}`, author: 'Ann (panel)', text: 'All merged.', createdAt: iso(0) }] }];
+    t.w.db.cursor++;
+  };
+  const closed = (t: Awaited<ReturnType<typeof opened>>) => json({ ok: true, bead: { ...t.w.db.beads[0]!, status: 'closed', updatedAt: iso(0) } } satisfies WriteResult);
+
+  it('an uncertain close whose comment went in: Try again closes without posting the comment again', async () => {
+    let t!: Awaited<ReturnType<typeof opened>>;
+    t = await closing(() => {
+      if (t.routed('update').length > 1) return closed(t);
+      commentLands(t);
+      return json({ ok: false, uncertain: true, current: null } satisfies WriteResult);
+    });
+    await click(button('Mark closed'));
+    await later(2_000);
+    expect(screen.getByText('It did not save.')).toBeTruthy();
+    await click(button('Try again'));
+    const sent = t.routed('update').map((c) => c.body.patch);
+    expect(sent[0]).toEqual({ status: 'closed', closeReason: 'Done', closeComment: 'All merged.' });
+    expect(sent[1]).toEqual({ status: 'closed', closeReason: 'Done' });
+  });
+
+  it('after an uncertain close whose comment went in, the dialog no longer holds the comment and sends none', async () => {
+    let t!: Awaited<ReturnType<typeof opened>>;
+    t = await closing(() => {
+      if (t.routed('update').length > 1) return closed(t);
+      commentLands(t);
+      return json({ ok: false, uncertain: true, current: null } satisfies WriteResult);
+    });
+    await click(button('Mark closed'));
+    await later(2_000);
+    await reopen();
+    expect(textbox('Comment (optional)').value).toBe('');
+    await click(button('Mark closed'));
+    expect(t.routed('update')[1]?.body.patch).toEqual({ status: 'closed', closeReason: 'Done' });
+  });
+
+  it('an uncertain close whose comment did not go in sends it again, once the project was read', async () => {
+    let t!: Awaited<ReturnType<typeof opened>>;
+    t = await closing(() => (t.routed('update').length > 1 ? closed(t) : json({ ok: false, uncertain: true, current: null } satisfies WriteResult)));
+    await click(button('Mark closed'));
+    // Before the project is read again nobody knows whether it went in: the dialog waits rather than guess.
+    await reopen();
+    expect(button('Mark closed').getAttribute('aria-disabled')).toBe('true');
+    await key(textbox('Close reason (optional)'), 'Enter');
+    expect(t.routed('update')).toHaveLength(1);
+    await later(2_000);
+    expect(textbox('Comment (optional)').value).toBe('All merged.');
+    await click(button('Mark closed'));
+    expect(t.routed('update')[1]?.body.patch).toEqual({ status: 'closed', closeReason: 'Done', closeComment: 'All merged.' });
+  });
+
+  for (const retried of ['uncertain', 'comment added'] as const) {
+    it(`Try again that answers ${retried}, then the dialog reopened before the next read: no second comment`, async () => {
+      let t!: Awaited<ReturnType<typeof opened>>;
+      /** The reads after Try again (the list's and the bead's own), held so the dialog is reopened before they land. */
+      const held = deferred<void>();
+      t = await closing(() => {
+        const n = t.routed('update').length;
+        if (n === 1) return json({ ok: false, uncertain: true, current: null } satisfies WriteResult);
+        if (n === 2) {
+          commentLands(t);
+          const base = t.w.answer;
+          t.w.handlers.snapshot = (call) => held.promise.then(() => base(call));
+          t.w.handlers.bead = (call) => held.promise.then(() => base(call));
+          return retried === 'uncertain'
+            ? json({ ok: false, uncertain: true, current: null } satisfies WriteResult)
+            : envelope(409, { code: 'blocked', message: "Your comment was added, but the bead could not be closed. This bead can't be closed yet. It is still blocked by p-b. Close those first." });
+        }
+        return closed(t);
+      });
+      await click(button('Mark closed'));
+      await later(2_000);
+      await click(button('Try again'));
+      expect(t.routed('update')[1]?.body.patch).toEqual({ status: 'closed', closeReason: 'Done', closeComment: 'All merged.' });
+      await reopen();
+      const release = async () => {
+        delete t.w.handlers.snapshot;
+        delete t.w.handlers.bead;
+        await run(() => held.resolve());
+        await later(2_000);
+      };
+      if (retried === 'uncertain') {
+        // Not known yet whether it went in: nothing is sent until the project is read, which then shows the comment.
+        expect(button('Mark closed').getAttribute('aria-disabled')).toBe('true');
+        await click(button('Mark closed'));
+        expect(t.routed('update')).toHaveLength(2);
+        await release();
+      }
+      // A comment added before a refused close is in at once, before any read.
+      expect(textbox('Comment (optional)').value).toBe('');
+      await click(button('Mark closed'));
+      expect(t.routed('update')[2]?.body.patch).toEqual({ status: 'closed', closeReason: 'Done' });
+      if (retried !== 'uncertain') await release();
+    });
+  }
+
+  it('a bead closed elsewhere while the dialog is open keeps what is being typed', async () => {
+    const t = await closing(() => json({}));
+    t.w.db.beads = [{ ...t.w.db.beads[0]!, status: 'closed', closedAt: iso(0), updatedAt: iso(0) }];
+    t.w.db.cursor++;
+    await later(2_000);
+    expect(textbox('Comment (optional)').value).toBe('All merged.');
+  });
+
+  it('Cancel asks before letting typed text go', async () => {
+    const t = await closing(() => json({}));
+    await click(button('Cancel'));
+    const ask = screen.getByRole('alertdialog', { name: 'Discard what you typed?' });
+    await click(within(ask).getByRole('button', { name: 'Keep editing' }));
+    expect(textbox('Comment (optional)').value).toBe('All merged.');
+    await click(button('Cancel'));
+    await click(within(screen.getByRole('alertdialog', { name: 'Discard what you typed?' })).getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('textbox', { name: 'Comment (optional)' })).toBeNull();
+    await reopen();
+    expect(textbox('Comment (optional)').value).toBe('');
+    expect(t.routed('update')).toHaveLength(0);
   });
 });

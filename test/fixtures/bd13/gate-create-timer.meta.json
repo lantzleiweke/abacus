@@ -1,0 +1,1 @@
+{"cmd": "bd gate create --type=timer --timeout=2h --blocks <id> --json", "cwd_label": "scratch plan02-a (prefix pl)", "exit": 0}

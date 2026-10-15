@@ -1,4 +1,4 @@
-import type { Bead, Comment, Dependency, JsonValue, StatusDef } from '../../shared/types';
+import type { Bead, Comment, Dependency, ExplainResult, JsonValue, StatusDef } from '../../shared/types';
 
 type Obj = Record<string, unknown>;
 
@@ -169,6 +169,21 @@ export function parseTypes(json: unknown): string[] {
   const core = mapArray(json.core_types, (raw) => (isObj(raw) && typeof raw.name === 'string' && raw.name !== '' ? raw.name : null));
   const custom = mapArray(json.custom_types, (raw) => (typeof raw === 'string' && raw !== '' ? raw : null));
   return [...core, ...custom];
+}
+
+/**
+ * `bd ready --explain --json`: `{ready: [...], blocked: [{id, blocked_by: [{id, title, status, priority}]}]}`, for the whole project.
+ * Returns the ready ids and, per blocked bead, what it waits on. Anything that is not shaped like that is left out.
+ */
+export function parseExplain(json: unknown): { ready: Set<string>; blocked: Map<string, ExplainResult['blockers']> } {
+  const answer = isObj(json) ? json : {};
+  const ready = new Set(mapArray(answer.ready, (raw) => (isObj(raw) && typeof raw.id === 'string' && raw.id !== '' ? raw.id : null)));
+  const blocked = new Map<string, ExplainResult['blockers']>();
+  for (const raw of Array.isArray(answer.blocked) ? answer.blocked : []) {
+    if (!isObj(raw) || typeof raw.id !== 'string' || raw.id === '') continue;
+    blocked.set(raw.id, mapArray(raw.blocked_by, (by) => (isObj(by) && typeof by.id === 'string' && by.id !== '' ? { id: by.id, title: str(by.title), status: str(by.status) } : null)));
+  }
+  return { ready, blocked };
 }
 
 /** `bd ready --json`: ids only. */

@@ -1,0 +1,1 @@
+{"cmd":"dolt sql -r json -q \"SELECT * FROM leases\" (after bd update <id> --claim)","cwd_label":"scratch plan02-a embedded database folder","exit":0}

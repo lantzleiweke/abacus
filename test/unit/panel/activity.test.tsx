@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/preact';
 import { createClient } from '../../../src/panel/client';
 import { createStore, StoreContext, type Store } from '../../../src/panel/store';
-import { activityFeed, changeWhat, whenOf, whoOf, type FeedInput } from '../../../src/panel/activity';
+import { activityFeed, changeWhat, rowChange, whenOf, whoOf, type FeedInput } from '../../../src/panel/activity';
 import { App } from '../../../src/panel/ui/App';
-import type { Bead, ChangeEvent, StatusDef } from '../../../src/shared/types';
+import type { Bead, ChangeEvent, StatusDef, WriteResult } from '../../../src/shared/types';
 import { fakeHost, flush, freshness, json, snapshot, type Answer, type Call } from './helpers';
 
 const NOW = new Date('2026-10-14T17:00:00Z').getTime();
@@ -128,6 +128,38 @@ describe('activity entry text', () => {
         }
       }
     }
+  });
+
+  it('words gate rows by kind and how they ended, naming who resolved only when it was not this panel', () => {
+    const g = (over: Partial<Activity>) => what({ kind: 'gate_resolved', gateId: 'p-g1', gateKind: 'human', reason: 'Review before closing', ...over });
+    expect(what({ kind: 'gate_opened', gateId: 'p-g1', gateKind: 'human', reason: 'Review before closing' })).toBe('Review requested');
+    expect(what({ kind: 'gate_opened', gateId: 'p-g1', gateKind: 'human', reason: 'Approve the plan before work starts' })).toBe('Plan approval requested');
+    expect(what({ kind: 'gate_opened', gateId: 'p-g1', gateKind: 'timer' })).toBe('Timer set');
+    expect(g({})).toBe('Review resolved by Claude Code');
+    expect(g({ actor: null })).toBe('Review resolved by someone else');
+    expect(g({ actor: 'Alice (panel)', byPanel: true })).toBe('Review resolved');
+    expect(g({ ended: 'deleted', actor: null })).toBe('Review deleted');
+    expect(g({ ended: 'unlinked' })).toBe('Review removed from this bead');
+    expect(g({ reason: 'Approve the plan before work starts' })).toBe('Plan approved by Claude Code');
+    // Not people's gates: never called a review, and nobody is said to have resolved them.
+    expect(g({ gateKind: 'timer', actor: null })).toBe('Timer ended');
+    expect(g({ gateKind: 'gh:pr', actor: null, ended: 'deleted' })).toBe('GitHub check deleted');
+    expect(g({ gateKind: undefined, actor: null })).toBe('Check cleared');
+  });
+
+  it('offers a row for restore only for a whole short field value (long text goes through History)', () => {
+    const row = (over: Partial<Activity>) => rowChange(event({ beadId: 'p-a', kind: 'field', ...over }));
+    expect(row({ field: 'priority', from: 2, to: 0 })).toEqual({ field: 'priority', from: 2, to: 0, text: false });
+    expect(row({ field: 'assignee', from: null, to: 'Bob' })).toEqual({ field: 'assignee', from: null, to: 'Bob', text: false });
+    expect(row({ field: 'labels', from: ['a'], to: ['a', 'b'] })).not.toBeNull();
+    // Labels a history row could not name, long text, a cut value, fields the panel does not write, and non-field rows.
+    expect(row({ field: 'labels' })).toBeNull();
+    expect(row({ field: 'description', from: 'a', to: 'b' })).toBeNull();
+    expect(row({ field: 'title', from: `${'x'.repeat(2000)}…`, to: 'Short' })).toBeNull();
+    expect(row({ field: 'title', from: 'x'.repeat(2000), to: 'Short' })).not.toBeNull();
+    expect(row({ field: 'parentId', from: null, to: 'p-b' })).toBeNull();
+    expect(row({ field: 'estimated_minutes', from: 1, to: 2 })).toBeNull();
+    expect(rowChange(event({ beadId: 'p-a', kind: 'closed', field: 'status', from: 'open', to: 'closed' }))).toBeNull();
   });
 
   it('names who made it: you (panel), the recorded name, or unknown', () => {
@@ -493,5 +525,108 @@ describe('activity view', () => {
     expect(earlier!.querySelector('.bd-act-gone')?.textContent).toBe('deleted');
     expect(earlier!.getAttribute('aria-disabled')).toBe('true');
     expect(untitled!.querySelector('.bd-act-notitle')?.textContent).toBe('(title not recorded)');
+  });
+});
+
+describe('restore from an activity row', () => {
+  const shown = bead('p-a', { title: 'Fix login', priority: 0, updatedAt: iso(2 * MIN) });
+  const feed = [
+    event({ id: 'r1', beadId: 'p-a', kind: 'field', field: 'priority', from: 2, to: 0, observedAt: iso(5 * MIN) }),
+    event({ id: 'r2', beadId: 'p-a', kind: 'field', field: 'description', from: 'Old text', to: 'New text', observedAt: iso(9 * MIN) }),
+  ];
+  const updates = (calls: Call[]) => calls.filter((c) => c.route === 'update');
+  const withUpdate = (update: (call: Call) => Answer, beads = [shown, BEADS[1]!]) => {
+    const base = service(feed, beads);
+    return (call: Call) => (call.route === 'update' ? update(call) : base(call));
+  };
+  const openMenu = async (row: HTMLElement) => {
+    await act(async () => {
+      fireEvent.click(row.querySelector('.bd-rowmore')!);
+      await flush();
+    });
+  };
+  const choose = async (name: string) => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name }));
+      await flush();
+    });
+  };
+  const bar = () => screen.getByRole('group', { name: /^Restore / });
+
+  it("activity row restore uses the row's values", async () => {
+    const { store, calls } = setup(withUpdate(() => json({ ok: true, bead: { ...shown, priority: 2, updatedAt: iso(0) } } satisfies WriteResult)));
+    await openActivity(store);
+    await openMenu(entries()[0]!);
+    await choose('Restore previous value');
+    expect(updates(calls)).toHaveLength(1);
+    expect(updates(calls)[0]!.body).toEqual({ directory: '/p/a', id: 'p-a', expectedUpdatedAt: shown.updatedAt, patch: { priority: 2 }, expected: { priority: 0 } });
+    expect(within(bar()).getByRole('status').textContent).toBe('Restored the earlier priority.');
+    // The bar sits outside the feed's options: nothing pressable is inside a row.
+    expect(screen.getByRole('listbox', { name: 'Activity' }).contains(bar())).toBe(false);
+  });
+
+  it('a long text row has no Restore: History carries the whole value', async () => {
+    const { store } = setup(withUpdate(() => json({})));
+    await openActivity(store);
+    await openMenu(entries()[1]!);
+    expect(screen.queryByRole('menuitem', { name: 'Restore previous value' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copy ID' })).toBeTruthy();
+  });
+
+  it('a refused row restore shows the current value and writes nothing more', async () => {
+    const current = { ...shown, priority: 1, updatedAt: iso(MIN) };
+    const { store, calls } = setup(withUpdate(() => json({ ok: false, conflict: true, current } satisfies WriteResult)));
+    await openActivity(store);
+    await openMenu(entries()[0]!);
+    await choose('Restore previous value');
+    const alert = within(bar()).getByRole('alert');
+    expect(alert.textContent).toContain('Now: P1.');
+    expect(alert.textContent).toContain('Nothing was changed.');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flush();
+    });
+    expect(updates(calls)).toHaveLength(1);
+    // Focus leaves the feed for the refusal's message, never the button that overwrites; a double Enter writes nothing.
+    const focused = document.activeElement as HTMLElement;
+    expect(focused.hasAttribute('data-refused')).toBe(true);
+    expect(bar().contains(focused)).toBe(true);
+    for (let i = 0; i < 2; i++) {
+      fireEvent.keyDown(focused, { key: 'Enter' });
+      if (focused.tagName === 'BUTTON') fireEvent.click(focused);
+    }
+    await flush();
+    expect(updates(calls)).toHaveLength(1);
+    await act(async () => {
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Restore anyway' }));
+      await flush();
+    });
+    expect(updates(calls)[1]!.body).toMatchObject({ expectedUpdatedAt: current.updatedAt, patch: { priority: 2 }, expected: { priority: 1 } });
+  });
+
+  it('a row the bead has moved past asks first in the bar, with focus on its message; Keep current closes it and sends nothing', async () => {
+    const { store, calls } = setup(withUpdate(() => json({}), [{ ...shown, priority: 1 }, BEADS[1]!]));
+    await openActivity(store);
+    await openMenu(entries()[0]!);
+    await choose('Restore previous value');
+    expect(updates(calls)).toHaveLength(0);
+    expect(within(bar()).getByRole('alert').textContent).toContain('Now: P1.');
+    expect((document.activeElement as HTMLElement).hasAttribute('data-refused')).toBe(true);
+    await act(async () => {
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Keep current' }));
+      await flush();
+    });
+    expect(screen.queryByRole('group', { name: /^Restore / })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('listbox', { name: 'Activity' }));
+    expect(updates(calls)).toHaveLength(0);
+  });
+
+  it('a row whose bead already holds the earlier value offers nothing to send', async () => {
+    const { store } = setup(withUpdate(() => json({}), [{ ...shown, priority: 2 }, BEADS[1]!]));
+    await openActivity(store);
+    await openMenu(entries()[0]!);
+    const item = screen.getByRole('menuitem', { name: /Restore previous value/ }) as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    expect(item.textContent).toContain('Already the earlier value');
   });
 });

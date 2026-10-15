@@ -1,0 +1,18 @@
+
+📊 Ready Work Explanation
+
+● Ready (1 issues):
+
+  pl-8nm [P2] Canon
+    Reason: no blocking dependencies
+
+● Blocked (2 issues):
+
+  pl-2n0 [P0] Task B
+    ← blocked by pl-9mg: Gate: timer [open]
+
+  pl-b9p [P1] Epic one
+    ← blocked by pl-e2e: Gate: human [open]
+
+─ Summary: 1 ready, 2 blocked
+

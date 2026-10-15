@@ -6,6 +6,8 @@ type FullSnapshot = Extract<SnapshotResponse, { unchanged: false }>;
 /** Why nothing can be changed right now, in a sentence, or null when changes can go through. */
 export function writesPaused(snapshot: FullSnapshot | null): string | null {
   if (!snapshot) return null;
+  // Any write would open the store and update it, which only the update's own confirm may do.
+  if (snapshot.freshness.schemaUpdate) return 'Editing is paused until the project is updated.';
   if (snapshot.writesBlocked) return 'Editing is paused until the sync problem is resolved.';
   if (snapshot.sync.kind === 'running') return `Editing is paused while ${snapshot.sync.op === 'publish' ? 'Publish' : 'Sync'} runs.`;
   return null;

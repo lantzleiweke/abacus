@@ -1,0 +1,32 @@
+[
+  {
+    "id": "pl-twp",
+    "title": "Old dup",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:39:26Z",
+    "created_by": "tester",
+    "updated_at": "2026-10-15T05:39:31Z",
+    "closed_at": "2026-10-15T05:39:31Z",
+    "dependencies": [
+      {
+        "id": "pl-8nm",
+        "title": "Canon",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "user@example.com",
+        "created_at": "2026-10-15T05:39:27Z",
+        "created_by": "tester",
+        "updated_at": "2026-10-15T05:39:27Z",
+        "dependency_type": "duplicates"
+      }
+    ],
+    "dependent_count": 0,
+    "dependency_count": 1,
+    "comment_count": 0,
+    "revision": "6407272229075405669"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "pl-b9p.1",
+    "title": "Child X",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:39:41Z",
+    "created_by": "tester",
+    "updated_at": "2026-10-15T05:39:41Z"
+  }
+]

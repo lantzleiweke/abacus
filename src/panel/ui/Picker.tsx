@@ -8,9 +8,10 @@ import { shortAgo } from '../format';
 import { composing } from '../keyboard';
 import { humanize, looker, markerOf, shortId, statusLabel, WEEK_MS } from '../list';
 import { attachPayload, beadOfItem, chipDirectory, isSyncChip } from '../resolve';
-import { createStore, firstLoadError, StoreContext, useNow, useStore, type StoreDeps } from '../store';
+import { createStore, firstLoadError, needsUpdate, StoreContext, useNow, useStore, type StoreDeps } from '../store';
 import { addStyles, type PanelHost } from './App';
 import { EmptyState, Loading, LoadError, WorkspaceEmpty } from './EmptyState';
+import { UPDATE_TITLE } from './ProjectUpdate';
 import { IconSearch, IconSpinner, TypeIcon } from './icons';
 import { Markdown } from './Markdown';
 import { Priority, StatusDot } from './Row';
@@ -128,7 +129,7 @@ function Picker({ host, client }: { host: DialogHost; client: Pick<BeadsClient, 
     host.close().catch(() => {});
   }
 
-  const confirm = () => void attach(at);
+  const chooseNow = () => void attach(at);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (composing(e)) return;
@@ -137,7 +138,7 @@ function Picker({ host, client }: { host: DialogHost; client: Pick<BeadsClient, 
     else if (e.key === 'ArrowUp' || (ctrl && e.key === 'p')) move(-1);
     else if (e.key === 'Enter') {
       // Shift+Enter does nothing: one bead per open.
-      if (!e.shiftKey) confirm();
+      if (!e.shiftKey) chooseNow();
     }
     else if (e.key === 'Escape') {
       if (query) setQuery('');
@@ -220,7 +221,7 @@ function Picker({ host, client }: { host: DialogHost; client: Pick<BeadsClient, 
         <button type="button" class="bd-btn bd-btn-sm" onClick={() => host.close().catch(() => {})}>
           Cancel
         </button>
-        <button type="button" class="bd-btn bd-btn-sm bd-btn-primary" disabled={busy || !at} onClick={confirm}>
+        <button type="button" class="bd-btn bd-btn-sm bd-btn-primary" disabled={busy || !at} onClick={chooseNow}>
           {busy ? (
             <>
               <IconSpinner size={12} />
@@ -291,6 +292,8 @@ function Dialog({ host, client, item }: { host: DialogHost; client: BeadsClient;
     if (isSyncChip(item)) return <SyncChipView host={host} here={chipDirectory(item) === state.directory} />;
     if (chipId === null && chipDirectory(item) !== null) return <EmptyState tone="neutral" title="That bead is in another project." body="Open that project to see it." />;
     if (state.workspace && state.workspace.kind !== 'ok') return <WorkspaceEmpty workspace={state.workspace} />;
+    // The update runs only from the panel's own confirm; this dialog only says where.
+    if (needsUpdate(state)) return <EmptyState tone="ask" title={UPDATE_TITLE} body="Update it from the Abacus panel, then pick beads here." />;
     if (firstLoadError(state)) return <LoadError />;
     if (!state.snapshot) return <Loading />;
     if (chipId) return <ChipView id={chipId} host={host} />;

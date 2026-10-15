@@ -1,0 +1,6 @@
+{
+  "action": "updated",
+  "key": "race-flag",
+  "schema_version": 1,
+  "value": "Always run tests with -race and -count=1"
+}

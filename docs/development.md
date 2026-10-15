@@ -2,7 +2,7 @@
 
 ## Setup
 
-You need Node 20 or newer and npm. For the integration tests you also need `bd` 1.2.2 or newer, `dolt` and `git` on the PATH.
+You need Node 20 or newer and npm. For the integration tests you also need `bd` 1.3.1, `dolt` and `git` on the PATH. The integration suites are verified on 1.3.1; 1.2.2 is covered by unit tests on captured output.
 
 ```sh
 npm install

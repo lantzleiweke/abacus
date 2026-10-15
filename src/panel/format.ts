@@ -58,6 +58,12 @@ export const timeText = (date: Date): string => TIME.format(wallClock(date));
 /** "Oct 2, 2026, 5:02 PM". */
 export const fullText = (date: Date): string => FULL.format(wallClock(date));
 
+/** A recorded name as shown: "you (panel)" for the panel's own, "unknown" when none was recorded. */
+export function personName(name: string | null, panel: string | null): string {
+  if (!name) return 'unknown';
+  return panel !== null && name === panel ? 'you (panel)' : name;
+}
+
 /** Last path segment of a directory, for a project name before the service has answered. */
 export const folderName = (directory: string): string => directory.split(/[\\/]/).filter(Boolean).pop() ?? directory;
 

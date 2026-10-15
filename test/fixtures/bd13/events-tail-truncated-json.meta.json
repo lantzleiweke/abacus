@@ -1,0 +1,1 @@
+{"cmd": "bd events tail --since 0 --json (stdout; the same JSON for --limit 1)", "cwd_label": "scratch with events-journal-retain-days 0, retain-rows 2, then bd events prune --before 5 (window [5..6])", "exit": 1}

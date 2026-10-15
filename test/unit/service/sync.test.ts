@@ -20,6 +20,7 @@ import {
   checkHalfMerge,
   lastTeamSync,
   localHead,
+  parseSupersededEdits,
   publishPreview,
   onTeamSynced,
   resetSyncState,
@@ -80,6 +81,8 @@ type Fake = {
   status: Row[];
   /** The local head once a pull has run (a pull that merges moves it); null leaves it. */
   headAfterPull: string | null;
+  /** What `dolt_diff(...)` over the issues table answers: the beads each commit added. An Error makes the query fail. */
+  added: Array<{ commit_hash: string; to_id: string }> | Error;
 };
 let fake: Fake;
 
@@ -110,6 +113,10 @@ function install(): void {
   sql.mockImplementation(async (_root, _mode, query) => {
     fake.sqlCalls.push(query);
     if (/active_branch/i.test(query)) return [{ branch: fake.branch }];
+    if (/dolt_diff\(/i.test(query)) {
+      if (fake.added instanceof Error) throw fake.added;
+      return fake.added.filter((row) => query.includes(`'${row.commit_hash}~'`));
+    }
     if (/HASHOF\('HEAD'\)/i.test(query)) return [{ head: fake.head }];
     if (/FROM dolt_status/i.test(query)) return /COUNT\(\*\)/i.test(query) ? [{ n: fake.status.length }] : fake.status;
     if (/dolt_commit_ancestors/i.test(query)) return fake.merges.filter((h) => query.includes(`'${h}'`)).map((commit_hash) => ({ commit_hash }));
@@ -162,6 +169,7 @@ beforeEach(() => {
     merges: [],
     status: [],
     headAfterPull: null,
+    added: [],
   };
   install();
 });
@@ -217,6 +225,73 @@ describe('unpublished', () => {
     expect(list[1]!.beadIds).toEqual(['scr-a', 'scr-b']);
     expect(list[2]).toMatchObject({ beadIds: [], actor: null });
     expect(list[2]!.summary).toMatch(/team/i);
+  });
+
+  describe('bd 1.3.1 embedded messages (server style, no actor, no id on create)', () => {
+    /** Dolt commit hashes are 32 characters. */
+    const h = (name: string): string => name.padEnd(32, '0');
+    const row = (commit_hash: string, message: string, at = '2026-10-14 12:30:40'): Row => ({ commit_hash, committer: 'beads', date: at, message });
+
+    it('names the created bead from the commit\'s own diff, never "issue", with one query for all creates', async () => {
+      fake.log = [row(h('c3'), 'bd: create issue'), row(h('c2'), 'bd: update sx-1'), row(h('c1'), 'bd: create issue')];
+      fake.added = [{ commit_hash: h('c1'), to_id: 'sx-a1' }, { commit_hash: h('c3'), to_id: 'sx-a3' }];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list[0]).toMatchObject({ commit: h('c3'), beadIds: ['sx-a3'], summary: 'Created sx-a3', actor: null });
+      expect(list[1]).toMatchObject({ beadIds: ['sx-1'], summary: 'Updated sx-1', actor: null });
+      expect(list[2]).toMatchObject({ commit: h('c1'), beadIds: ['sx-a1'], summary: 'Created sx-a1', actor: null });
+      expect(list.flatMap((c) => c.beadIds)).not.toContain('issue');
+      expect(fake.sqlCalls.filter((q) => /dolt_diff\(/i.test(q))).toHaveLength(1);
+    });
+
+    it('says "Created a bead", with no id, when the diff cannot be read or has nothing', async () => {
+      fake.log = [row(h('c2'), 'bd: create issue'), row(h('c1'), 'bd: create issue')];
+      fake.added = new Error('dolt_diff failed');
+      let list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list.map((c) => [c.beadIds, c.summary, c.actor])).toEqual([[[], 'Created a bead', null], [[], 'Created a bead', null]]);
+      fake.added = [];
+      list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list.map((c) => c.beadIds)).toEqual([[], []]);
+    });
+
+    it('asks for no diff when there is no create commit, and never with an unsafe commit hash', async () => {
+      fake.log = [row('c1', 'bd: update sx-1')];
+      await unpublished(ROOT, 'embedded');
+      expect(fake.sqlCalls.some((q) => /dolt_diff\(/i.test(q))).toBe(false);
+      fake.log = [row("x'); DROP TABLE issues; --", 'bd: create issue')];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(fake.sqlCalls.some((q) => /dolt_diff\(/i.test(q))).toBe(false);
+      expect(list[0]).toMatchObject({ beadIds: [], summary: 'Created a bead' });
+    });
+
+    it('names a gate commit as a review, never as a bead of its own', async () => {
+      fake.log = [row(h('c2'), 'bd: resolve (auto-commit) by Claude Code'), row(h('c1'), 'bd: create gate sx-g1 blocking sx-a1')];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list[0]).toMatchObject({ beadIds: [], summary: 'Resolved a review', actor: 'Claude Code' });
+      expect(list[1]).toMatchObject({ beadIds: ['sx-a1'], summary: 'Requested review on sx-a1', actor: null });
+      expect(list.flatMap((c) => c.beadIds)).not.toContain('sx-g1');
+      expect(fake.sqlCalls.some((q) => /dolt_diff\(/i.test(q))).toBe(false);
+    });
+
+    it('reads dep add and dep remove with both ids', async () => {
+      fake.log = [row('c2', 'bd: dep remove sx-a sx-b'), row('c1', 'bd: dep add sx-a sx-b')];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list[0]).toMatchObject({ beadIds: ['sx-a', 'sx-b'], summary: 'Unlinked sx-a and sx-b', actor: null });
+      expect(list[1]).toMatchObject({ beadIds: ['sx-a', 'sx-b'], summary: 'Linked sx-a and sx-b', actor: null });
+    });
+
+    it('reads comment, close, reopen and delete', async () => {
+      fake.log = [row('c4', 'bd: delete 1 issue(s)'), row('c3', 'bd: delete 3 issue(s)'), row('c2', 'bd: close sx-1'), row('c1', 'bd: comment sx-1')];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list.map((c) => [c.summary, c.beadIds])).toEqual([['Deleted a bead', []], ['Deleted 3 beads', []], ['Closed sx-1', ['sx-1']], ['Commented on sx-1', ['sx-1']]]);
+      fake.log = [row('c1', 'bd: reopen sx-1')];
+      expect(((await unpublished(ROOT, 'embedded'))!)[0]).toMatchObject({ summary: 'Reopened sx-1', beadIds: ['sx-1'] });
+    });
+
+    it('leaves the merge commits bd makes as team merges', async () => {
+      fake.log = [row('c1', 'auto-resolve merge conflicts: metadata, dependencies, schema_migrations, config, issues (field-level three-way merge), labels/comments/events (union)')];
+      const list = (await unpublished(ROOT, 'embedded'))!;
+      expect(list[0]).toMatchObject({ beadIds: [], summary: 'Merged changes from the team', actor: null });
+    });
   });
 
   it('is an empty list when everything is published', async () => {
@@ -421,6 +496,67 @@ describe('pull', () => {
     await finish();
     expect(pulls()).toHaveLength(0);
     expect(syncState(ROOT)).toMatchObject({ kind: 'error', message: expect.stringMatching(/team/i) });
+  });
+});
+
+describe('auto-merged edits (bd 1.3 settles same-field edits last-write-wins and says so on stderr)', () => {
+  const notice = (id: string, fields: string) => `Notice: auto-merged issue ${id}; ${fields} settled last-write-wins (the older side's edit was superseded)\n`;
+  const PULL_NOTICED = (...lines: string[]) => ok('Pulling from Dolt remote...\nPull complete.\n', lines.join(''));
+
+  it('parses the notice lines: bead, plain field names, internal timestamps left out, repeats merged', () => {
+    const text = [
+      notice('sx-g0z', 'title, updated_at'),
+      'Pull complete.\n',
+      notice('sx-6on', 'description, status, acceptance_criteria, updated_at'),
+      notice('sx-g0z', 'priority, updated_at'),
+      notice('sx-aaa', 'updated_at'),
+    ].join('');
+    expect(parseSupersededEdits(text)).toEqual([
+      { beadId: 'sx-g0z', fields: ['title', 'priority'] },
+      { beadId: 'sx-6on', fields: ['description', 'status', 'acceptance criteria'] },
+      { beadId: 'sx-aaa', fields: [] },
+    ]);
+    expect(parseSupersededEdits('Pulling...\nPull complete.\n')).toEqual([]);
+    expect(parseSupersededEdits('Notice: something else entirely\n')).toEqual([]);
+  });
+
+  it('a pull that auto-merged ends idle and carries which beads and fields were superseded, and the raw log', async () => {
+    fake.pulls = [PULL_NOTICED(notice('sx-g0z', 'title, updated_at'))];
+    startPull(ROOT, 'embedded');
+    await finish();
+    const state = syncState(ROOT);
+    expect(state).toMatchObject({ kind: 'idle', superseded: [{ beadId: 'sx-g0z', fields: ['title'] }] });
+    if (state.kind !== 'idle') throw new Error('unreachable');
+    expect(state.log).toContain('auto-merged issue sx-g0z');
+    expect(lastTeamSync(ROOT)).not.toBeNull();
+    expect(writesBlocked(ROOT)).toBe(false);
+  });
+
+  it('a pull with nothing superseded stays exactly idle', async () => {
+    startPull(ROOT, 'embedded');
+    await finish();
+    expect(syncState(ROOT)).toEqual({ kind: 'idle' });
+  });
+
+  it('a publish carries the notices of every pull it made, and the next job starts clean', async () => {
+    fake.pushes = [REJECTED, PUSH_OK];
+    fake.pulls = [PULL_NOTICED(notice('sx-g0z', 'title, updated_at')), PULL_NOTICED(notice('sx-6on', 'status, updated_at'))];
+    startPublish(ROOT, 'embedded', 'aaaa1111');
+    await finish();
+    expect(verbs()).toEqual(['pull', 'push', 'pull', 'push']);
+    expect(syncState(ROOT)).toMatchObject({ kind: 'idle', superseded: [{ beadId: 'sx-g0z', fields: ['title'] }, { beadId: 'sx-6on', fields: ['status'] }] });
+    startPull(ROOT, 'embedded');
+    await finish();
+    expect(syncState(ROOT)).toEqual({ kind: 'idle' });
+  });
+
+  it('a delete on one side against an edit on the other still stops as a conflict, with nothing superseded', async () => {
+    fake.pulls = [EMBEDDED_CONFLICT];
+    fake.conflicts = [{ base_id: 'sx-g0z', our_title: 'Mine', their_title: 'Theirs' }];
+    startPull(ROOT, 'embedded');
+    await finish();
+    expect(syncState(ROOT)).toMatchObject({ kind: 'conflict', halfMerged: false });
+    expect(syncState(ROOT)).not.toHaveProperty('superseded');
   });
 });
 

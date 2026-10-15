@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -8,8 +9,9 @@ import { WriteError } from '../../../src/service/bd/adapter';
 import { BdError } from '../../../src/service/bd/exec';
 import { startServer } from '../../../src/service/main';
 import { createRoutes, rulesFrom, type RouteDeps } from '../../../src/service/routes';
+import { resetUpdateState, startUpdate, updateJob, whenUpdateSettled } from '../../../src/service/schema-update';
 import type { ApiErrorEnvelope } from '../../../src/shared/api';
-import type { Bead, SyncState, WorkspaceState, WriteResult } from '../../../src/shared/types';
+import type { Bead, LiveState, SyncState, WorkspaceState, WriteResult } from '../../../src/shared/types';
 
 const TOKEN = 'secret-token';
 const T0 = '2026-10-14T10:00:00Z';
@@ -31,21 +33,40 @@ let workspace: WorkspaceState;
 let beads: Bead[] | null;
 let sync: SyncState;
 let blocked: boolean;
+let skew: { from: number; to: number } | null;
 let log: string[];
 let deps: RouteDeps;
-let storeState: { unseen: string[]; deletions: string[] };
+let storeState: { unseen: string[] };
+let liveState: LiveState;
+const journalChanged = vi.fn();
+const readFailureDropped = vi.fn();
 
 const provider = {
   update: vi.fn(),
   create: vi.fn(),
   comment: vi.fn(),
   dependency: vi.fn(),
+  gateCreate: vi.fn(),
+  gateResolve: vi.fn(),
+  humanRespond: vi.fn(),
+  humanDismiss: vi.fn(),
+  history: vi.fn(),
+  gateHistory: vi.fn(),
+  deferBead: vi.fn(),
+  undeferBead: vi.fn(),
+  supersede: vi.fn(),
+  duplicate: vi.fn(),
+  readyExplain: vi.fn(),
+  eventsJournal: vi.fn(),
+  enableEventsJournal: vi.fn(),
+  migrateSchema: vi.fn(),
 };
+const explain = vi.fn();
+const memories = { list: vi.fn(), remember: vi.fn(), forget: vi.fn() };
 const store = {
   markSeen: vi.fn(),
   save: vi.fn(),
-  unseenIds: vi.fn(),
-  unseenDeletionIds: vi.fn(),
+  allUnseenIds: vi.fn(),
   confirmFirstContact: vi.fn(),
   firstContactConfirmedFor: vi.fn(),
   restoreFirstContact: vi.fn(),
@@ -64,17 +85,35 @@ beforeEach(async () => {
   beads = [bead('a'), bead('b', { parentId: 'a' })];
   sync = { kind: 'idle' };
   blocked = false;
+  skew = null;
   log = [];
-  storeState = { unseen: ['a'], deletions: ['gone'] };
-  for (const fn of [...Object.values(provider), ...Object.values(store)]) fn.mockReset();
-  store.unseenIds.mockImplementation(() => storeState.unseen);
-  store.unseenDeletionIds.mockImplementation(() => storeState.deletions);
+  storeState = { unseen: ['a', 'gone', 'gated'] };
+  for (const fn of [...Object.values(provider), ...Object.values(store), ...Object.values(memories)]) fn.mockReset();
+  store.allUnseenIds.mockImplementation(() => storeState.unseen);
   store.save.mockResolvedValue(undefined);
   store.firstContactConfirmedFor.mockReturnValue(null);
   provider.update.mockResolvedValue({ ok: true, bead: bead('a', { title: 'New' }) } satisfies WriteResult);
   provider.create.mockResolvedValue(bead('new'));
   provider.comment.mockResolvedValue({ id: 'c1', author: 'x', text: 'hi', createdAt: T0 });
   provider.dependency.mockResolvedValue(undefined);
+  provider.gateCreate.mockResolvedValue({ ok: true, gate: { id: 'g1', kind: 'human', reason: 'Review before closing', blocks: ['a'], createdBy: 'Ann (panel)', createdAt: T0, timeoutMs: null, planApproval: false } });
+  provider.gateResolve.mockResolvedValue({ ok: true, gateId: 'g1' });
+  provider.humanRespond.mockResolvedValue({ ok: true, bead: bead('a', { status: 'closed' }) });
+  provider.gateHistory.mockResolvedValue({ rows: [], events: [] });
+  provider.humanDismiss.mockResolvedValue({ ok: true, bead: bead('a', { status: 'closed' }) });
+  explain.mockReset();
+  for (const name of ['deferBead', 'undeferBead', 'supersede', 'duplicate'] as const) provider[name].mockResolvedValue({ ok: true, bead: bead('a') } satisfies WriteResult);
+  explain.mockResolvedValue({ state: 'blocked', blockers: [{ id: 'b', title: 'B', status: 'open' }] });
+  provider.eventsJournal.mockReset().mockResolvedValue('off');
+  provider.enableEventsJournal.mockReset().mockResolvedValue(undefined);
+  provider.migrateSchema.mockReset().mockResolvedValue(undefined);
+  readFailureDropped.mockReset();
+  resetUpdateState();
+  journalChanged.mockReset();
+  liveState = 'off';
+  memories.list.mockResolvedValue({ memories: [], fingerprint: 'f' });
+  memories.remember.mockResolvedValue({ ok: true, memory: { key: 'k', text: 'text', changedAt: null, changedBy: null } });
+  memories.forget.mockResolvedValue({ ok: true, memory: null });
 
   deps = {
     resolveWorkspace: vi.fn(async (directory: string, opts?: { refreshWorkspace?: boolean }) => {
@@ -87,7 +126,13 @@ beforeEach(async () => {
     }),
     projectStore: vi.fn(async () => store as never),
     providerFor: vi.fn(() => provider as never),
+    memories: memories as never,
     cachedBeads: vi.fn(() => beads),
+    schemaSkew: vi.fn(() => skew),
+    readFailureDropped,
+    startUpdate,
+    updateJob,
+    explain: explain as never,
     panelActor: vi.fn(async () => 'Ann (panel)'),
     preview: vi.fn(async () => ({ head: 'aaaa1111', changes: [], total: 0 })),
     localHead: vi.fn(async () => 'aaaa1111'),
@@ -96,6 +141,7 @@ beforeEach(async () => {
     syncState: vi.fn(() => sync),
     writesBlocked: vi.fn(() => blocked),
     checkHalfMerge: vi.fn(async () => undefined),
+    live: { state: vi.fn(() => liveState), journalChanged },
     beadUrl: vi.fn(async (r: string, project: string, id: string) => `https://example.com/${project}?bead=${id}`),
   };
 });
@@ -159,6 +205,13 @@ describe('validation', () => {
         ['context', { id }],
         ['update', { id, expectedUpdatedAt: T0, patch: {} }],
         ['comment', { id, text: 'hi' }],
+        ['explain', { id }],
+        ['deferBead', { id, expectedUpdatedAt: T0, until: null }],
+        ['undeferBead', { id, expectedUpdatedAt: T0 }],
+        ['supersede', { id, with: 'b', expectedUpdatedAt: T0 }],
+        ['supersede', { id: 'a', with: id, expectedUpdatedAt: T0 }],
+        ['duplicate', { id, of: 'b', expectedUpdatedAt: T0 }],
+        ['duplicate', { id: 'a', of: id, expectedUpdatedAt: T0 }],
         ['dependency', { op: 'add', from: id, to: 'b', kind: 'blocks' }],
         ['dependency', { op: 'add', from: 'a', to: id, kind: 'blocks' }],
         ['seen', { ids: [id] }],
@@ -182,6 +235,15 @@ describe('validation', () => {
       ['create', { input: { title: 'x', type: 'task', priority: '2', parentId: null, description: '' } }],
       ['create', { input: { title: 'x', type: 'task', priority: 2, parentId: 'bad id', description: '' } }],
       ['comment', { id: 'a' }],
+      ['deferBead', { id: 'a', until: null }],
+      ['deferBead', { id: 'a', expectedUpdatedAt: T0 }],
+      ['deferBead', { id: 'a', expectedUpdatedAt: T0, until: 5 }],
+      ['deferBead', { id: 'a', expectedUpdatedAt: T0, until: null, reason: 5 }],
+      ['undeferBead', { id: 'a' }],
+      ['supersede', { id: 'a', expectedUpdatedAt: T0 }],
+      ['supersede', { id: 'a', with: 'b' }],
+      ['duplicate', { id: 'a', expectedUpdatedAt: T0 }],
+      ['duplicate', { id: 'a', of: 'b' }],
       ['dependency', { op: 'nope', from: 'a', to: 'b', kind: 'blocks' }],
       ['dependency', { op: 'add', from: 'a', to: 'b' }],
       ['seen', {}],
@@ -199,7 +261,8 @@ describe('validation', () => {
 
   it('rejects every patch field of the wrong type, one by one', async () => {
     const wrong: Array<[string, unknown]> = [
-      ['title', 5], ['status', null], ['description', {}], ['design', []], ['acceptance', 1], ['notes', true], ['closeReason', 0],
+      ['title', 5], ['status', null], ['description', {}], ['design', []], ['acceptance', 1], ['notes', true], ['closeReason', 0], ['closeComment', 1], ['type', 4], ['type', null],
+      ['parent', 5], ['parent', 'bad id'], ['due', 5], ['due', {}],
       ['priority', '2'], ['priority', Number.NaN], ['priority', null], ['assignee', 5], ['assignee', {}],
       ['labels', 'a'], ['labels', [1]], ['labels', ['a', null]],
     ];
@@ -212,11 +275,11 @@ describe('validation', () => {
   });
 
   it('passes the shown values (expected) through, and rejects ones of the wrong type', async () => {
-    const expected = { title: 't', status: 's', description: 'd', design: 'g', acceptance: 'c', notes: 'n', priority: null, assignee: null, labels: ['x'] };
+    const expected = { title: 't', status: 's', description: 'd', design: 'g', acceptance: 'c', notes: 'n', priority: null, assignee: null, labels: ['x'], type: 'task', parentId: null, due: '2026-12-01' };
     await call('update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'u' }, expected: { ...expected, closeReason: 'r', id: 'z' } });
     expect(provider.update).toHaveBeenCalledWith('a', T0, { title: 'u' }, 'Ann (panel)', expected);
     provider.update.mockClear();
-    for (const [key, value] of [['title', 5], ['priority', '2'], ['assignee', 3], ['labels', [1]]] as Array<[string, unknown]>) {
+    for (const [key, value] of [['title', 5], ['priority', '2'], ['assignee', 3], ['labels', [1]], ['type', 3], ['parentId', 3], ['parentId', 'bad id'], ['due', 3]] as Array<[string, unknown]>) {
       const res = await call('update', { id: 'a', expectedUpdatedAt: T0, patch: {}, expected: { [key]: value } });
       expect(res.status, key).toBe(400);
       expect(errorOf(res.json).message).toContain(`expected.${key}`);
@@ -226,7 +289,7 @@ describe('validation', () => {
   });
 
   it('drops unknown patch keys and passes the known ones through whole', async () => {
-    const patch = { title: 't', status: 's', description: 'd', design: 'g', acceptance: 'c', notes: 'n', closeReason: 'r', priority: 1, assignee: null, labels: ['x'] };
+    const patch = { title: 't', status: 's', description: 'd', design: 'g', acceptance: 'c', notes: 'n', closeReason: 'r', closeComment: 'c', type: 'bug', parent: 'b', due: null, priority: 1, assignee: null, labels: ['x'] };
     await call('update', { id: 'a', expectedUpdatedAt: T0, patch: { ...patch, id: 'other', updatedAt: 'x', extra: { y: 1 }, createdBy: 'me' } });
     expect(provider.update).toHaveBeenCalledWith('a', T0, patch, 'Ann (panel)', {});
   });
@@ -263,6 +326,11 @@ describe('workspace resolution', () => {
       ['update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'x' } }],
       ['create', { input: { title: 'x', type: 'task', priority: 2, parentId: null, description: '' } }],
       ['comment', { id: 'a', text: 'hi' }],
+      ['deferBead', { id: 'a', expectedUpdatedAt: T0, until: null }],
+      ['undeferBead', { id: 'a', expectedUpdatedAt: T0 }],
+      ['supersede', { id: 'a', with: 'b', expectedUpdatedAt: T0 }],
+      ['duplicate', { id: 'a', of: 'b', expectedUpdatedAt: T0 }],
+      ['explain', { id: 'a' }],
       ['dependency', { op: 'add', from: 'a', to: 'b', kind: 'blocks' }],
       ['seen', { all: true }],
       ['context', { id: 'a' }],
@@ -299,6 +367,11 @@ describe('workspace resolution', () => {
       ['update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'x' } }],
       ['create', { input: { title: 'x', type: 'task', priority: 2 } }],
       ['comment', { id: 'a', text: 'hi' }],
+      ['deferBead', { id: 'a', expectedUpdatedAt: T0, until: null }],
+      ['undeferBead', { id: 'a', expectedUpdatedAt: T0 }],
+      ['supersede', { id: 'a', with: 'b', expectedUpdatedAt: T0 }],
+      ['duplicate', { id: 'a', of: 'b', expectedUpdatedAt: T0 }],
+      ['explain', { id: 'a' }],
       ['dependency', { op: 'add', from: 'a', to: 'b', kind: 'blocks' }],
       ['seen', { all: true }],
       ['context', { id: 'a' }],
@@ -489,13 +562,204 @@ describe('bead', () => {
   });
 });
 
+describe('explain', () => {
+  it('returns the structured answer for a bead in the cache, read through the root provider', async () => {
+    const res = await call('explain', { id: 'a' });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ state: 'blocked', blockers: [{ id: 'b', title: 'B', status: 'open' }] });
+    expect(explain).toHaveBeenCalledWith(provider, root, 'a');
+  });
+
+  it('answers 404 for a bead that is not there, without asking bd', async () => {
+    const res = await call('explain', { id: 'zzz' });
+    expect(res.status).toBe(404);
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('is refused while a sync runs, and does not need writes to be allowed', async () => {
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const running = await call('explain', { id: 'a' });
+    expect(errorOf(running.json).code).toBe('sync-running');
+    sync = { kind: 'idle' };
+    blocked = true;
+    expect((await call('explain', { id: 'a' })).status).toBe(200);
+  });
+
+  it('a failed read says so in plain words', async () => {
+    explain.mockRejectedValueOnce(new BdError('exit', 'bd exploded'));
+    const res = await call('explain', { id: 'a' });
+    expect(res.status).toBe(500);
+    expect(errorOf(res.json).code).toBe('beads-error');
+  });
+});
+
+describe('history', () => {
+  const issueRow = (hash: string, n: number, over: Record<string, unknown>) => ({
+    CommitHash: hash, Committer: 'beads', CommitDate: `2026-10-14T10:00:0${n}Z`,
+    Issue: { id: 'a', title: 'Title a', status: 'open', priority: 2, issue_type: 'task', created_at: T0, created_by: 'x', updated_at: `2026-10-14T10:00:0${n}Z`, ...over },
+  });
+  const twoVersions = () => ({
+    rows: [issueRow('hhhh2222', 2, { acceptance_criteria: '- [ ] one', priority: 1 }), issueRow('hhhh1111', 1, {})],
+    events: null,
+  });
+
+  it('pages a bead from the versions bd keeps, without events below 1.3', async () => {
+    provider.history.mockResolvedValue(twoVersions());
+    const res = await call('history', { id: 'a' });
+    expect(res.status).toBe(200);
+    expect(provider.history).toHaveBeenCalledWith('a', { limit: 200, events: false });
+    expect(res.json.labelsKnown).toBe(false);
+    expect(res.json.more).toBe(false);
+    expect(res.json.entries.map((e: { created?: true }) => e.created === true)).toEqual([false, true]);
+    expect(deps.providerFor).toHaveBeenCalledWith(root, 'embedded');
+  });
+
+  it('asks for the audit events on 1.3 and later', async () => {
+    workspace = okWorkspace({ bdVersion: '1.3.1' });
+    provider.history.mockResolvedValue({ ...twoVersions(), events: [] });
+    const res = await call('history', { id: 'a' });
+    expect(provider.history).toHaveBeenCalledWith('a', { limit: 200, events: true });
+    expect(res.json.labelsKnown).toBe(true);
+  });
+
+  it('a restorable change builds the patch and the expected values the update route takes', async () => {
+    provider.history.mockResolvedValue(twoVersions());
+    const { json } = await call('history', { id: 'a' });
+    const entry = json.entries[0];
+    expect(entry.restorable).toEqual(['priority', 'acceptance']);
+    const patch: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const change of entry.changes.filter((c: { field: string }) => entry.restorable.includes(c.field))) {
+      patch[change.field] = change.from;
+      expected[change.field] = change.to;
+    }
+    expect(patch).toEqual({ priority: 2, acceptance: '' });
+    expect(expected).toEqual({ priority: 1, acceptance: '- [ ] one' });
+    const res = await call('update', { id: 'a', expectedUpdatedAt: T0, patch, expected });
+    expect(res.status).toBe(200);
+    expect(provider.update).toHaveBeenCalledWith('a', T0, patch, 'Ann (panel)', expected);
+  });
+
+  it('reads the gates its own links name from their records, not from the activity the service watched', async () => {
+    // Gate rows are not beads: a blocks link to an id the bead cache does not hold is a gate (or one that was deleted).
+    beads = [bead('a', { dependencies: [{ from: 'a', to: 'gate-1', kind: 'blocks', createdBy: 'Ann (panel)', createdAt: null }, { from: 'a', to: 'b', kind: 'blocks', createdBy: null, createdAt: null }, { from: 'a', to: 'gate-2', kind: 'related', createdBy: null, createdAt: null }, { from: 'a', to: 'external:proj:cap', kind: 'blocks', createdBy: null, createdAt: null }] }), bead('b')];
+    provider.history.mockResolvedValue(twoVersions());
+    provider.gateHistory.mockResolvedValue({
+      rows: [bead('gate-1', { type: 'gate', status: 'closed', closedAt: '2026-10-14T10:00:05Z', description: 'Ad-hoc gate blocking a\n\nReason: Review before closing', extra: { await_type: 'human' } })],
+      events: [{ id: 'e1', beadId: 'gate-1', type: 'closed', actor: 'Claude Code', oldValue: '', newValue: 'Reviewed', rawCreatedAt: '2026-10-14 10:00:05', utcCreatedAt: true }],
+    });
+    const res = await call('history', { id: 'a' });
+    expect(res.status).toBe(200);
+    expect(provider.gateHistory).toHaveBeenCalledWith(['gate-1'], { utc: false });
+    expect(res.json.entries[0]).toMatchObject({ id: 'gate:gate-1:resolved', actor: 'Claude Code', at: '2026-10-14T10:00:05.000Z', gate: { what: 'resolved', byPanel: false, gateKind: 'human' } });
+  });
+
+  it('a bead with no gate links reads no gates', async () => {
+    provider.history.mockResolvedValue(twoVersions());
+    await call('history', { id: 'a' });
+    expect(provider.gateHistory).toHaveBeenCalledWith([], expect.anything());
+  });
+
+  it('still lists the versions when the gates cannot be read, and keeps the gate rows it observed', async () => {
+    provider.history.mockResolvedValue(twoVersions());
+    provider.gateHistory.mockRejectedValue(new BdError('exit', 'nope'));
+    (deps.getSnapshot as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      unchanged: false, cursor: 'c', activity: [{ id: 'g1', beadId: 'a', kind: 'gate_opened', gateId: 'g', gateKind: 'human', reason: 'Review', actor: 'Ann (panel)', byPanel: true, observedAt: '2026-10-14T10:00:05Z', unseen: false }],
+    });
+    const res = await call('history', { id: 'a' });
+    expect(res.status).toBe(200);
+    expect(res.json.entries[0]).toMatchObject({ id: 'gate:g1', gate: { what: 'requested', byPanel: true } });
+  });
+
+  it('is refused while a sync holds the project, like every other read that would queue behind it', async () => {
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const res = await call('history', { id: 'a' });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.json).code).toBe('sync-running');
+    expect(provider.history).not.toHaveBeenCalled();
+    expect(provider.gateHistory).not.toHaveBeenCalled();
+  });
+
+  it('checks what it is given and reads nothing otherwise', async () => {
+    for (const body of [{}, { id: '../x' }, { id: 'a', limit: 0 }, { id: 'a', limit: 51 }, { id: 'a', limit: 1.5 }, { id: 'a', limit: '5' }, { id: 'a', before: 'a b' }, { id: 'a', before: 7 }]) {
+      expect((await call('history', body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect((await call('history', { id: 'nope' })).status).toBe(404);
+    expect(provider.history).not.toHaveBeenCalled();
+  });
+
+  it('a failed read says so', async () => {
+    provider.history.mockRejectedValue(new BdError('exit', 'bd exploded'));
+    const res = await call('history', { id: 'a' });
+    expect(res.status).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe('memories', () => {
+  it('lists the memories of the resolved root, with the search', async () => {
+    memories.list.mockResolvedValue({ memories: [{ key: 'k', text: 'text', changedAt: T0, changedBy: 'Ann (panel)' }], fingerprint: 'f1' });
+    const res = await call('memories', { query: 'tabs' });
+    expect(res).toMatchObject({ status: 200, json: { memories: [{ key: 'k' }], fingerprint: 'f1' } });
+    expect(memories.list).toHaveBeenCalledWith(root, 'embedded', 'tabs');
+    await call('memories');
+    expect(memories.list).toHaveBeenLastCalledWith(root, 'embedded', undefined);
+  });
+
+  it('is refused while a sync holds the project, since the read would queue behind it', async () => {
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const res = await call('memories');
+    expect(res.status).toBe(409);
+    expect(errorOf(res.json).code).toBe('sync-running');
+    expect(memories.list).not.toHaveBeenCalled();
+  });
+
+  it('a project that cannot be used is the workspace envelope', async () => {
+    workspace = { kind: 'no-workspace' } as WorkspaceState;
+    const res = await call('memories');
+    expect(res.status).toBe(409);
+    expect(errorOf(res.json).code).toBe('workspace');
+  });
+
+  it('a failed read says so in plain words', async () => {
+    memories.list.mockRejectedValue(new BdError('exit', 'bd exploded'));
+    const res = await call('memories');
+    expect(res.status).toBe(500);
+    expect(errorOf(res.json).code).toBe('beads-error');
+  });
+});
+
 describe('writes', () => {
   const writes: Array<[string, Record<string, unknown>, ReturnType<typeof vi.fn>]> = [
     ['update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'New' } }, provider.update],
     ['create', { input: { title: 'x', type: 'task', priority: 2, parentId: null, description: '' } }, provider.create],
     ['comment', { id: 'a', text: 'hi' }, provider.comment],
     ['dependency', { op: 'add', from: 'a', to: 'b', kind: 'blocks' }, provider.dependency],
+    ['deferBead', { id: 'a', expectedUpdatedAt: T0, until: '2026-12-01' }, provider.deferBead],
+    ['undeferBead', { id: 'a', expectedUpdatedAt: T0 }, provider.undeferBead],
+    ['supersede', { id: 'a', with: 'b', expectedUpdatedAt: T0 }, provider.supersede],
+    ['duplicate', { id: 'a', of: 'b', expectedUpdatedAt: T0 }, provider.duplicate],
+    ['gateCreate', { id: 'a' }, provider.gateCreate],
+    ['gateResolve', { gateId: 'g1' }, provider.gateResolve],
+    ['humanRespond', { id: 'a', response: 'Use 60s' }, provider.humanRespond],
+    ['humanDismiss', { id: 'a' }, provider.humanDismiss],
+    ['memoryRemember', { text: 'Use tabs' }, memories.remember],
+    ['memoryForget', { key: 'k', expectedText: 'text' }, memories.forget],
   ];
+
+  it('while the project needs the update every write route is refused 409 needs-schema-update and runs nothing; the update itself still runs', async () => {
+    skew = { from: 32, to: 66 };
+    workspace = okWorkspace({ bdVersion: '1.3.1' });
+    for (const [name, body, mock] of [...writes, ['enableEvents', { confirm: true }, provider.enableEventsJournal] as [string, Record<string, unknown>, ReturnType<typeof vi.fn>]]) {
+      const res = await call(name, body);
+      expect(res.status, name).toBe(409);
+      expect(errorOf(res.json), name).toMatchObject({ code: 'needs-schema-update', message: 'This project needs a one-time update for the newer Beads.', schemaUpdate: { from: 32, to: 66 } });
+      expect(mock, name).not.toHaveBeenCalled();
+    }
+    // The explicit update is the one write that passes.
+    expect((await call('migrateSchema', { confirm: true })).status).toBe(200);
+    await whenUpdateSettled(root);
+    expect(provider.migrateSchema).toHaveBeenCalledTimes(1);
+  });
 
   it('update passes everything to the root provider with the panel actor and returns the result', async () => {
     const res = await call('update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'New', assignee: null } });
@@ -566,6 +830,213 @@ describe('writes', () => {
     expect(errorOf((await call('comment', { id: 'a', text: 'hi' })).json).code).toBe('writes-blocked');
   });
 
+  it('deferBead passes the date text (or null), the reason and the panel actor', async () => {
+    const dated = await call('deferBead', { id: 'a', expectedUpdatedAt: T0, until: 'next friday', reason: ' waiting ' });
+    expect(dated.status).toBe(200);
+    expect(provider.deferBead).toHaveBeenCalledWith('a', T0, 'next friday', 'waiting', 'Ann (panel)');
+    await call('deferBead', { id: 'a', expectedUpdatedAt: T0, until: null });
+    expect(provider.deferBead).toHaveBeenLastCalledWith('a', T0, null, undefined, 'Ann (panel)');
+  });
+
+  it('undeferBead, supersede and duplicate pass their arguments and the panel actor', async () => {
+    await call('undeferBead', { id: 'a', expectedUpdatedAt: T0 });
+    expect(provider.undeferBead).toHaveBeenCalledWith('a', T0, 'Ann (panel)');
+    await call('supersede', { id: 'a', with: 'b', expectedUpdatedAt: T0 });
+    expect(provider.supersede).toHaveBeenCalledWith('a', 'b', T0, 'Ann (panel)');
+    await call('duplicate', { id: 'a', of: 'b', expectedUpdatedAt: T0 });
+    expect(provider.duplicate).toHaveBeenCalledWith('a', 'b', T0, 'Ann (panel)');
+  });
+
+  it('a refused close-as write is a WriteError envelope', async () => {
+    provider.supersede.mockRejectedValueOnce(new WriteError('blocked', 'Something blocks it.', 'detail'));
+    const res = await call('supersede', { id: 'a', with: 'b', expectedUpdatedAt: T0 });
+    expect(errorOf(res.json).code).toBe('blocked');
+  });
+
+  it('gateCreate passes the bead, the reason (the default one when absent) and the panel actor, and returns the gate', async () => {
+    const asked = await call('gateCreate', { id: 'a', reason: '  Look at the schema  ', kind: 'human' });
+    expect(asked.status).toBe(200);
+    expect(asked.json).toMatchObject({ ok: true, gate: { id: 'g1' } });
+    expect(provider.gateCreate).toHaveBeenCalledWith('a', 'Look at the schema', 'Ann (panel)');
+    await call('gateCreate', { id: 'a' });
+    expect(provider.gateCreate).toHaveBeenLastCalledWith('a', 'Review before closing', 'Ann (panel)');
+  });
+
+  it('gateCreate and gateResolve answer a domain conflict as a 200 body, never an error', async () => {
+    provider.gateCreate.mockResolvedValueOnce({ ok: false, code: 'already-open', gate: { id: 'g1' } });
+    const open = await call('gateCreate', { id: 'a' });
+    expect(open).toMatchObject({ status: 200, json: { ok: false, code: 'already-open' } });
+    provider.gateResolve.mockResolvedValueOnce({ ok: false, code: 'already-resolved', resolvedBy: 'Claude Code', at: T0 });
+    const resolved = await call('gateResolve', { gateId: 'g1', reason: 'ok' });
+    expect(resolved).toMatchObject({ status: 200, json: { ok: false, code: 'already-resolved', resolvedBy: 'Claude Code' } });
+    expect(provider.gateResolve).toHaveBeenCalledWith('g1', 'ok', 'Ann (panel)');
+  });
+
+  it('gateResolve passes no reason when there is none', async () => {
+    await call('gateResolve', { gateId: 'g1' });
+    expect(provider.gateResolve).toHaveBeenCalledWith('g1', undefined, 'Ann (panel)');
+  });
+
+  it('an old Beads that cannot do it is an error envelope with unsupported', async () => {
+    provider.gateCreate.mockRejectedValueOnce(new WriteError('unsupported', 'This version of Beads does not support that.', 'Error: unknown command "gate"'));
+    const res = await call('gateCreate', { id: 'a' });
+    expect(res.status).toBe(501);
+    expect(errorOf(res.json)).toMatchObject({ code: 'unsupported', message: 'This version of Beads does not support that.' });
+  });
+
+  it('gate routes refuse a bad id, kind or reason before touching anything', async () => {
+    const tooLong = 'x'.repeat(501);
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['gateCreate', { id: 'a b' }],
+      ['gateCreate', { id: 'a;rm' }],
+      ['gateCreate', { id: 'a', kind: 'timer' }],
+      ['gateCreate', { id: 'a', reason: '' }],
+      ['gateCreate', { id: 'a', reason: '   ' }],
+      ['gateCreate', { id: 'a', reason: tooLong }],
+      ['gateCreate', { id: 'a', reason: 'one\ntwo' }],
+      ['gateCreate', { id: 'a', reason: 7 }],
+      ['gateResolve', { gateId: '' }],
+      ['gateResolve', { gateId: '../x' }],
+      ['gateResolve', { gateId: 'x'.repeat(129) }],
+      ['gateResolve', { gateId: 'g1', reason: tooLong }],
+      ['gateResolve', { gateId: 'g1', reason: 'a\rb' }],
+    ];
+    for (const [name, body] of cases) {
+      const res = await call(name, body);
+      expect(res.status, `${name} ${JSON.stringify(body)}`).toBe(400);
+      expect(errorOf(res.json).code).toBe('BAD_REQUEST');
+    }
+    expect(provider.gateCreate).not.toHaveBeenCalled();
+    expect(provider.gateResolve).not.toHaveBeenCalled();
+    // A reason of exactly 500 characters is fine.
+    expect((await call('gateCreate', { id: 'a', reason: 'x'.repeat(500) })).status).toBe(200);
+  });
+
+  it('humanRespond passes the bead, the trimmed answer and the panel actor, and returns the bead', async () => {
+    const res = await call('humanRespond', { id: 'a', response: '  Use 60s\nnot 30s  ' });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true, bead: { id: 'a', status: 'closed' } });
+    expect(provider.humanRespond).toHaveBeenCalledWith('a', 'Use 60s\nnot 30s', 'Ann (panel)');
+  });
+
+  it('humanDismiss passes the reason trimmed, and none when it is absent or blank', async () => {
+    await call('humanDismiss', { id: 'a', reason: '  Not needed ' });
+    expect(provider.humanDismiss).toHaveBeenLastCalledWith('a', 'Not needed', 'Ann (panel)');
+    await call('humanDismiss', { id: 'a' });
+    expect(provider.humanDismiss).toHaveBeenLastCalledWith('a', undefined, 'Ann (panel)');
+    await call('humanDismiss', { id: 'a', reason: '   ' });
+    expect(provider.humanDismiss).toHaveBeenLastCalledWith('a', undefined, 'Ann (panel)');
+    await call('humanDismiss', { id: 'a', reason: '' });
+    expect(provider.humanDismiss).toHaveBeenLastCalledWith('a', undefined, 'Ann (panel)');
+  });
+
+  it('a request that is no longer open is a 200 body with the current bead, never an error', async () => {
+    provider.humanRespond.mockResolvedValueOnce({ ok: false, code: 'not-open', current: bead('a', { status: 'closed' }) });
+    const res = await call('humanRespond', { id: 'a', response: 'Late' });
+    expect(res).toMatchObject({ status: 200, json: { ok: false, code: 'not-open', current: { id: 'a' } } });
+    provider.humanDismiss.mockResolvedValueOnce({ ok: false, code: 'not-open', current: null });
+    expect(await call('humanDismiss', { id: 'a' })).toMatchObject({ status: 200, json: { ok: false, code: 'not-open', current: null } });
+  });
+
+  it('humanRespond and humanDismiss map a refusal to its envelope: blocked is 409, an old Beads is 501', async () => {
+    provider.humanRespond.mockRejectedValueOnce(new WriteError('blocked', "This bead can't be closed yet.", 'raw'));
+    const blockedRes = await call('humanRespond', { id: 'a', response: 'x' });
+    expect(blockedRes.status).toBe(409);
+    expect(errorOf(blockedRes.json)).toMatchObject({ code: 'blocked', detail: 'raw' });
+    provider.humanDismiss.mockRejectedValueOnce(new WriteError('unsupported', 'This version of Beads does not support that.', 'Error: unknown command "human"'));
+    const old = await call('humanDismiss', { id: 'a' });
+    expect(old.status).toBe(501);
+    expect(errorOf(old.json)).toMatchObject({ code: 'unsupported' });
+  });
+
+  it('human routes refuse a bad id, answer or reason before touching anything', async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['humanRespond', { id: 'a b', response: 'x' }],
+      ['humanRespond', { id: '../x', response: 'x' }],
+      ['humanRespond', { response: 'x' }],
+      ['humanRespond', { id: 'a' }],
+      ['humanRespond', { id: 'a', response: 7 }],
+      ['humanRespond', { id: 'a', response: '' }],
+      ['humanRespond', { id: 'a', response: '   \n ' }],
+      ['humanRespond', { id: 'a', response: 'x'.repeat(16_001) }],
+      ['humanDismiss', { id: 'a;rm' }],
+      ['humanDismiss', { id: 'x'.repeat(129) }],
+      ['humanDismiss', { id: 'a', reason: 7 }],
+      ['humanDismiss', { id: 'a', reason: 'x'.repeat(501) }],
+      ['humanDismiss', { id: 'a', reason: 'one\ntwo' }],
+    ];
+    for (const [name, body] of cases) {
+      const res = await call(name, body);
+      expect(res.status, `${name} ${JSON.stringify(body)}`).toBe(400);
+      expect(errorOf(res.json).code).toBe('BAD_REQUEST');
+    }
+    expect(provider.humanRespond).not.toHaveBeenCalled();
+    expect(provider.humanDismiss).not.toHaveBeenCalled();
+    // The limits themselves are fine.
+    expect((await call('humanRespond', { id: 'a', response: 'x'.repeat(16_000) })).status).toBe(200);
+    expect((await call('humanDismiss', { id: 'a', reason: 'x'.repeat(500) })).status).toBe(200);
+  });
+
+  it('memoryRemember passes the text, key and expected text, with the root, mode and panel actor', async () => {
+    const added = await call('memoryRemember', { text: '  Use tabs  ', key: 'go-tabs' });
+    expect(added).toMatchObject({ status: 200, json: { ok: true, memory: { key: 'k' } } });
+    expect(memories.remember).toHaveBeenLastCalledWith(root, { text: '  Use tabs  ', key: 'go-tabs', expectedText: undefined }, 'Ann (panel)');
+    await call('memoryRemember', { text: 'New words', key: 'go-tabs', expectedText: 'Old words' });
+    expect(memories.remember).toHaveBeenLastCalledWith(root, { text: 'New words', key: 'go-tabs', expectedText: 'Old words' }, 'Ann (panel)');
+    await call('memoryRemember', { text: 'x' });
+    expect(memories.remember).toHaveBeenLastCalledWith(root, { text: 'x', key: undefined, expectedText: undefined }, 'Ann (panel)');
+  });
+
+  it('memoryForget passes the key and the text the person saw', async () => {
+    const res = await call('memoryForget', { key: 'go-tabs', expectedText: 'Use tabs' });
+    expect(res).toMatchObject({ status: 200, json: { ok: true, memory: null } });
+    expect(memories.forget).toHaveBeenCalledWith(root, { key: 'go-tabs', expectedText: 'Use tabs' }, 'Ann (panel)');
+  });
+
+  it('a memory that is not as the person saw it is a 200 body with the current one, never an error', async () => {
+    const current = { key: 'k', text: 'Someone else wrote this', changedAt: T0, changedBy: 'Bo (panel)' };
+    memories.remember.mockResolvedValueOnce({ ok: false, code: 'changed', current });
+    expect(await call('memoryRemember', { text: 'Mine', key: 'k', expectedText: 'Old' })).toMatchObject({ status: 200, json: { ok: false, code: 'changed', current } });
+    memories.forget.mockResolvedValueOnce({ ok: false, code: 'changed', current: null });
+    expect(await call('memoryForget', { key: 'k', expectedText: 'Old' })).toMatchObject({ status: 200, json: { ok: false, code: 'changed', current: null } });
+  });
+
+  it('memory writes map a refusal to its envelope', async () => {
+    memories.remember.mockRejectedValueOnce(new WriteError('invalid', 'A memory needs some text.'));
+    const bad = await call('memoryRemember', { text: 'x' });
+    expect(bad.status).toBe(400);
+    expect(errorOf(bad.json)).toMatchObject({ code: 'invalid', message: 'A memory needs some text.' });
+    memories.forget.mockRejectedValueOnce(new WriteError('unsupported', 'This version of Beads does not support that.', 'Error: unknown command "forget"'));
+    expect((await call('memoryForget', { key: 'k', expectedText: 'x' })).status).toBe(501);
+  });
+
+  it('memory routes refuse a bad body before touching anything', async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['memoryRemember', {}],
+      ['memoryRemember', { text: 7 }],
+      ['memoryRemember', { text: 'x', key: 7 }],
+      ['memoryRemember', { text: 'x', key: 'k'.repeat(201) }],
+      ['memoryRemember', { text: 'x', expectedText: null }],
+      ['memoryRemember', { text: 'x', expectedText: 7 }],
+      ['memoryRemember', { text: 'x', fingerprint: 'abc', key: ['k'] }],
+      ['memoryForget', {}],
+      ['memoryForget', { key: 'k' }],
+      ['memoryForget', { key: 'k', expectedText: 7 }],
+      ['memoryForget', { key: '', expectedText: 'x' }],
+      ['memoryForget', { key: 7, expectedText: 'x' }],
+      ['memories', { query: 7 }],
+      ['memories', { query: 'q'.repeat(201) }],
+    ];
+    for (const [name, body] of cases) {
+      const res = await call(name, body);
+      expect(res.status, `${name} ${JSON.stringify(body)}`).toBe(400);
+      expect(errorOf(res.json).code).toBe('BAD_REQUEST');
+    }
+    expect(memories.remember).not.toHaveBeenCalled();
+    expect(memories.forget).not.toHaveBeenCalled();
+    expect(memories.list).not.toHaveBeenCalled();
+  });
+
   it('maps a WriteError to its code, message and detail', async () => {
     const cases: Array<[WriteError, number]> = [
       [new WriteError('invalid', 'A bead needs a title.'), 400],
@@ -630,16 +1101,17 @@ describe('writes', () => {
 });
 
 describe('seen', () => {
-  it('marks the given ids and returns beads and deletions that are still unseen', async () => {
+  it('marks the given ids and returns every bead still unseen: changed beads, deletions and beads with an unseen review row', async () => {
     const res = await call('seen', { ids: ['a', 'gone'] });
     expect(res.status).toBe(200);
     expect(store.markSeen).toHaveBeenCalledWith(['a', 'gone']);
     expect(store.save).toHaveBeenCalledTimes(1);
-    expect(res.json).toEqual({ unseenIds: ['a', 'gone'] });
+    // The panel replaces its list with this answer, so a bead whose only news is a review row ('gated') must be on it.
+    expect(res.json).toEqual({ unseenIds: ['a', 'gone', 'gated'] });
   });
 
   it('marks everything with all: true', async () => {
-    storeState = { unseen: [], deletions: [] };
+    storeState = { unseen: [] };
     const res = await call('seen', { all: true });
     expect(store.markSeen).toHaveBeenCalledWith('all');
     expect(res.json).toEqual({ unseenIds: [] });
@@ -946,5 +1418,242 @@ describe('rulesFrom', () => {
   it('ignores headings inside code fences, for the start and for the end', () => {
     const text = '# P\n\n```sh\n# sync the beads\n```\n\n## Dolt\n\nBefore.\n\n~~~\n## Other\n~~~\n\nAfter.\n\n## Next\n\nNo.\n';
     expect(rulesFrom(text)).toBe('## Dolt\n\nBefore.\n\n~~~\n## Other\n~~~\n\nAfter.');
+  });
+});
+
+describe('live updates', () => {
+  const modern = () => {
+    workspace = okWorkspace({ bdVersion: '1.3.1' });
+  };
+
+  it('status reports off, on and unknown, and the follower state', async () => {
+    modern();
+    provider.eventsJournal.mockResolvedValueOnce('off');
+    expect((await call('eventsStatus')).json).toEqual({ available: true, journal: 'off', live: 'off' });
+    provider.eventsJournal.mockResolvedValueOnce('on');
+    liveState = 'following';
+    expect((await call('eventsStatus')).json).toEqual({ available: true, journal: 'on', live: 'following' });
+    provider.eventsJournal.mockResolvedValueOnce('unknown');
+    expect((await call('eventsStatus')).json).toMatchObject({ available: true, journal: 'unknown' });
+    // A read that throws is unknown too, not an error: Settings still opens.
+    provider.eventsJournal.mockRejectedValueOnce(new Error('boom'));
+    const failed = await call('eventsStatus');
+    expect(failed.status).toBe(200);
+    expect(failed.json).toMatchObject({ available: true, journal: 'unknown' });
+  });
+
+  it('live updates are hidden without the capability (status is available: false, not an error, and nothing is read)', async () => {
+    workspace = okWorkspace({ bdVersion: '1.2.2' });
+    const res = await call('eventsStatus');
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ available: false, live: 'off' });
+    expect(provider.eventsJournal).not.toHaveBeenCalled();
+  });
+
+  it('status never starts the follower, and is refused while a sync holds the queue', async () => {
+    modern();
+    await call('eventsStatus');
+    expect(deps.getSnapshot).not.toHaveBeenCalled();
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const res = await call('eventsStatus');
+    expect(res.status).toBe(409);
+    expect(errorOf(res.json).code).toBe('sync-running');
+  });
+
+  it('enableEvents refuses without confirm: only the literal true counts, and nothing is written', async () => {
+    modern();
+    for (const body of [{}, { confirm: false }, { confirm: 'true' }, { confirm: 1 }, { confirm: null }]) {
+      const res = await call('enableEvents', body);
+      expect(res.status).toBe(400);
+      expect(errorOf(res.json).code).toBe('BAD_REQUEST');
+    }
+    expect(provider.enableEventsJournal).not.toHaveBeenCalled();
+  });
+
+  it('enableEvents refuses below 1.3 with the unsupported envelope, and nothing is written', async () => {
+    workspace = okWorkspace({ bdVersion: '1.2.2' });
+    const res = await call('enableEvents', { confirm: true });
+    expect(res.status).toBe(501);
+    expect(errorOf(res.json)).toMatchObject({ code: 'unsupported' });
+    expect(res.json.ok).toBeUndefined();
+    expect(provider.enableEventsJournal).not.toHaveBeenCalled();
+  });
+
+  it('enableEvents runs exactly one enable with the panel actor, tells the follower, and answers the status read after', async () => {
+    modern();
+    liveState = 'off';
+    const res = await call('enableEvents', { confirm: true });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, status: { available: true, journal: 'on', live: 'off' } });
+    expect(provider.enableEventsJournal).toHaveBeenCalledTimes(1);
+    expect(provider.enableEventsJournal).toHaveBeenCalledWith('Ann (panel)');
+    expect(deps.providerFor).toHaveBeenCalledWith(root, 'embedded');
+    expect(journalChanged).toHaveBeenCalledWith(root);
+    // No other write path ran.
+    for (const name of ['update', 'create', 'comment', 'dependency'] as const) expect(provider[name]).not.toHaveBeenCalled();
+  });
+
+  it('a finished enable is answered on, even if a Sync started meanwhile or the setting cannot be read again', async () => {
+    modern();
+    // The enable resolved (the adapter read it back as on); a pull pressed since must not turn that into a 409.
+    provider.enableEventsJournal.mockImplementationOnce(async () => {
+      sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    });
+    liveState = 'following';
+    const res = await call('enableEvents', { confirm: true });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, status: { available: true, journal: 'on', live: 'following' } });
+    expect(provider.eventsJournal).not.toHaveBeenCalled();
+  });
+
+  it('an enable that was saved but could not be confirmed is a 504 with saved, and still tells the follower', async () => {
+    modern();
+    provider.enableEventsJournal.mockRejectedValueOnce(new WriteError('uncertain', 'Saved, but could not confirm.', 'reads back as unknown', true));
+    const res = await call('enableEvents', { confirm: true });
+    expect(res.status).toBe(504);
+    expect(errorOf(res.json)).toMatchObject({ code: 'uncertain', saved: true });
+    expect(journalChanged).toHaveBeenCalledWith(root);
+  });
+
+  it('enableEvents goes through the write guard: refused while a sync runs and while the merge is half done', async () => {
+    modern();
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const running = await call('enableEvents', { confirm: true });
+    expect(running.status).toBe(409);
+    expect(errorOf(running.json).code).toBe('sync-running');
+    sync = { kind: 'idle' };
+    blocked = true;
+    const half = await call('enableEvents', { confirm: true });
+    expect(half.status).toBe(409);
+    expect(errorOf(half.json).code).toBe('writes-blocked');
+    expect(provider.enableEventsJournal).not.toHaveBeenCalled();
+    expect(journalChanged).not.toHaveBeenCalled();
+  });
+
+  it('enableEvents answers a failed write as the error envelope and does not tell the follower', async () => {
+    modern();
+    provider.enableEventsJournal.mockRejectedValueOnce(new WriteError('failed', "Beads didn't turn live updates on.", 'reads back as off'));
+    const res = await call('enableEvents', { confirm: true });
+    expect(res.status).toBe(500);
+    expect(errorOf(res.json)).toMatchObject({ code: 'failed', detail: 'reads back as off' });
+    expect(journalChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe('migrateSchema (the explicit update of a project on an older schema)', () => {
+  it('refuses without confirm: only the literal true counts, and nothing is run', async () => {
+    for (const body of [{}, { confirm: false }, { confirm: 'true' }, { confirm: 1 }, { confirm: null }]) {
+      const res = await call('migrateSchema', body);
+      expect(res.status).toBe(400);
+      expect(errorOf(res.json).code).toBe('BAD_REQUEST');
+    }
+    expect(provider.migrateSchema).not.toHaveBeenCalled();
+    expect(readFailureDropped).not.toHaveBeenCalled();
+  });
+
+  const press = async () => {
+    const res = await call('migrateSchema', { confirm: true });
+    await whenUpdateSettled(root);
+    return res;
+  };
+
+  it('starts the update and answers at once; it runs once with the panel actor and drops the cached read failure when it ends', async () => {
+    let finish: () => void = () => undefined;
+    provider.migrateSchema.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+    const res = await call('migrateSchema', { confirm: true });
+    // Answered while the update is still running.
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true });
+    expect(updateJob(root)).toMatchObject({ kind: 'running' });
+    expect(readFailureDropped).not.toHaveBeenCalled();
+    finish();
+    await whenUpdateSettled(root);
+    expect(provider.migrateSchema).toHaveBeenCalledTimes(1);
+    expect(provider.migrateSchema).toHaveBeenCalledWith('Ann (panel)');
+    expect(updateJob(root)).toBeNull();
+    expect(readFailureDropped).toHaveBeenCalledTimes(1);
+    expect(readFailureDropped).toHaveBeenCalledWith(root);
+    for (const name of ['update', 'create', 'comment', 'dependency', 'enableEventsJournal'] as const) expect(provider[name]).not.toHaveBeenCalled();
+  });
+
+  it('a second press while it runs starts nothing and answers the same', async () => {
+    let finish: () => void = () => undefined;
+    provider.migrateSchema.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+    skew = { from: 32, to: 66 };
+    expect((await call('migrateSchema', { confirm: true })).status).toBe(200);
+    expect((await call('migrateSchema', { confirm: true })).json).toEqual({ ok: true });
+    finish();
+    await whenUpdateSettled(root);
+    expect(provider.migrateSchema).toHaveBeenCalledTimes(1);
+  });
+
+  it('while it runs, every write and every read that would wait behind it is refused 409 needs-schema-update at once', async () => {
+    let finish: () => void = () => undefined;
+    provider.migrateSchema.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+    skew = { from: 32, to: 66 };
+    await call('migrateSchema', { confirm: true });
+    for (const [name, body] of [['update', { id: 'a', expectedUpdatedAt: T0, patch: { title: 'x' } }], ['comment', { id: 'a', text: 'hi' }], ['history', { id: 'a' }], ['sync-preview', {}]] as Array<[string, Record<string, unknown>]>) {
+      const res = await call(name, body);
+      expect(res.status, name).toBe(409);
+      expect(errorOf(res.json), name).toMatchObject({ code: 'needs-schema-update', schemaUpdate: { from: 32, to: 66 } });
+    }
+    expect(provider.update).not.toHaveBeenCalled();
+    finish();
+    await whenUpdateSettled(root);
+  });
+
+  it('goes through the write guard: refused while a sync runs and while the merge is half done', async () => {
+    sync = { kind: 'running', op: 'pull', startedAt: T0 };
+    const running = await press();
+    expect(running.status).toBe(409);
+    expect(errorOf(running.json).code).toBe('sync-running');
+    sync = { kind: 'idle' };
+    blocked = true;
+    const half = await press();
+    expect(half.status).toBe(409);
+    expect(errorOf(half.json).code).toBe('writes-blocked');
+    expect(provider.migrateSchema).not.toHaveBeenCalled();
+    expect(readFailureDropped).not.toHaveBeenCalled();
+    expect(updateJob(root)).toBeNull();
+  });
+
+  it('a refused update ends as a failed job with the error, and keeps the cached failure', async () => {
+    provider.migrateSchema.mockRejectedValueOnce(new WriteError('failed', 'The change could not be saved.', 'Error: nope'));
+    expect((await press()).status).toBe(200);
+    expect(updateJob(root)).toEqual({ kind: 'failed', at: expect.any(String), code: 'failed', message: 'The change could not be saved.', detail: 'Error: nope' });
+    expect(readFailureDropped).not.toHaveBeenCalled();
+  });
+
+  it('a store shared with the team ends as a failed job update-blocked-shared with the message and the detail', async () => {
+    provider.migrateSchema.mockRejectedValueOnce(new WriteError('update-blocked-shared', 'This project shares its beads with your team.', 'refusing to auto-apply 34 pending schema migrations'));
+    await press();
+    expect(updateJob(root)).toEqual({ kind: 'failed', at: expect.any(String), code: 'update-blocked-shared', message: 'This project shares its beads with your team.', detail: 'refusing to auto-apply 34 pending schema migrations' });
+    expect(readFailureDropped).not.toHaveBeenCalled();
+  });
+
+  it('an update saved but not confirmed ends as a failed job with saved, and still drops the cached failure so the next snapshot reads again', async () => {
+    provider.migrateSchema.mockRejectedValueOnce(new WriteError('uncertain', 'May be updated.', 'read-back failed', true));
+    await press();
+    expect(updateJob(root)).toMatchObject({ kind: 'failed', code: 'uncertain', saved: true });
+    expect(readFailureDropped).toHaveBeenCalledWith(root);
+  });
+
+  it('a try after a failure starts again and clears it', async () => {
+    provider.migrateSchema.mockRejectedValueOnce(new WriteError('failed', 'The change could not be saved.', 'Error: nope'));
+    await press();
+    expect(updateJob(root)?.kind).toBe('failed');
+    await press();
+    expect(provider.migrateSchema).toHaveBeenCalledTimes(2);
+    expect(updateJob(root)).toBeNull();
+  });
+
+  it('a read refused for the old schema is answered needs-schema-update with the two versions, in plain copy', async () => {
+    const stderr = readFileSync(join(__dirname, '../../fixtures/bd13/schema-skew.stderr'), 'utf8').trim();
+    (deps.cachedBeads as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    (deps.getSnapshot as ReturnType<typeof vi.fn>).mockRejectedValue(new BdError('exit', stderr.replace(/^Error: /, ''), { code: 1, stderr }));
+    const res = await call('bead', { id: 'a' });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.json)).toMatchObject({ code: 'needs-schema-update', message: 'This project needs a one-time update for the newer Beads.', schemaUpdate: { from: 32, to: 66 } });
+    expect(errorOf(res.json).detail).toContain('schema version mismatch');
   });
 });

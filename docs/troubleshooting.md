@@ -7,7 +7,10 @@ Find the message the panel shows, then read the cause and the fix. Messages are 
 3. [Edits are refused or uncertain](#edits-are-refused-or-uncertain)
 4. [Sync and Publish](#sync-and-publish)
 5. [Attaching and starting sessions](#attaching-and-starting-sessions)
-6. [Odd behavior that is not an error](#odd-behavior-that-is-not-an-error)
+6. [Reviews, History and Restore](#reviews-history-and-restore)
+7. [Memories](#memories)
+8. [Live updates](#live-updates)
+9. [Odd behavior that is not an error](#odd-behavior-that-is-not-an-error)
 
 ## The project cannot be shown
 
@@ -23,6 +26,10 @@ These replace the list. The panel checks them when it opens and when you press R
 | "This project's Beads server isn't running." | The project uses a Beads database server on a fixed local port, and nothing answers there. | Start the server the way you usually do, then **Retry**. The panel never starts it. **Copy details** gives the folder and port. |
 | "Couldn't load this project's beads." | The first read failed. | **Retry**. If it keeps failing, **Copy details** and look at the cause below. |
 | "Beads can't open this project right now." | The service reported a state this panel does not know. Usually the panel and the service are different versions. | **Retry**. Then update the extension and reload. |
+| "This project needs a one-time update for the newer Beads." | The project was last written by an older Beads, and the installed one will not read it until its data is updated. Nothing is wrong with the beads. | Press **Update project** and confirm. It runs in the background for up to two minutes. Other changes are refused until it is done. |
+| "This project shares its beads with your team, so Beads won't update it from here. Ask whoever set up the team copy to update it, or update it on the computer that hosts it." | The project is shared through a team copy or a server, and Beads refuses to update a shared project in place. The panel does not force it. | Ask whoever set up the team copy, or update the project on the computer that hosts it. There is no retry button. |
+| "Beads ran the update but the project still reads as out of date." | The update finished but the project still reads as older. | **Check again**. If it stays, **Copy details** and hand them to your agent. |
+| "The project may be updated now, but Beads didn't confirm it." / "The update may have finished, but Beads didn't confirm it." | Beads did not say how the update ended, for example because it ran past two minutes on a large project. | Wait while the panel reads the project again, or press **Check again**. |
 | "Open a project to see its beads." | No project is open in OpenChamber. | Open a folder. |
 | "No beads in this project yet." | The project has none. | Nothing to fix. They appear within a few seconds of your agent creating them. |
 
@@ -53,6 +60,8 @@ Most of these are described with their buttons in the [user guide](user-guide.md
 | "Other parts of the bead changed; this one did not. Re-apply to save yours." | The bead moved, but not the field you edited. | **Re-apply**. |
 | "That bead no longer exists." | It was deleted. | Go back to the list. |
 | "This bead can't be closed yet. It is still blocked by x, y. Close those first." | Beads refuses to close a bead whose blockers are open. The panel does not force it. | Close the blockers first, or remove the link. |
+| "This bead can't be closed yet. It is waiting on a review. Resolve the review first." | A person has to resolve a review or approve a plan before the bead can close. See [below](#reviews-history-and-restore). | Resolve it in Needs me or in the bead's Waiting on section. |
+| "X is working on this bead. Move it out of In progress first, or ask them." | Beads 1.3 refuses to hand a bead to someone else while another person or agent holds it in progress. The panel does not override the hold. | Ask them, or move the bead out of In progress and then change the assignee. |
 | "These two beads are already linked as "kind". Remove that link first, then add the new one." | Beads holds one link per ordered pair of beads. | Remove the existing link in Relationships, then add the new one. |
 | "Only tasks can block other tasks." | Beads refuses a Blocks link from a bead of another type. | Use another link kind, or change the type. |
 | "A label cannot contain a comma or a double quote." | Beads reads labels as comma-separated text. | Rename the label. |
@@ -122,6 +131,57 @@ A sync your agent runs is not counted in "Team synced". Only syncs from the pane
 | "Beads sync problem" (a chip) | A sync card was handed to a chat and the chip carries its details. | Read it with your agent. |
 
 Starting a session in a worktree does not add a chip to it, because OpenChamber closes the panel when the worktree opens. The session is linked, and a tip tells you to type `/bd <id>` there.
+
+## Reviews, History and Restore
+
+| Message | Cause | Fix |
+|---|---|---|
+| "This bead can't be closed yet. It is waiting on a review. Resolve the review first." (or "Approve the plan first." or "Resolve them first.") | An open review or plan approval holds the bead. Beads refuses the close. The panel shows the refusal and does not force it. | **Resolve** (or **Approve**) in Needs me or in Waiting on, then close. |
+| "Your comment was added, but the bead could not be closed. …" | The close dialog adds the comment first, then closes. Beads refused the close, for a review or another open blocker. | The comment is saved, so do not post it again. Fix what blocks the close and close again. |
+| "Checking whether your comment went in." | Beads did not answer in time. The panel reads the bead again before it does anything else. | Wait for the result. It never closes the bead until it knows. |
+| "This bead already waits on a review." / "This bead already waits on a plan approval." | A second request of the same kind was refused. | Nothing to fix. Resolve the first one. |
+| "The review on X was already resolved by <name> 5m ago." / "This review was already resolved by <name> 5m ago. Updating." | An agent or a teammate resolved it between your reading and your click. | Nothing to fix. It shows under "Changed since you looked". |
+| "The request X was already answered or closed." | The help request was closed elsewhere first. | Nothing to fix. |
+| "<Waiting on …>. You can answer once that is done." | The help request is itself blocked by an open bead. Respond and Dismiss are hidden, because Beads would refuse the close. | Finish or unblock the bead it waits on. |
+| "This bead changed since its history was read." | The bead was edited while the History section was open. | Press **Refresh**. |
+| "Too long to restore here" | Only the start of a very long text is read for History, so the whole text cannot be put back from it. | Edit the field by hand, or ask your agent. |
+| "This bead changed since it was shown. The <field> is still X. Nothing was changed." | A restore was refused because the bead moved since you pressed it. | Look at the bead, then restore again. |
+| "The <field> was changed again since. Now: X. Nothing was changed." with **Restore anyway** and **Keep current** | The field moved after the version you are restoring. The panel shows what would change before it writes. | Choose. **Restore anyway** replaces the current value. |
+| "The <field> is already the earlier value." / "The <field> it holds now cannot be put back from here." | The restore would change nothing, or the current value is a long text. | Nothing to fix, or edit by hand. |
+| An entry reads "someone else or another computer" | Beads 1.3 keeps who made a change only on the computer where it was made. A change that arrived with a Sync has no name here. A close or reopen never has one in History. | Nothing to fix. It is a limit of what Beads records. |
+
+A Sync or Publish pauses restores, like other edits. See [While Sync is running](user-guide.md#while-sync-is-running-or-has-a-problem).
+
+## Memories
+
+| Message | Cause | Fix |
+|---|---|---|
+| "<name> changed elsewhere while you were editing. Nothing was saved." | Someone, often an agent running `bd remember`, changed the memory after you opened it. | Read "Now in Beads". **Save mine anyway** replaces it, **Keep current** leaves it. |
+| "This memory was removed elsewhere. Nothing was saved. Add it again with your text, or discard it." | The memory was forgotten while you edited. | **Add it again** or **Discard**. |
+| "This memory changed since you opened this step. This is its text now; nothing was forgotten." | Forget found different text than the text you saw. | Read it again, then decide. |
+| "A memory named X already exists. Nothing was saved." | The name is taken. | **Replace it with mine**, or pick another name. |
+| "A memory is at most 4,000 characters. Shorten it; nothing was saved." | Beads limits the size, and the panel does not cut text. | Shorten it, or split it in two. |
+| "That text is the name of another memory. Reword it so it reads as an instruction." | With no name given, Beads reads a short text that matches a memory's name as that memory. | Reword it, or give it a name. |
+| "Could not bring back <name>: a memory with that name exists now. Nothing was saved. Its text was:" | **Undo** after a forget found the name taken. The old text is shown. | Copy the text, then add it under another name. |
+| "Could not read the memories again: …" | A read after the page was open failed. The list is the last one read. | Wait, or press **Back** and open Memories again. |
+
+## Live updates
+
+The project menu (the project name in the header) holds the Live updates row. Polling every few seconds keeps working whatever it says, so none of these stop the list from updating.
+
+| Message | Cause | Fix |
+|---|---|---|
+| "Needs a newer version of Beads (1.3 or later). Until then, the panel checks for changes every few seconds." | Live updates need Beads 1.3. On 1.2.2 the panel is complete in every other way. | Update Beads, or leave it. |
+| "Live updates need a newer version of Beads." | The panel asked a Beads that cannot do it. | The same. |
+| "Off for this project, so the panel checks for changes every few seconds. Turn it on to see changes as soon as they happen." | The project has not turned it on. The panel never does that on its own. | **Turn on live updates**, and confirm. |
+| "Reconnecting. Until then, the panel checks for changes every few seconds." | The follower stopped and is starting again, with waits of 2, 5, 15 and 60 seconds. | Wait. |
+| "Not working right now, so the panel checks for changes every few seconds." | The follower failed 5 times in a row with no event. It tries again after 5 minutes, and a successful event ends it earlier. | Wait, or restart the extension. If it stays, run `bd events tail --follow` in the project in a terminal and read what it says. |
+| "Starting. Until then, …" | The follower is being started. | Wait a moment. |
+| "Wait for the sync to finish, then try again." | A Sync or Publish is running. The setting is not changed during one. | Try again afterwards. |
+| "Couldn't read this setting for the project." | The panel could not ask Beads for it. | **Try again**. |
+| "Live updates may be on now, but Beads didn't confirm it." | The change was sent and the answer did not come. The panel reads the state again and shows it. | Look at the row. If it says Off, turn it on again. |
+
+Turning it on edits `.beads/config.yaml`. If your project tracks that file in Git, the change shows as an uncommitted edit. Commit it if the team should have it, or `git restore` it to go back. Turning it off, for a project that no longer wants it, is done with `bd config set events-journal false` in a terminal.
 
 ## Odd behavior that is not an error
 

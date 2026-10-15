@@ -1,6 +1,6 @@
 # Decisions
 
-Choices made while building version 0.1.0, with the reason for each. All were made on 2026-10-14, during the first build. Where a decision has a cost, it is stated. The [architecture](architecture.md) doc describes how the parts work. This one explains why.
+Choices made while building Abacus, with the reason for each. The 0.1.0 decisions are first, and were made on 2026-10-14, during the first build. The [0.2 section](#02) follows them. Where a decision has a cost, it is stated. The [architecture](architecture.md) doc describes how the parts work. This one explains why.
 
 1. [Scope and product](#scope-and-product)
 2. [Running Beads](#running-beads)
@@ -13,6 +13,7 @@ Choices made while building version 0.1.0, with the reason for each. All were ma
 9. [Interface](#interface)
 10. [Naming and packaging](#naming-and-packaging)
 11. [Deferred](#deferred)
+12. [0.2](#02)
 
 ## Scope and product
 
@@ -20,7 +21,7 @@ Choices made while building version 0.1.0, with the reason for each. All were ma
 
 **An extension first, native later.** OpenChamber has no provider abstraction for issue trackers and has a contribution policy, so the code that talks to Beads is isolated in `src/service/bd/`. A native port would replace that layer and keep the rest.
 
-**Works on projects as they are.** No migration, no Beads upgrade, no setup. The panel never changes `.beads/config.yaml` or `metadata.json`, because in many projects those files are tracked in Git and shared. It never calls `bd dolt remote add` or any command that writes them. (Why: a silent change to shared configuration is worse than a missing feature.)
+**Works on projects as they are.** No migration, no Beads upgrade, no setup. In 0.1.0 the panel never changed `.beads/config.yaml` or `metadata.json`, because in many projects those files are tracked in Git and shared. It never calls `bd dolt remote add` or any command that writes them. (Why: a silent change to shared configuration is worse than a missing feature.) 0.2 has two exceptions, and each needs your click: [Live updates](#live-updates) writes one setting, and [Update project](#update-project) updates an older project once.
 
 **Human or agent icons were dropped.** Agents write under the user's own Git name, so an icon would mislabel exactly the thing the user wants to audit. The Activity feed shows the recorded name and "you (panel)" only for the panel's own writes.
 
@@ -86,6 +87,8 @@ Choices made while building version 0.1.0, with the reason for each. All were ma
 
 **Writes made through the panel are attributed through a hook** (`onPanelWrite`), so a link the panel removes is attributed to the panel and counts as seen.
 
+**Ruling: with Beads 1.3, Activity names who made a change only for changes made on this computer.** Beads 1.3 stops sharing its `events` table between clones, so a change that arrived with a Sync has no recorded name here and shows without one. The panel does not guess a name. Event times come from `created_at`, read as UTC, for a store written by Beads 1.3 or later; Beads 1.2 event ids carry the time and are still read from the id.
+
 ## Freshness and polling
 
 **The panel polls every 2 seconds and the service throttles its look at the project to once per 4.** Latency is about 4 to 5 seconds. A shorter cycle would cost more `bd` calls and more lock contention.
@@ -139,6 +142,10 @@ Choices made while building version 0.1.0, with the reason for each. All were ma
 **Before each push the service re-checks that the unpushed set equals the previewed set plus only this job's own merge commits, and that `dolt_status` is empty.** The panel tells the user a few milliseconds of risk remain, because Dolt cannot push up to a named commit and the agent writes outside the panel.
 
 **A Sync or Publish is refused while one runs.** This includes a Publish that arrives during a job.
+
+**Ruling: when Beads 1.3 settles two edits to the same field on its own, the panel says so.** Beads keeps the newer edit and reports it on a successful Sync. A Sync or Publish that did this still ends clean, and its toast names the beads and fields whose older edit was replaced ("Both sides edited the same thing, so the newer edit was kept"), with Copy for the raw text. A bead deleted on one side and edited on the other is still not settled by Beads: it stays a conflict and is handed to the agent. Cost: the notice is on the end-of-job toast only, so it is not shown for a job that ends in an error after the merge, or for a Sync the agent runs. A lasting notice on the team line would be a design call.
+
+**Ruling: a bead someone holds in In progress cannot be reassigned until it leaves In progress.** Beads 1.3 refuses it. The panel runs the status move first, then the rest of the edit, and when Beads still refuses it says who holds the bead and what to do, without ever overriding the hold.
 
 **Spawning for sync survives bad input.** A NUL byte or a too-long argument list used to risk a crash. Titles flow into arguments, so the fix was folded in. A crash from running out of file handles was folded in too, since one crash would take every panel down.
 
@@ -225,3 +232,135 @@ Not done in 0.1.0. Some are known limits, some are plans.
 - Showing which session is working on a bead, and opt-in status comments when a session starts or finishes.
 - Moving projects between embedded and server mode, or upgrading Beads. The extension will not do either.
 - VS Code and mobile. OpenChamber does not load extensions there.
+
+## 0.2
+
+Choices made while building 0.2, on 2026-10-14 and 2026-10-15. Each says what was decided, why, and what it costs if it is wrong. The first nine were the design's open calls. The rest were settled as the work met real Beads behavior.
+
+### The design's nine calls
+
+1. **A plan approval is a human gate whose reason starts with fixed words.** Beads has no "plan" kind of gate. A review gate with a known reason prefix lets the panel say "Plan" and "Approve", and lets an agent read it the same way. Cost: someone who types that prefix by hand makes a review look like a plan, and a person who removes the prefix in `bd` turns a plan into a plain review. The panel does not guard against either.
+2. **Needs me is the view the panel opens on when it has something in it.** A person who comes back to the panel wants to know what waits on them before anything else. The rail badge keeps meaning "unseen beads", so the two numbers do not compete. An automatic opening is not saved as your choice. Cost: someone who prefers Epic sees another view first on days with work waiting. They press the Epic tab once, and the panel remembers that only if they pick it.
+3. **A bead is stuck after 3 days without an update, per project. Keep hides it for 7 days.** Three days is long enough that agent work is not flagged by a slow afternoon. The number is a project setting, 1 to 30. Keep is stored on this computer and writes nothing to Beads, so a teammate's panel is unaffected. Cost: a threshold that is too low floods Stuck. A kept bead returns after 7 days even if you meant it forever.
+4. **Memories live on a page behind the project menu, not in a view tab.** They are written rarely and read by agents, not people, so they do not earn a place next to the views you use all day. Cost: they take one more click to find.
+5. **The beads that hold a review are kept out of the Epic and Status lists and counts.** Beads stores a gate as a bead of its own. Shown, each review would be one more row of work that cannot be started. Cost: the gate has no row of its own. You reach it from the bead it blocks, and from Needs me.
+6. **Live updates are on only when the person turns them on, per project, after a confirmation.** Turning them on writes `.beads/config.yaml`, a file many teams commit. Every earlier version of the panel left that file alone, so changing it needs an explicit yes. Cost: most people will not find the setting, and keep polling every few seconds.
+7. **A tick in the acceptance checklist rewrites only that line.** The edit is the one the person made and no more. It still goes through the same re-read-before-write check, so a concurrent edit to the text refuses it. Cost: a checklist item written another way (a `*` bullet, a numbered list) is not tickable.
+8. **0.2 was built on its own branch in a separate working copy.** It touched the service, the panel and the bundles at once, and the main branch had to stay releasable for fixes. Cost: a merge at the end that has to be read carefully, since the built bundles are committed.
+9. **Settings live in a project menu in the header.** The settings are per project (Stuck days, Live updates) and the project name is where a person already looks for "which project is this". Where Keep is stored (this computer, per project) follows the same rule. Cost: a setting under a name that does not look clickable is easy to miss. The name has a small arrow to say it opens.
+
+### Needs me, reviews and stuck work
+
+**A bead is in Needs me once per section, and "waiting" beats "asked".** A bead that is both under a review and a request for help appears under "Waiting for your review" only. Cost: the question stays hidden until the review is done.
+
+**An expired lease counts as stuck.** A bead whose holder's claim has run out shows under Stuck even if it was updated today. A claim that has run out means nobody is working on it. Cost: a long run by an agent that never refreshed its claim looks stuck. It is one click to Keep.
+
+**A review an agent resolves shows under "Changed since you looked", not Waiting.** There is nothing left to do, and it does not deserve a place that means "do something". Cost: it can be missed if you never open that section.
+
+**Respond and Dismiss refuse when the request is blocked.** They follow `bd close` exactly, including blockers from waits-for links and from a parent that waits on a review. The panel must not be a way around a review. Cost: a request that is blocked for a reason you consider silly cannot be answered here. The panel says what it waits on.
+
+**A `human` bead in a done-category custom status counts as closed.** It is not asking anything any more.
+
+**Dismiss writes no comment.** It closes the request, and Dismiss with a reason is there for words. A silent dismiss is quick and honest about what it is. Cost: the agent learns that its request was closed and not why.
+
+**Respond and Dismiss do not repeat `bd close`'s refusal for pinned beads, templates and beads assigned to someone else.** They check blockers and the rest is left to Beads' own answer. Cost: a pinned or template help request could be closed from the panel where `bd close` would refuse. That is a rare shape of bead for a help request.
+
+**A close that Beads refuses because open children remain is shown as "blocked".** One wording for the one idea, for both a gate and a child.
+
+**Gate-creating actions read "Ask for a review" and "Ask for plan approval". "Approve" only resolves a plan.** A button should say what it does to the bead. "Approve" on the thing that creates the request would say the opposite. "Gate" does not appear in the panel's wording: the history says "Review resolved by <name>", "Review deleted" and "Review removed from this bead".
+
+**The first click acts, and "Add a reason" is a quieter second way in.** A row that always opened a form would turn a one-second job into a three-step one. Cost: a person can resolve a review with no words and the agent gets none.
+
+**The upgrade from 0.1 does not show a "Deleted" row for each review.** The first snapshot after the upgrade takes reviews out the way later ones do, so the change feed is not flooded with beads that were never deleted.
+
+### History and Restore
+
+**History is read when the section opens.** It costs nothing until asked. Cost: the first open waits for a read.
+
+**History names who made a change only when Beads recorded it on this computer.** In 1.3 the table that holds that is local to each copy of the project, so a change that came in with a Sync has no name here. The panel joins the versions to the audit rows only when a recorded value matches what was written, and says "someone else or another computer" otherwise. The tighter join shows an honest "unknown" more often instead of crediting a coincidence. Cost: more entries without a name.
+
+**A close or a reopen has no name in History.** `bd close` records no value Beads can tie to a version, so the panel would be guessing.
+
+**Review events in History come from the gates' own audit rows.** They are the only record of who asked and who resolved.
+
+**Restore is an ordinary edit.** It re-reads, checks the field's current value against the one you saw, and writes only that field. When the field has been changed again since, nothing is written until you see the diff and press "Restore anyway". A test restores a text field and is refused after a newer edit. Cost: two clicks when the bead has moved on, which is the point.
+
+**A long text is never restored from History.** Only its start is read, so putting it back would write a cut text. Cost: a long description cannot be reverted from here.
+
+**Labels are not listed in History.** Beads keeps no record of them that the panel can read.
+
+**Forget in Memories is recoverable.** "Forgot <name>. Undo" re-adds the same name and text, because a forgotten memory is a lost instruction for every agent and a confirm dialog is not enough protection against a slip. Cost: Undo fails if the name has been taken, and then shows the text so it is not lost.
+
+### Memories
+
+**Memories are written with Cmd or Ctrl+Enter, and Enter is a new line.** They are often several lines. The Name field adds on Enter, since it is one line.
+
+**A memory over 4,000 characters is refused, not cut.** Cutting a memory silently changes what every session is told.
+
+**A memory is changed or forgotten only when its text is still the text you saw.** It is the same rule as every other edit, here with higher stakes.
+
+**The newest change comes first.** It is the one a reader wants. Cost: a memory that was never changed has no date and sorts last.
+
+**The name `schema_version` is refused.** Beads' own JSON answers use it, and a memory under that name would collide with them.
+
+### Editing
+
+**Defer indefinitely clears an existing defer date first, then defers.** So a bead that was deferred until a date does not keep that date while it waits for someone to bring it back. Cost: two writes when there is a date to clear. An integration test runs the clear step against Beads 1.3.1 (defer with a date, then defer indefinitely without undeferring in between).
+
+**The date preview reads only the forms it is sure of.** `tomorrow`, `+3d`, `+2w`, `+6h`, `next monday`, a date, a date with a time. Anything else says "Beads will read this when you save." Cost: a form Beads accepts (`+30m`) shows no preview. The alternative was a preview that might not match what Beads wrote.
+
+**Undefer is offered for an open bead with a future defer date.** Beads clears the date.
+
+**The parent menu offers epics only.** The panel's Epic view is built on that, and moving a bead under a bead that is not an epic makes a tree it cannot draw. Cost: a bead cannot be moved under a task.
+
+**Comment and close relies on Beads' own blocker check.** The comment goes in first. If Beads refuses the close, the comment stays and the message says so. Cost: a failed close leaves a comment behind. The comment is the thing you wrote and wanted kept.
+
+**Stuck days takes 1 to 30.** A stored value above 30 falls back to 3. A threshold of a year would hide everything the view is for.
+
+### Live updates
+
+**The follower is a nudge, not the data source.** When the Beads log reports an event, the panel refreshes at once by reading the project as it always did. Polling stays as the fallback and as the only path on Beads 1.2.2. Pulls, merges, other computers and direct SQL are not in the log, so the panel cannot rely on it. Cost: the polling code stays.
+
+**Below Beads 1.3 the setting is shown as unavailable ("Needs a newer version of Beads"), not hidden.** Hiding it would leave a person with no way to learn why they have no live updates.
+
+**The log is local and kept for 7 days.** Turning it on writes a setting in `.beads/config.yaml`, so teammates get it too if that file is committed. The confirmation says both.
+
+**The confirmation message does not say "Open Settings again to check".** The panel reads the setting again and shows what it found. A note that sent you somewhere else was noise.
+
+**The log's first start after a long pause recovers by itself.** Beads prunes old entries after 7 days. When the panel asks from a position Beads no longer has, it reads the head with one extra call and carries on.
+
+**While live updates run, the panel asks for changes every 500 ms instead of every 2 s.** The service answers from what it already read, so no Beads call is made per ask. Without this the faster service made no difference on screen: in the live check a change took 2.1 to 3.2 s to appear, and about 1.3 s after. Cost: more requests while the panel is visible and live updates are on.
+
+### Event times from older Beads
+
+**History shows an event's time only when it is known to be right.** Beads 1.2.2 wrote event times in local time but labeled them UTC, so on a project upgraded from 1.2.2 those rows would sit hours off (in the live check, a label "added" 7 hours before the bead existed). The panel takes the time from the event's id when the id carries one, trusts the stored time only for rows newer than the 1.3 upgrade, and otherwise shows the row without a time (a label added with the bead shows at the bead's creation). Cost: some old rows show no time.
+
+### Update project
+
+**A project made with an older Beads shows a note and one button, "Update project", and never updates by itself.** The note reads "This project needs a one-time update for the newer Beads". The button asks first. This is the second place the panel changes Beads, after live updates. Cost: a second button that writes.
+
+**Every write is refused while the project needs the update.** The detail and New bead screens are hidden meanwhile, so a comment or a new bead cannot start an update nobody confirmed.
+
+**The update never forces anything.** A project that shares its beads with a team copy is refused by Beads. The panel shows plain copy ("This project shares its beads with your team, so Beads won't update it from here. Ask whoever set up the team copy to update it, or update it on the computer that hosts it.") and offers no retry. Such a project stays unreadable in Abacus until it is updated elsewhere.
+
+**The update has its own 120 second budget and runs as a background job like Sync.** The normal write limit never kills it partway, and the host's request cut does not apply. Cost: a long wait on very large stores.
+
+**A person's shell cannot start an update the panel did not ask for.** The service removes the two Beads variables that skip the check or allow a remote update from the environment it passes on.
+
+**The "needs update" state stays until a read succeeds.** It does not clear on a cached shortcut, and it resets when Beads is upgraded.
+
+**Stuck counts an expired claim only for beads that are in progress.** A bead that was closed or returned to open is not stuck.
+
+**Written down, not built:** a project whose history was flattened has no event times for some History rows, which then show without a time. Update project is not tested on projects with a shared remote or in server mode.
+
+### Deferred in 0.2
+
+- **History and Activity cannot name who made a change on another computer with Beads 1.3.** It is a Beads limit (the events table is local to each copy). A close and a reopen are never named in History.
+- **Per-bead conflict resolution** ("keep mine", "take theirs") is not built. A Sync conflict is still handed to the agent.
+- **Server-mode projects are not tested for three things:** the memories list, the read of who holds a bead, and the live-updates follower. If the follower cannot run there, the panel could start it up to 5 times in about 6 minutes for each open panel before it gives up for 5 minutes. Polling keeps the list fresh meanwhile.
+- **Update project is untested on shared stores and server mode,** and a long update on a very large store can end without a clear answer. The panel then offers "Check again".
+- **A project with flattened history shows some History rows without a time.** Beads 1.2.2 recorded event times in a way the flattened copy no longer has, so the panel shows those rows untimed instead of guessing.
+- **Claims refresh only when the whole project is read.** A claim that runs out is noticed within a minute, not at the second it runs out.
+- **The log's 7-day prune means a first start usually recovers from a gap** and is the normal start, not a rare one.
+- **Not built, by choice:** a query bar and saved searches, a preview of what a chip sends, notifications, bulk actions, the full-screen board, a `bd serve` adapter, and formulas, molecules, swarms and wisps. The [backlog](backlog.md) lists them with their size.
+

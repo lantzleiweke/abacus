@@ -1,0 +1,1 @@
+{"cmd": "bd --actor \"Ann (panel)\" migrate schema --json (--json still prints text; the open itself migrated)", "cwd_label": "scratch copy of the pre-1.3 test backup", "exit": 0}

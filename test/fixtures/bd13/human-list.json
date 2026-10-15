@@ -1,0 +1,31 @@
+[
+  {
+    "id": "pl-lzo",
+    "title": "Need a decision on cache TTL",
+    "description": "Which TTL?",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:36:54Z",
+    "created_by": "tester",
+    "updated_at": "2026-10-15T05:36:54Z",
+    "labels": [
+      "human"
+    ]
+  },
+  {
+    "id": "pl-o8j",
+    "title": "Second help",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:36:54Z",
+    "created_by": "tester",
+    "updated_at": "2026-10-15T05:36:54Z",
+    "labels": [
+      "human"
+    ]
+  }
+]

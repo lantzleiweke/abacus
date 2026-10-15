@@ -1,0 +1,2 @@
+Error: events journal truncated: checkpoint 0 is below the retained window [5..6]; records 1..4 were pruned
+Hint: resume with --since 4 to continue from the oldest retained record (accepting the gap), or re-import from scratch

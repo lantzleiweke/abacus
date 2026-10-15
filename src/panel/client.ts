@@ -81,6 +81,22 @@ export type BeadsClient = {
   create: Method<'create'>;
   comment: Method<'comment'>;
   dependency: Method<'dependency'>;
+  gateCreate: Method<'gateCreate'>;
+  gateResolve: Method<'gateResolve'>;
+  humanRespond: Method<'humanRespond'>;
+  humanDismiss: Method<'humanDismiss'>;
+  history: Method<'history'>;
+  memories: Method<'memories'>;
+  memoryRemember: Method<'memoryRemember'>;
+  memoryForget: Method<'memoryForget'>;
+  deferBead: Method<'deferBead'>;
+  undeferBead: Method<'undeferBead'>;
+  supersede: Method<'supersede'>;
+  duplicate: Method<'duplicate'>;
+  explain: Method<'explain'>;
+  eventsStatus: Method<'eventsStatus'>;
+  enableEvents: Method<'enableEvents'>;
+  migrateSchema: Method<'migrateSchema'>;
   seen: Method<'seen'>;
   context: Method<'context'>;
   syncPreview: Method<'sync-preview'>;
@@ -115,6 +131,22 @@ export function createClient(host: Pick<HostClient, 'serviceRequest'>): BeadsCli
     create: call('create'),
     comment: call('comment'),
     dependency: call('dependency'),
+    gateCreate: call('gateCreate'),
+    gateResolve: call('gateResolve'),
+    humanRespond: call('humanRespond'),
+    humanDismiss: call('humanDismiss'),
+    history: call('history'),
+    memories: call('memories'),
+    memoryRemember: call('memoryRemember'),
+    memoryForget: call('memoryForget'),
+    deferBead: call('deferBead'),
+    undeferBead: call('undeferBead'),
+    supersede: call('supersede'),
+    duplicate: call('duplicate'),
+    explain: call('explain'),
+    eventsStatus: call('eventsStatus'),
+    enableEvents: call('enableEvents'),
+    migrateSchema: call('migrateSchema'),
     seen: call('seen'),
     context: call('context'),
     syncPreview: call('sync-preview'),

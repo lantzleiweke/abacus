@@ -37,7 +37,7 @@ export function Popover({ label, align = 'start', onClose, children, role = 'dia
   }, []);
   useEffect(() => {
     const el = ref.current;
-    const first = ['[data-autofocus]', '[role="menuitemradio"][aria-checked="true"]', 'input', '[role="menuitemradio"]', 'button']
+    const first = ['[data-autofocus]', '[role="menuitemradio"][aria-checked="true"]', 'input', '[role="menuitemradio"]', '[role="menuitem"]:not(:disabled)', 'button']
       .map((s) => el?.querySelector<HTMLElement>(s))
       .find(Boolean);
     first?.focus();
@@ -57,7 +57,7 @@ export function Popover({ label, align = 'start', onClose, children, role = 'dia
       return;
     }
     if (role !== 'menu' || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []);
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]:not(:disabled)') ?? []);
     const i = items.indexOf(document.activeElement as HTMLElement);
     items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
     e.preventDefault();

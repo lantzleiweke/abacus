@@ -1,0 +1,1 @@
+Error: refusing to auto-apply 34 pending schema migrations to a shared server database (v32 -> v66): migrating would lock out every co-resident bd client still on the old schema (#5920)

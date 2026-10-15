@@ -189,11 +189,14 @@ export type RowActions = {
 /** Why the menu closed: from the keyboard or a chosen item (focus goes back to the row), or a click elsewhere. */
 export type MenuClose = 'keyboard' | 'item' | 'outside';
 
+/** An item a view adds above the usual ones (an Activity row's Restore). `off` says why it cannot run. */
+export type MenuExtra = { label: string; icon: ComponentChildren; run: () => void; off?: string };
+
 /**
  * Add to current chat, Start session, Start in worktree, Copy ID for one bead. Opens under its row (above when there is no room), so the row's
  * title stays in view. Arrow keys move; Escape, Tab, or a click outside closes.
  */
-export function RowMenu({ at, actions, onClose }: { at: MenuAt; actions: RowActions; onClose(why: MenuClose): void }) {
+export function RowMenu({ at, actions, extra = [], onClose }: { at: MenuAt; actions: RowActions; extra?: MenuExtra[]; onClose(why: MenuClose): void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
 
@@ -223,13 +226,14 @@ export function RowMenu({ at, actions, onClose }: { at: MenuAt; actions: RowActi
   }, [onClose]);
 
   const busy = actions.busy === true;
-  const items: Array<{ label: string; icon: ComponentChildren; run: () => void; off?: string }> = [
-    { label: 'Add to current chat', icon: <IconChat />, run: () => actions.addToChat(at.id), off: actions.noChat ? 'No open chat' : undefined },
+  const items: Array<MenuExtra & { rule?: true }> = [
+    ...extra,
+    { label: 'Add to current chat', ...(extra.length ? { rule: true as const } : {}), icon: <IconChat />, run: () => actions.addToChat(at.id), off: actions.noChat ? 'No open chat' : undefined },
     { label: 'Start session', icon: <IconSession />, run: () => actions.startSession(at.id) },
     { label: 'Start in worktree…', icon: <IconBranch />, run: () => actions.startInWorktree(at.id) },
     { label: 'Copy ID', icon: <IconCopy />, run: () => actions.copyId(at.id) },
   ];
-  const agentItem = (label: string) => label !== 'Copy ID';
+  const agentItem = (label: string) => label !== 'Copy ID' && !extra.some((x) => x.label === label);
 
   const onKeyDown = (e: KeyboardEvent) => {
     const buttons = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
@@ -254,7 +258,8 @@ export function RowMenu({ at, actions, onClose }: { at: MenuAt; actions: RowActi
       style={place ? { left: `${place.left}px`, top: `${place.top}px` } : { visibility: 'hidden', left: '0px', top: '0px' }}
       onKeyDown={onKeyDown}
     >
-      {items.map(({ label, icon, run, off }) => (
+      {items.map(({ label, icon, run, off, rule }) => [
+        rule && <div key={`${label}-rule`} class="bd-menu-rule" role="separator" />,
         <button
           key={label}
           type="button"
@@ -270,8 +275,8 @@ export function RowMenu({ at, actions, onClose }: { at: MenuAt; actions: RowActi
           {icon}
           <span>{label}</span>
           {off && <span class="bd-menu-off">{off}</span>}
-        </button>
-      ))}
+        </button>,
+      ])}
       <div class="bd-menu-id">{at.id}</div>
     </div>
   );

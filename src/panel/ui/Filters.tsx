@@ -24,7 +24,7 @@ function Line({ label, children }: { label: string; children: ComponentChildren 
 
 const toggle = <T,>(list: T[], value: T): T[] => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
 
-/** The filter sheet under the tools row: status, assignee, priority, and Ready. Choices persist per project. */
+/** The filter sheet under the tools row: status, assignee, priority, due date, and Ready. Choices persist per project. */
 export function Filters() {
   const state = useStore();
   const store = useStoreApi();
@@ -95,6 +95,14 @@ export function Filters() {
             <span class="bd-pr" data-p={p}>{`P${p}`}</span>
           </Chip>
         ))}
+      </Line>
+      <Line label="Due">
+        <Chip pressed={f.due === 'overdue'} onClick={() => set({ due: f.due === 'overdue' ? 'any' : 'overdue' })} title="Not done, and the due date has passed">
+          Overdue
+        </Chip>
+        <Chip pressed={f.due === 'week'} onClick={() => set({ due: f.due === 'week' ? 'any' : 'week' })} title="Not done, and due in the next 7 days">
+          Due this week
+        </Chip>
       </Line>
       <Line label="Ready">
         <Chip pressed={f.ready} onClick={() => set({ ready: !f.ready })} title="Open beads with nothing blocking them">

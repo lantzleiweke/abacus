@@ -127,7 +127,7 @@ describe.skipIf(process.env.BD_INTEGRATION !== '1')('sync (two embedded clones, 
     expect((await exported(providerB, mine.id)).title).toBe('From A, behind the team');
   }, 180_000);
 
-  it('a same-field edit on both sides is a backed-out conflict: both sides listed, local edit intact, nothing pushed', async () => {
+  it('a same-field edit on both sides merges on its own (bd 1.3, newer wins) and the sync says which bead and field', async () => {
     await retitle(providerA, sharedId, 'A title');
     startPublish(rootA, 'embedded', await localHead(rootA, 'embedded'));
     await syncSettled(rootA);
@@ -137,12 +137,49 @@ describe.skipIf(process.env.BD_INTEGRATION !== '1')('sync (two embedded clones, 
     startPull(rootB, 'embedded');
     await syncSettled(rootB);
     const state = syncState(rootB);
+    expect(state).toMatchObject({ kind: 'idle', superseded: expect.arrayContaining([expect.objectContaining({ beadId: sharedId })]) });
+    if (state.kind !== 'idle') throw new Error('unreachable');
+    expect(state.superseded!.find((e) => e.beadId === sharedId)!.fields).toContain('title');
+    expect(state.log).toContain('auto-merged issue');
+    expect(writesBlocked(rootB)).toBe(false);
+    // The edit made last wins.
+    expect((await exported(providerB, sharedId)).title).toBe('B title');
+
+    startPublish(rootB, 'embedded', await localHead(rootB, 'embedded'));
+    await syncSettled(rootB);
+    expect(syncState(rootB)).toMatchObject({ kind: 'idle' });
+    startPull(rootA, 'embedded');
+    await syncSettled(rootA);
+    expect(syncState(rootA)).toEqual({ kind: 'idle' });
+    expect((await exported(providerA, sharedId)).title).toBe('B title');
+  }, 180_000);
+
+  it('a bead deleted on one side and edited on the other is a backed-out conflict: listed, local edit intact, nothing pushed', async () => {
+    const doomed = await providerA.create({ title: 'Doomed', type: 'task', priority: 2, parentId: null, description: '' }, ACTOR);
+    startPublish(rootA, 'embedded', await localHead(rootA, 'embedded'));
+    await syncSettled(rootA);
+    expect(syncState(rootA)).toEqual({ kind: 'idle' });
+    startPull(rootB, 'embedded');
+    await syncSettled(rootB);
+    expect(syncState(rootB)).toEqual({ kind: 'idle' });
+
+    // Scratch only: the product never deletes. A leaf bead, so --force is just bd's confirmation here.
+    // runBd refuses --force by design, so this goes straight to the binary.
+    await run('bd', ['delete', doomed.id, '--force'], { cwd: rootA, env: childEnv() });
+    startPublish(rootA, 'embedded', await localHead(rootA, 'embedded'));
+    await syncSettled(rootA);
+    expect(syncState(rootA)).toEqual({ kind: 'idle' });
+
+    await retitle(providerB, doomed.id, 'Edited on B');
+    startPull(rootB, 'embedded');
+    await syncSettled(rootB);
+    const state = syncState(rootB);
     expect(state).toMatchObject({ kind: 'conflict', mode: 'embedded', halfMerged: false });
     if (state.kind !== 'conflict') throw new Error('unreachable');
-    expect(state.beads.map((b) => b.beadId)).toContain(sharedId);
+    expect(state.beads.map((b) => b.beadId)).toContain(doomed.id);
     expect(state.log).toContain('dolt pull');
     expect(writesBlocked(rootB)).toBe(false);
-    expect((await exported(providerB, sharedId)).title).toBe('B title');
+    expect((await exported(providerB, doomed.id)).title).toBe('Edited on B');
 
     // Publishing from the conflicted clone stops at the pull: nothing reaches the remote.
     startPublish(rootB, 'embedded', await localHead(rootB, 'embedded'));
@@ -154,7 +191,7 @@ describe.skipIf(process.env.BD_INTEGRATION !== '1')('sync (two embedded clones, 
     startPull(rootA, 'embedded');
     await syncSettled(rootA);
     expect(syncState(rootA)).toEqual({ kind: 'idle' });
-    expect((await exported(providerA, sharedId)).title).toBe('A title');
+    expect((await exported(providerA, sharedId)).title).toBe('B title');
   }, 180_000);
 });
 

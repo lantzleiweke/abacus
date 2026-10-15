@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { RouteTable } from '../shared/api';
 import type { ApiErrorCode, ErrorEnvelope } from '../shared/types';
+import { follower } from './live';
 import { createRoutes } from './routes';
 
 /** Host request bodies are capped at 64,000 chars; reject anything larger. */
@@ -83,13 +84,40 @@ export function startServer(opts: { port: number; token: string; handlers: Route
   return server;
 }
 
-function main(): void {
+/**
+ * Ends the events followers, then the service. A listener for SIGTERM or SIGINT replaces Node's default exit, so it has to exit itself:
+ * without that the service would ignore the host's stop request.
+ */
+export function installShutdown(proc: Pick<NodeJS.Process, 'on' | 'exit'> = process, stop: () => void = () => follower().stopAll()): void {
+  const shutdown = () => {
+    try {
+      stop();
+    } finally {
+      proc.exit(0);
+    }
+  };
+  proc.on('SIGTERM', shutdown);
+  proc.on('SIGINT', shutdown);
+  // A normal exit (the host closing the pipe, an uncaught error) still takes the children with it.
+  proc.on('exit', () => {
+    try {
+      stop();
+    } catch {
+      // Nothing left to do at exit.
+    }
+  });
+}
+
+export function main(): void {
   const port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
   const token = process.env.OPENCHAMBER_SERVICE_TOKEN;
   if (!Number.isInteger(port) || port <= 0 || !token) {
     process.stderr.write('OPENCHAMBER_SERVICE_PORT and OPENCHAMBER_SERVICE_TOKEN are required.\n');
     process.exit(1);
   }
+  installShutdown();
+  // Followers a crashed service left behind (their owner is gone and the command line still says `bd events tail`).
+  follower().reapStale();
   startServer({ port, token, handlers: createRoutes() });
 }
 

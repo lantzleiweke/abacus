@@ -1,7 +1,12 @@
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { build } from 'esbuild';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { startServer } from '../../../src/service/main';
+import { installShutdown, startServer } from '../../../src/service/main';
 import type { RouteTable } from '../../../src/shared/api';
 
 const TOKEN = 'secret-token';
@@ -106,4 +111,72 @@ describe('service http', () => {
     expect(res.status).toBe(413);
     expect((await res.json()).error.code).toBe('BODY_TOO_LARGE');
   });
+});
+
+describe('shutdown', () => {
+  it('stops the followers, then exits, on SIGTERM and SIGINT', () => {
+    const handlers = new Map<string, () => void>();
+    const exits: number[] = [];
+    const stops: string[] = [];
+    installShutdown(
+      {
+        on: ((event: string, handler: () => void) => {
+          handlers.set(event, handler);
+          return process;
+        }) as never,
+        exit: ((code?: number) => {
+          stops.push('exit');
+          exits.push(code ?? 0);
+        }) as never,
+      },
+      () => stops.push('stop'),
+    );
+    handlers.get('SIGTERM')!();
+    handlers.get('SIGINT')!();
+    expect(stops).toEqual(['stop', 'exit', 'stop', 'exit']);
+    expect(exits).toEqual([0, 0]);
+    // A normal exit stops the followers too, and does not exit again.
+    handlers.get('exit')!();
+    expect(stops.at(-1)).toBe('stop');
+    expect(exits).toHaveLength(2);
+  });
+
+  it('still exits if stopping the followers throws', () => {
+    const handlers = new Map<string, () => void>();
+    let exited = false;
+    installShutdown(
+      { on: ((event: string, handler: () => void) => handlers.set(event, handler)) as never, exit: (() => (exited = true)) as never },
+      () => {
+        throw new Error('boom');
+      },
+    );
+    expect(() => handlers.get('SIGTERM')!()).toThrow('boom');
+    expect(exited).toBe(true);
+  });
+
+  it('service still exits on SIGTERM', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oc-beads-main-'));
+    try {
+      const bundle = join(dir, 'main.cjs');
+      await build({ entryPoints: [join(process.cwd(), 'src/service/main.ts')], bundle: true, format: 'cjs', platform: 'node', target: 'node20', outfile: bundle, logLevel: 'silent' });
+      const port = 20_000 + Math.floor(Math.random() * 20_000);
+      const env: NodeJS.ProcessEnv = { ...process.env, OPENCHAMBER_SERVICE_PORT: String(port), OPENCHAMBER_SERVICE_TOKEN: 'tok', XDG_DATA_HOME: join(dir, 'data') };
+      for (const key of Object.keys(env)) if (key.startsWith('VITEST')) delete env[key];
+      const child = spawn(process.execPath, [bundle], { env, stdio: 'ignore' });
+      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
+      // Up when /health answers.
+      let up = false;
+      for (let i = 0; i < 50 && !up; i += 1) {
+        await new Promise((r) => setTimeout(r, 100));
+        up = await fetch(`http://127.0.0.1:${port}/health`, { headers: { authorization: 'Bearer tok' } }).then((r) => r.ok, () => false);
+      }
+      expect(up).toBe(true);
+      child.kill('SIGTERM');
+      const result = await Promise.race([exited, new Promise<'hung'>((r) => setTimeout(() => r('hung'), 5_000))]);
+      if (result === 'hung') child.kill('SIGKILL');
+      expect(result).toEqual({ code: 0, signal: null });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

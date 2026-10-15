@@ -1,0 +1,4 @@
+{
+  "error": "--days must be at least 1",
+  "schema_version": 1
+}

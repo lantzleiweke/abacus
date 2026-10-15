@@ -1,19 +1,22 @@
 import type { Bead, ChangeEvent, Dependency, JsonValue, Related, StatusDef } from '../shared/types';
 import { ago, dayText, recordedDate, timeText } from './format';
+import { gateEventOf, gateEventWords } from './gates';
 import { compareIds, humanize, looker, statusLabel, type Look } from './list';
 
 const DAY_MS = 86_400_000;
+const SKEW_MS = 120_000;
 
 // ------------------------------------------------------------------------------------------------- time
 
 /**
  * A real timestamp (ISO with zone) for reading: "9m ago" within the past day, otherwise "Oct 13, 5:02 PM". Text that is
- * not a timestamp comes back as it is.
+ * not a timestamp comes back as it is. A time a little ahead of `now` (the panel's clock ticks, the change was just
+ * recorded) counts as now, so it reads the same as the age in the corner of a row.
  */
 export function when(text: string, now: number): string {
   const at = Date.parse(text);
   if (!Number.isFinite(at)) return text;
-  if (at <= now && now - at < DAY_MS) return ago(now - at);
+  if (at - now < SKEW_MS && now - at < DAY_MS) return ago(now - at);
   const date = new Date(at);
   return `${dayText(date, now)}, ${timeText(date)}`;
 }
@@ -32,11 +35,8 @@ export function depTime(text: string | null): string | null {
 
 // ------------------------------------------------------------------------------------------------- people
 
-/** A recorded name as shown: "you (panel)" for the panel's own, "unknown" when none was recorded. */
-export function personName(name: string | null, panel: string | null): string {
-  if (!name) return 'unknown';
-  return panel !== null && name === panel ? 'you (panel)' : name;
-}
+// Lives with the other formatters, so the gate wording can use it without importing this file back.
+export { personName } from './format';
 
 const changeActor = (e: ChangeEvent): string => (e.byPanel ? 'you (panel)' : (e.actor ?? 'unknown'));
 
@@ -102,6 +102,15 @@ export function changeLine(e: ChangeEvent, statuses: StatusDef[], now: number): 
       return { lead: `Link added ${by}`, what: `${kindLabel(e.field ?? '', 'out').toLowerCase()} ${String(e.to ?? '')}`.trim() };
     case 'dep_removed':
       return { lead: `Link removed ${by}`, what: `${kindLabel(e.field ?? '', 'out').toLowerCase()} ${String(e.from ?? '')}`.trim() };
+    case 'gate_opened':
+    case 'gate_resolved': {
+      const { head, by: named } = gateEventWords(gateEventOf(e));
+      // A deleted gate names no one; an ask or a removed link names whoever the log recorded, when it recorded one.
+      const ended = e.kind === 'gate_resolved' && e.ended === 'deleted';
+      const who = named ?? (ended || (!e.actor && !e.byPanel) ? null : changeActor(e));
+      const reason = e.reason?.trim().split('\n')[0]?.trim();
+      return { lead: who ? `${head} ${time} by ${who}` : `${head} ${time}`, what: reason || null };
+    }
     case 'field':
       break;
   }
@@ -274,4 +283,66 @@ export function acceptanceItems(text: string): Array<{ text: string; done: boole
     items.push({ text: m[2]!.trim(), done: m[1] === 'x' || m[1] === 'X' });
   }
   return items;
+}
+
+/**
+ * One line of acceptance criteria. `box`: a list item written with an explicit `[ ]` or `[x]`, the only kind a tick changes;
+ * `bullet`: a list item without one; `text`: anything else, inside a code block too. `index` is the line's place in the text.
+ */
+export type AcceptanceLine = { index: number; kind: 'box' | 'bullet' | 'text'; done: boolean; text: string; depth: number };
+
+/** A list item with a box: what comes before the box's mark, the mark, and the rest. */
+const BOX = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\](?:\s|$))/;
+const BULLET = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
+const FENCE = /^\s*(```|~~~)/;
+/** A thematic break (`- - -`, `* * *`): a rule, not a list item. */
+const RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+
+/** Every line of the criteria, read as the checklist shows it. Lines inside a code block are text, whatever they look like. */
+export function acceptanceLines(text: string): AcceptanceLine[] {
+  /** The fence that opened the code block the line is in: only the same kind closes it. */
+  let fence: string | null = null;
+  return text.split('\n').map((raw, index): AcceptanceLine => {
+    const line = raw.replace(/\r$/, '');
+    const mark = FENCE.exec(line)?.[1];
+    if (mark && (fence === null || fence === mark)) {
+      fence = fence === null ? mark : null;
+      return { index, kind: 'text', done: false, text: line, depth: 0 };
+    }
+    const bullet = fence !== null || RULE.test(line) ? null : BULLET.exec(line);
+    if (!bullet) return { index, kind: 'text', done: false, text: line, depth: 0 };
+    const depth = bullet[1]!.replace(/\t/g, '  ').length >= 2 ? 1 : 0;
+    const box = BOX.exec(line);
+    if (box) return { index, kind: 'box', done: box[2] !== ' ', text: line.slice(box[0].length).trim(), depth };
+    return { index, kind: 'bullet', done: false, text: bullet[2]!.trim(), depth };
+  });
+}
+
+/** The criteria as the detail lays them out: runs of list lines as checklists, everything between as markdown. */
+export type AcceptanceBlock = { kind: 'list'; lines: AcceptanceLine[] } | { kind: 'text'; text: string };
+
+export function acceptanceBlocks(text: string): AcceptanceBlock[] {
+  const blocks: AcceptanceBlock[] = [];
+  for (const line of acceptanceLines(text)) {
+    const last = blocks[blocks.length - 1];
+    if (line.kind !== 'text') {
+      if (last?.kind === 'list') last.lines.push(line);
+      else blocks.push({ kind: 'list', lines: [line] });
+    } else if (last?.kind === 'text') last.text += `\n${line.text}`;
+    // A blank line between list items does not end the list.
+    else if (line.text.trim() !== '') blocks.push({ kind: 'text', text: line.text });
+  }
+  return blocks;
+}
+
+/**
+ * The criteria with the box on line `index` ticked or unticked, every other byte as it was; null when that line has no box (only
+ * a written `[ ]` or `[x]` can be ticked).
+ */
+export function toggleLine(text: string, index: number): string | null {
+  const lines = text.split('\n');
+  const line = lines[index];
+  if (line === undefined || acceptanceLines(text)[index]?.kind !== 'box') return null;
+  lines[index] = line.replace(BOX, (_all, head: string, mark: string, tail: string) => `${head}${mark === ' ' ? 'x' : ' '}${tail}`);
+  return lines.join('\n');
 }

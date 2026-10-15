@@ -7,7 +7,7 @@ import { firstLoadError, useStore, useStoreApi, type PanelError } from '../store
 export type Tone = 'neutral' | 'missing' | 'warning' | 'error' | 'ask';
 
 /** Three beads on a thread; the middle one carries the tone. */
-function Thread({ tone }: { tone: Tone }) {
+export function Thread({ tone }: { tone: Tone }) {
   return (
     <svg class="bd-thread" data-tone={tone} width="72" height="20" viewBox="0 0 72 20" aria-hidden="true" focusable="false">
       <path class="bd-thread-line" d="M2 10h68" />
@@ -59,7 +59,8 @@ export function workspaceCopy(workspace: WorkspaceState): { title: string; body:
       return {
         tone: 'ask',
         title: `Open this project with Beads ${workspace.bdVersion}?`,
-        body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it here lets Beads update it to ${workspace.bdVersion}, which may change its files.`,
+        // Opening updates nothing: a project on an older format is shown the update, which asks again before it runs.
+        body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it lets Beads check the project. If it is on an older format, Abacus will ask before updating it.`,
       };
     case 'server-down':
       return {

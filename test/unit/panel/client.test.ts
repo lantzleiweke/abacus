@@ -20,6 +20,33 @@ describe('createClient', () => {
     expect(calls[0].route).toBe('sync-preview');
   });
 
+  it('every new route posts to /api/<name> with the directory', async () => {
+    const { host, calls } = fakeHost(() => json({}));
+    const client = createClient(host);
+    const d = '/p/a';
+    await client.gateCreate({ directory: d, id: 'x-1' });
+    await client.gateResolve({ directory: d, gateId: 'g-1' });
+    await client.humanRespond({ directory: d, id: 'x-1', response: 'yes' });
+    await client.humanDismiss({ directory: d, id: 'x-1' });
+    await client.history({ directory: d, id: 'x-1' });
+    await client.memories({ directory: d });
+    await client.memoryRemember({ directory: d, text: 'note' });
+    await client.memoryForget({ directory: d, key: 'note', expectedText: 'note' });
+    await client.deferBead({ directory: d, id: 'x-1', expectedUpdatedAt: 't', until: '+2d' });
+    await client.undeferBead({ directory: d, id: 'x-1', expectedUpdatedAt: 't' });
+    await client.supersede({ directory: d, id: 'x-1', with: 'x-2', expectedUpdatedAt: 't' });
+    await client.duplicate({ directory: d, id: 'x-1', of: 'x-2', expectedUpdatedAt: 't' });
+    await client.explain({ directory: d, id: 'x-1' });
+    await client.eventsStatus({ directory: d });
+    await client.enableEvents({ directory: d, confirm: true });
+    await client.migrateSchema({ directory: d, confirm: true });
+    expect(calls.map((c) => c.route)).toEqual([
+      'gateCreate', 'gateResolve', 'humanRespond', 'humanDismiss', 'history', 'memories', 'memoryRemember', 'memoryForget',
+      'deferBead', 'undeferBead', 'supersede', 'duplicate', 'explain', 'eventsStatus', 'enableEvents', 'migrateSchema',
+    ]);
+    for (const call of calls) expect(call.body.directory).toBe(d);
+  });
+
   it('turns an error envelope into a BeadsRequestError carrying message, detail and workspace', async () => {
     const { host } = fakeHost(() =>
       envelope(409, { code: 'workspace', message: "This folder doesn't use Beads.", detail: 'raw', workspace: { kind: 'no-workspace' } }),
@@ -394,15 +421,15 @@ describe('store persistence', () => {
     first.setView('status');
     // Deferred and Closed start collapsed; toggling Closed opens it.
     first.toggleCollapsed('status:closed');
-    first.setFilters({ ...first.get().filters, ready: true });
+    first.setFilters({ ...first.get().filters, ready: true, due: 'overdue' });
     await flush();
-    expect(fake.stored.get(uiKey('/p/a'))).toMatchObject({ view: 'status', collapsed: ['status:deferred'], filters: { ready: true } });
+    expect(fake.stored.get(uiKey('/p/a'))).toMatchObject({ view: 'status', collapsed: ['status:deferred'], filters: { ready: true, due: 'overdue' } });
     first.dispose();
 
     const second = createStore({ client: createClient(fake.host), host: fake.host, visibility: visibility() });
     second.setDirectory('/p/a');
     await flush();
-    expect(second.get()).toMatchObject({ view: 'status', collapsed: ['status:deferred'], filters: { ready: true } });
+    expect(second.get()).toMatchObject({ view: 'status', collapsed: ['status:deferred'], filters: { ready: true, due: 'overdue' } });
     second.setDirectory('/p/b');
     await flush();
     expect(second.get().view).toBe('epic');

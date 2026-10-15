@@ -1,16 +1,32 @@
 import { createContext } from 'preact';
 import { useContext, useEffect, useState } from 'preact/hooks';
 import { GUEST_BADGE_MAX, type HostClient } from '@openchamber/sdk';
-import type { BeadResponse } from '../shared/api';
-import type { Bead, BeadPatch, ChangeEvent, Comment, ExpectedFields, JsonValue, NewBead, SnapshotResponse, SyncState, WorkspaceState } from '../shared/types';
+import type { BeadResponse, EnableEventsResult, EventsStatusResult, HistoryRequest, MemoriesResult, MemoryWriteResult, MigrateSchemaResult, RememberRequest } from '../shared/api';
+import type {
+  Bead, BeadPatch, Capabilities, ChangeEvent, Comment, ExpectedFields, ExplainResult, Freshness, Gate, GateCreateResult, GateResolveResult, HistoryResult, HumanResult, JsonValue, Lease, NewBead, SnapshotResponse, SyncState,
+  WorkspaceState, WriteResult,
+} from '../shared/types';
 import { relatedFor } from '../shared/related';
 import { ANSWER_LOST, asRequestError, COPY_MAX, TOAST_MAX, type BeadsClient } from './client';
 import { beadSignature, latestUnseenChange, newerBead } from './detail';
 import { defaultParent } from './edit';
 import { shortId } from './list';
+import { DEFAULT_STALE_DAYS, KEEP_MS, needsOf } from './needs';
 
-export type View = 'epic' | 'status' | 'activity';
-const VIEWS: readonly View[] = ['epic', 'status', 'activity'];
+export type View = 'needs' | 'epic' | 'status' | 'activity';
+const VIEWS: readonly View[] = ['needs', 'epic', 'status', 'activity'];
+
+/** Which full-screen page shows in place of the views: the list (the views and the detail), or the project's memories. */
+export type Page = 'list' | 'memories';
+
+/** The project's own settings, kept by the panel on this computer (never written to Beads). */
+export type ProjectSettings = { staleDays: number };
+
+/** What the panel hides when the installed Beads is too old for it; each is a feature name the entry points check. */
+export type Feature = 'gates' | 'human' | 'history' | 'memories' | 'events' | 'defer' | 'supersede' | 'explain';
+
+/** How a read (not a write) ended. */
+export type ReadOutcome<T> = { kind: 'ok'; value: T } | { kind: 'error'; error: PanelError } | { kind: 'dropped' };
 
 /**
  * `open` (the default, "Current"): everything not done, plus beads closed in the last 7 days. `all`: everything, however
@@ -18,14 +34,16 @@ const VIEWS: readonly View[] = ['epic', 'status', 'activity'];
  */
 export type StatusFilter = 'open' | 'all' | { only: string[] };
 export type AssigneeFilter = 'any' | 'unassigned' | { name: string };
-export type Filters = { status: StatusFilter; assignee: AssigneeFilter; priorities: number[]; ready: boolean };
+/** `overdue`: due before now; `week`: due in the next 7 days. Either way only beads not done. */
+export type DueFilter = 'any' | 'overdue' | 'week';
+export type Filters = { status: StatusFilter; assignee: AssigneeFilter; priorities: number[]; ready: boolean; due: DueFilter };
 
-export const DEFAULT_FILTERS: Filters = { status: 'open', assignee: 'any', priorities: [], ready: false };
+export const DEFAULT_FILTERS: Filters = { status: 'open', assignee: 'any', priorities: [], ready: false, due: 'any' };
 
 /** Deferred and Closed start folded away, as in the approved mockup. */
 export const DEFAULT_COLLAPSED: readonly string[] = ['status:deferred', 'status:closed'];
 
-export const filtersActive = (f: Filters): boolean => f.status !== 'open' || f.assignee !== 'any' || f.priorities.length > 0 || f.ready;
+export const filtersActive = (f: Filters): boolean => f.status !== 'open' || f.assignee !== 'any' || f.priorities.length > 0 || f.ready || f.due !== 'any';
 
 export type FullSnapshot = Extract<SnapshotResponse, { unchanged: false }>;
 
@@ -57,9 +75,27 @@ export type WriteOutcome<T> =
   | { kind: 'dropped' };
 
 /**
+ * How turning on live updates ended. Like any write, except that an `uncertain` answer keeps the service's own message (it says what
+ * is known: for example that the setting is in and the follower could not be read) and carries the status read again straight
+ * after (`null` when that read failed too), so the person is never told only "Saved. Refreshing".
+ */
+export type EnableEventsOutcome =
+  | Exclude<WriteOutcome<EnableEventsResult>, { kind: 'uncertain' }>
+  | (Extract<WriteOutcome<EnableEventsResult>, { kind: 'uncertain' }> & { message: string; status: EventsStatusResult | null });
+
+/**
+ * How the one-time project update ended. Like any write, except that an `uncertain` answer keeps the service's own words: the update
+ * may still be running, or ran and only reading it back failed (`saved`). The project is being read again; it is never sent again by itself.
+ */
+export type UpdateProjectOutcome =
+  | Exclude<WriteOutcome<MigrateSchemaResult>, { kind: 'uncertain' }>
+  | (Extract<WriteOutcome<MigrateSchemaResult>, { kind: 'uncertain' }> & { message: string });
+
+/**
  * Unsaved text, kept in the store so it outlives the part of the screen that holds it (the detail goes away while the
  * project cannot be used, for example). A text editor's also keeps what it started from: the text and the bead's time.
  */
+/** A kept draft. The close comment (`closeComment`) reuses `base` for a count of comments and `original` for a time, both as text. */
 export type Draft = { text: string; original?: string; base?: string };
 
 export type LinkChange = { op: 'add'; from: string; to: string; kind: string } | { op: 'remove'; from: string; to: string };
@@ -72,7 +108,23 @@ export type State = {
   workspace: WorkspaceState | null;
   /** The last full answer, with freshness and sync from later `unchanged` answers merged in. */
   snapshot: FullSnapshot | null;
+  /** From the last full answer; both off, and no gates or leases, until there is one. */
+  capabilities: Capabilities;
+  gates: Gate[];
+  leases: Lease[];
+  /** Features the installed Beads answered `unsupported` for this visit; their entry points are hidden. */
+  unsupported: Set<string>;
+  /**
+   * Projects whose update Beads refused because they are shared with the team (`update-blocked-shared`), by directory, with the service's
+   * words. Kept across a project switch and a remount, so no button to try again comes back; dropped when the project reads normally.
+   */
+  sharedUpdates: Record<string, { message: string; detail?: string }>;
+  settings: ProjectSettings;
+  /** Stuck rows kept away: bead id to the time (ms) the row may show again. Per project. */
+  keep: Record<string, number>;
   view: View;
+  /** The page in place of the views. Not persisted. */
+  page: Page;
   filters: Filters;
   /** Collapsed group keys, for example `epic:<id>` or `status:closed`. */
   collapsed: string[];
@@ -122,6 +174,13 @@ export type Store = {
   retry(): void;
   confirmFirstContact(): Promise<void>;
   setView(view: View): void;
+  setPage(page: Page): void;
+  /** Notes that the installed Beads cannot do `feature`: its entry points hide. */
+  markUnsupported(feature: Feature): void;
+  /** Hides a Stuck row for a week. Nothing is written to Beads. */
+  keepStuck(id: string): void;
+  /** The Stuck threshold in whole days (at least 1). */
+  setStaleDays(days: number): void;
   setFilters(filters: Filters): void;
   toggleCollapsed(key: string): void;
   setQuery(query: string): void;
@@ -150,6 +209,32 @@ export type Store = {
   update(id: string, expectedUpdatedAt: string, patch: BeadPatch, expected?: ExpectedFields): Promise<WriteOutcome<Bead>>;
   /** Makes a bead and opens it. */
   create(input: NewBead): Promise<WriteOutcome<Bead>>;
+  /** Snoozes a bead until `until` (as typed; null: until someone brings it back). */
+  defer(id: string, expectedUpdatedAt: string, until: string | null, reason?: string): Promise<WriteOutcome<Bead>>;
+  undefer(id: string, expectedUpdatedAt: string): Promise<WriteOutcome<Bead>>;
+  supersede(id: string, withId: string, expectedUpdatedAt: string): Promise<WriteOutcome<Bead>>;
+  duplicate(id: string, of: string, expectedUpdatedAt: string): Promise<WriteOutcome<Bead>>;
+  /** Asks for a review of a bead. `already-open` comes back as a value, with the review that is already waiting. */
+  requestReview(id: string, reason?: string): Promise<WriteOutcome<GateCreateResult>>;
+  resolveReview(gateId: string, reason?: string): Promise<WriteOutcome<GateResolveResult>>;
+  /** Answers a help request (closes it with the answer as a comment). `not-open` comes back as a value. */
+  respond(id: string, response: string): Promise<WriteOutcome<HumanResult>>;
+  dismissRequest(id: string, reason?: string): Promise<WriteOutcome<HumanResult>>;
+  remember(request: Omit<RememberRequest, 'directory'>): Promise<WriteOutcome<MemoryWriteResult>>;
+  forget(key: string, expectedText: string): Promise<WriteOutcome<MemoryWriteResult>>;
+  enableEvents(): Promise<EnableEventsOutcome>;
+  /**
+   * Updates a project made with an older Beads (`freshness.schemaUpdate`) to the format the installed Beads reads. Only from the
+   * confirm that says what it does; on success the project is read again, workspace included, so the list and sync come back.
+   */
+  updateProject(): Promise<UpdateProjectOutcome>;
+  /** Reads the project again, workspace included, and resolves when that read has answered. */
+  checkProject(): Promise<void>;
+  /** Reads, for the screens that load on demand. `unsupported` hides the feature as a side effect. */
+  readHistory(request: Omit<HistoryRequest, 'directory'>): Promise<ReadOutcome<HistoryResult>>;
+  readMemories(query?: string): Promise<ReadOutcome<MemoriesResult>>;
+  readExplain(id: string): Promise<ReadOutcome<ExplainResult>>;
+  readEventsStatus(): Promise<ReadOutcome<EventsStatusResult>>;
   comment(id: string, text: string): Promise<WriteOutcome<Comment>>;
   /** Adds or removes a link (`from` depends on `to`). */
   link(change: LinkChange): Promise<WriteOutcome<null>>;
@@ -178,6 +263,8 @@ export type Store = {
   setDraft(id: string, field: string, draft: Draft | null): void;
   /** Lets go of every draft of a bead in the shown project. */
   dropDrafts(id: string): void;
+  /** The fields with a draft kept for `id` in the shown project. */
+  draftFields(id: string): string[];
   /**
    * A sync job was asked for: shows the state the service answered at once (null when the answer was lost) and reads
    * the project again. Polls already on their way are dropped, so none from before the job can paint over it.
@@ -187,6 +274,8 @@ export type Store = {
 };
 
 export const POLL_MS = 2_000;
+/** Poll interval while the panel is visible and the service's events follower is running. The service answers from held state. */
+export const LIVE_POLL_MS = 500;
 export const MAX_BACKOFF_MS = 30_000;
 /** Poll interval while the panel is closed in the rail but the window is up: enough to keep the badge honest. */
 export const HIDDEN_POLL_MS = 60_000;
@@ -204,17 +293,34 @@ function fnv(text: string, seed: number): string {
 /** Storage key for a project's UI state. Storage is per extension, not per project, so the key carries a digest of the directory. */
 export const uiKey = (directory: string): string => `ui:${fnv(directory, 0x811c9dc5)}${fnv(directory, 0x01000193)}`;
 
+/** Storage key for a project's settings and kept rows, beside its UI state. */
+export const projectKey = (directory: string): string => `project:${fnv(directory, 0x811c9dc5)}${fnv(directory, 0x01000193)}`;
+
+const DEFAULT_SETTINGS: ProjectSettings = { staleDays: DEFAULT_STALE_DAYS };
+const NO_CAPABILITIES: Capabilities = { eventsJournal: false, leases: false };
+export const MAX_STALE_DAYS = 30;
+
+/** Stored settings and kept rows, or the defaults for anything missing or not understood. Kept rows already over are let go. */
+function readProject(value: unknown, now: number): { settings: ProjectSettings; keep: Record<string, number> } {
+  const v = isObject(value) ? value : {};
+  const days = v.staleDays;
+  const keep: Record<string, number> = {};
+  if (isObject(v.keep)) for (const [id, until] of Object.entries(v.keep)) if (typeof until === 'number' && Number.isFinite(until) && until > now) keep[id] = until;
+  return { settings: { staleDays: typeof days === 'number' && Number.isInteger(days) && days >= 1 && days <= MAX_STALE_DAYS ? days : DEFAULT_SETTINGS.staleDays }, keep };
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every((v) => typeof v === 'string');
 
 function readFilters(value: unknown): Filters {
   if (!isObject(value)) return DEFAULT_FILTERS;
-  const { status, assignee, priorities, ready } = value;
+  const { status, assignee, priorities, ready, due } = value;
   return {
     status: status === 'open' || status === 'all' ? status : isObject(status) && isStrings(status.only) ? { only: status.only } : 'open',
     assignee: assignee === 'any' || assignee === 'unassigned' ? assignee : isObject(assignee) && typeof assignee.name === 'string' ? { name: assignee.name } : 'any',
     priorities: Array.isArray(priorities) ? priorities.filter((p): p is number => Number.isInteger(p) && p >= 0 && p <= 4) : [],
     ready: ready === true,
+    due: due === 'overdue' || due === 'week' ? due : 'any',
   };
 }
 
@@ -279,7 +385,15 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
     generation: 0,
     workspace: null,
     snapshot: null,
+    capabilities: NO_CAPABILITIES,
+    gates: [],
+    leases: [],
+    unsupported: new Set(),
+    sharedUpdates: {},
+    settings: DEFAULT_SETTINGS,
+    keep: {},
     view: 'epic',
+    page: 'list',
     filters: DEFAULT_FILTERS,
     collapsed: [...DEFAULT_COLLAPSED],
     query: '',
@@ -297,8 +411,21 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
   /** Each poll gets a number; only the newest one's answer is applied. */
   let latest = 0;
   let failures = 0;
+  /** The service's last answer said the events follower is running: changes reach it at once, so asking often is cheap and useful. */
+  let following = false;
   /** The user changed UI state before the stored state for this directory loaded: keep theirs. */
   let touched = false;
+  /** Same for the project's settings and kept rows. */
+  let projectTouched = false;
+  /** The stored state for this directory has been read (or could not be), so the opening view may be decided. */
+  let storedLoaded = false;
+  /** The opening view for this directory has been decided (once per open). */
+  let viewDecided = false;
+  /**
+   * While Needs me is showing because it opened by itself, the person's own last view: that one is saved, not Needs me, until they
+   * pick a view themselves. Null otherwise.
+   */
+  let chosenView: View | null = null;
   let disposed = false;
   /** The newest poll has not answered yet. A Retry may still overtake it; becoming visible does not. */
   let inFlight = false;
@@ -347,6 +474,19 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
     else if (!visibility.isDocumentHidden?.()) timer = setTimeout(() => void poll(), Math.max(ms, HIDDEN_POLL_MS));
   };
 
+  /** The update was refused for a shared project: keep that for the directory (see `State.sharedUpdates`). A project that reads normally forgets it. */
+  function rememberShared(directory: string, freshness: Freshness): void {
+    const job = freshness.schemaUpdateJob;
+    if (job?.kind === 'failed' && job.code === 'update-blocked-shared') {
+      const kept = state.sharedUpdates[directory];
+      if (kept?.message === job.message && kept.detail === job.detail) return;
+      set({ sharedUpdates: { ...state.sharedUpdates, [directory]: { message: job.message, ...(job.detail ? { detail: job.detail } : {}) } } });
+    } else if (!freshness.schemaUpdate && directory in state.sharedUpdates) {
+      const { [directory]: _gone, ...rest } = state.sharedUpdates;
+      set({ sharedUpdates: rest });
+    }
+  }
+
   async function poll(refreshWorkspace = false): Promise<void> {
     clearTimer();
     const { directory, generation } = state;
@@ -363,16 +503,26 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       const answer = await client.snapshot({ directory, ...(cursor ? { cursor } : {}), ...(refreshWorkspace ? { refreshWorkspace: true } : {}) });
       if (!current()) return;
       failures = 0;
+      following = answer.following === true;
+      rememberShared(directory, answer.freshness);
       if (!answer.unchanged) {
         listedBeads = answer.beads;
-        set({ snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) }, workspace: answer.workspace, error: null });
+        set({
+          snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) },
+          capabilities: answer.capabilities ?? NO_CAPABILITIES,
+          gates: answer.gates ?? [],
+          leases: answer.leases ?? [],
+          workspace: answer.workspace,
+          error: null,
+        });
+        decideView();
         followDetail();
       } else if (state.snapshot) {
         const held = answered.size;
         const beads = holding(listedBeads, answer.freshness);
         set({ snapshot: { ...state.snapshot, cursor: answer.cursor, freshness: answer.freshness, sync: answer.sync, ...(answered.size !== held ? { beads } : {}) }, error: null });
       }
-      schedule(POLL_MS);
+      schedule(following ? LIVE_POLL_MS : POLL_MS);
     } catch (thrown) {
       if (!current()) return;
       const error = asRequestError(thrown);
@@ -384,6 +534,27 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       set({ error: toPanelError(error) });
       schedule(Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));
     }
+  }
+
+  // ----------------------------------------------------------------------------------------------- opening view
+
+  /**
+   * Once per open, when both the stored state and the first full answer are in: Needs me opens when it has something, else
+   * the last used view stays. A view the person picked before that is theirs. Not saved, so "last used" stays what they chose.
+   */
+  function decideView() {
+    if (viewDecided || !storedLoaded || state.snapshot === null || state.workspace?.kind !== 'ok') return;
+    viewDecided = true;
+    if (touched) return;
+    if (needsOf(state, now()).count > 0 && state.view !== 'needs') {
+      chosenView = state.view;
+      set({ view: 'needs' });
+    }
+  }
+
+  function markUnsupported(feature: string) {
+    if (state.unsupported.has(feature)) return;
+    set({ unsupported: new Set([...state.unsupported, feature]) });
   }
 
   // ----------------------------------------------------------------------------------------------- written beads
@@ -546,8 +717,10 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
     if (readBead && state.detail) void loadDetail();
   }
 
-  function refused(thrown: unknown): WriteOutcome<never> {
+  function refused(thrown: unknown, feature?: Feature): WriteOutcome<never> {
     const error = asRequestError(thrown);
+    // The installed Beads is too old for it: hide the entry points, and say so plainly.
+    if (error.code === 'unsupported' && feature) markUnsupported(feature);
     // A write whose answer was lost on the way back (the host gave up, the helper stopped) may still have gone in.
     if (error.code === 'uncertain' || ANSWER_LOST.has(error.code)) {
       refreshAfterWrite(true);
@@ -561,7 +734,7 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
   }
 
   /** One write for the shown project. Its answer is dropped when the project changed while it ran. */
-  async function writing<T, R>(send: (directory: string) => Promise<R>, done: (answer: R) => WriteOutcome<T>): Promise<WriteOutcome<T>> {
+  async function writing<T, R>(send: (directory: string) => Promise<R>, done: (answer: R) => WriteOutcome<T>, feature?: Feature): Promise<WriteOutcome<T>> {
     const { directory, generation } = state;
     if (directory === null || disposed) return { kind: 'dropped' };
     const here = () => generation === state.generation && !disposed;
@@ -569,8 +742,52 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       const answer = await send(directory);
       return here() ? done(answer) : { kind: 'dropped' };
     } catch (thrown) {
-      return here() ? refused(thrown) : { kind: 'dropped' };
+      return here() ? refused(thrown, feature) : { kind: 'dropped' };
     }
+  }
+
+  /** One read for the shown project, answered like a write: dropped when the project changed, `unsupported` hides the feature. */
+  async function reading<R>(send: (directory: string) => Promise<R>, feature: Feature): Promise<ReadOutcome<R>> {
+    const { directory, generation } = state;
+    if (directory === null || disposed) return { kind: 'dropped' };
+    const here = () => generation === state.generation && !disposed;
+    try {
+      const value = await send(directory);
+      return here() ? { kind: 'ok', value } : { kind: 'dropped' };
+    } catch (thrown) {
+      if (!here()) return { kind: 'dropped' };
+      const error = asRequestError(thrown);
+      if (error.code === 'unsupported') markUnsupported(feature);
+      return { kind: 'error', error: toPanelError(error) };
+    }
+  }
+
+  /** What answering or dismissing a help request answered: the closed bead shows at once; `not-open` is a value for the row to word. */
+  function humanDone(result: HumanResult): WriteOutcome<HumanResult> {
+    if (result.ok) applyWritten(result.bead);
+    else if (result.current) applyWritten(result.current);
+    void poll();
+    return { kind: 'ok', value: result };
+  }
+
+  /** What a write of a whole bead (update, snooze, supersede, duplicate) answered, shown at once. */
+  function writtenBead(result: WriteResult): WriteOutcome<Bead> {
+    if (result.ok) {
+      applyWritten(result.bead);
+      void poll();
+      // In, but the panel could not note it as its own, so it may show as someone else's change.
+      if (result.detail) {
+        host.toast({ kind: 'info', message: 'Saved. It may show as a change from someone else.', copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {});
+      }
+      return { kind: 'ok', value: result.bead };
+    }
+    if ('conflict' in result) {
+      applyWritten(result.current);
+      return { kind: 'conflict', current: result.current };
+    }
+    if (result.current) applyWritten(result.current);
+    refreshAfterWrite(result.current === null);
+    return { kind: 'uncertain', current: result.current, saved: result.saved === true };
   }
 
   /** The freshest copy of a bead the panel holds: the detail's read one or the list's. */
@@ -580,8 +797,15 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
     const { directory, view, filters, collapsed } = state;
     if (directory === null) return;
     touched = true;
-    const value = { view, filters, collapsed } as unknown as JsonValue;
+    const value = { view: chosenView ?? view, filters, collapsed } as unknown as JsonValue;
     host.storage.set(uiKey(directory), value).catch(() => {});
+  };
+
+  const persistProject = () => {
+    const { directory, settings, keep } = state;
+    if (directory === null) return;
+    projectTouched = true;
+    host.storage.set(projectKey(directory), { staleDays: settings.staleDays, keep } as unknown as JsonValue).catch(() => {});
   };
 
   const stopVisibility = visibility.onChange(() => {
@@ -615,12 +839,24 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       bannered.clear();
       answered.clear();
       listedBeads = [];
+      projectTouched = false;
+      storedLoaded = false;
+      viewDecided = false;
+      chosenView = null;
       const generation = state.generation + 1;
       set({
         directory,
         generation,
         workspace: null,
         snapshot: null,
+        capabilities: NO_CAPABILITIES,
+        gates: [],
+        leases: [],
+        unsupported: new Set(),
+        // A different project never sees this one's kept rows or threshold, not even while its own load is in flight.
+        settings: DEFAULT_SETTINGS,
+        keep: {},
+        page: 'list',
         error: null,
         selectedId: null,
         detail: null,
@@ -632,12 +868,18 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
         ...readUi(undefined),
       });
       if (directory === null) return;
-      host.storage
-        .get(uiKey(directory))
-        .then((stored) => {
-          if (!disposed && generation === state.generation && !touched && stored !== undefined) set(readUi(stored));
-        })
-        .catch(() => {});
+      const load = (key: string) => host.storage.get(key).catch(() => undefined);
+      void Promise.all([load(uiKey(directory)), load(projectKey(directory))]).then(([ui, project]) => {
+        if (disposed || generation !== state.generation) return;
+        if (!touched && ui !== undefined) set(readUi(ui));
+        if (project !== undefined) {
+          const read = readProject(project, now());
+          // Kept since the open stays kept; a threshold set since the open stays the person's.
+          set({ keep: { ...read.keep, ...state.keep }, settings: projectTouched ? state.settings : read.settings });
+        }
+        storedLoaded = true;
+        decideView();
+      });
       void poll();
     },
     retry() {
@@ -668,8 +910,23 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       }
     },
     setView(view) {
+      chosenView = null;
       set({ view });
       persist();
+    },
+    setPage(page) {
+      if (page !== state.page) set({ page });
+    },
+    markUnsupported,
+    keepStuck(id) {
+      set({ keep: { ...state.keep, [id]: now() + KEEP_MS } });
+      persistProject();
+    },
+    setStaleDays(days) {
+      const staleDays = Math.min(MAX_STALE_DAYS, Math.max(1, Math.round(days)));
+      if (!Number.isFinite(staleDays) || staleDays === state.settings.staleDays) return;
+      set({ settings: { ...state.settings, staleDays } });
+      persistProject();
     },
     setFilters(filters) {
       set({ filters });
@@ -724,6 +981,10 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
       const prefix = draftKey(id, '');
       for (const key of [...drafts.keys()]) if (key.startsWith(prefix)) drafts.delete(key);
     },
+    draftFields(id) {
+      const prefix = draftKey(id, '');
+      return [...drafts.keys()].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    },
     reloadDetail() {
       void loadDetail();
     },
@@ -766,27 +1027,113 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
         .catch(() => {});
     },
     update(id, expectedUpdatedAt, patch, expected) {
+      return writing((directory) => client.update({ directory, id, expectedUpdatedAt, patch, ...(expected ? { expected } : {}) }), writtenBead);
+    },
+    defer(id, expectedUpdatedAt, until, reason) {
+      return writing((directory) => client.deferBead({ directory, id, expectedUpdatedAt, until, ...(reason ? { reason } : {}) }), writtenBead, 'defer');
+    },
+    undefer(id, expectedUpdatedAt) {
+      return writing((directory) => client.undeferBead({ directory, id, expectedUpdatedAt }), writtenBead, 'defer');
+    },
+    supersede(id, withId, expectedUpdatedAt) {
+      return writing((directory) => client.supersede({ directory, id, with: withId, expectedUpdatedAt }), writtenBead, 'supersede');
+    },
+    duplicate(id, of, expectedUpdatedAt) {
+      return writing((directory) => client.duplicate({ directory, id, of, expectedUpdatedAt }), writtenBead, 'supersede');
+    },
+    requestReview(id, reason) {
       return writing(
-        (directory) => client.update({ directory, id, expectedUpdatedAt, patch, ...(expected ? { expected } : {}) }),
-        (result): WriteOutcome<Bead> => {
-          if (result.ok) {
-            applyWritten(result.bead);
-            void poll();
-            // In, but the panel could not note it as its own, so it may show as someone else's change.
-            if (result.detail) {
-              host.toast({ kind: 'info', message: 'Saved. It may show as a change from someone else.', copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {});
-            }
-            return { kind: 'ok', value: result.bead };
-          }
-          if ('conflict' in result) {
-            applyWritten(result.current);
-            return { kind: 'conflict', current: result.current };
-          }
-          if (result.current) applyWritten(result.current);
-          refreshAfterWrite(result.current === null);
-          return { kind: 'uncertain', current: result.current, saved: result.saved === true };
+        (directory) => client.gateCreate({ directory, id, ...(reason ? { reason } : {}) }),
+        (value): WriteOutcome<GateCreateResult> => {
+          void poll();
+          return { kind: 'ok', value };
         },
+        'gates',
       );
+    },
+    resolveReview(gateId, reason) {
+      return writing(
+        (directory) => client.gateResolve({ directory, gateId, ...(reason ? { reason } : {}) }),
+        (value): WriteOutcome<GateResolveResult> => {
+          void poll();
+          return { kind: 'ok', value };
+        },
+        'gates',
+      );
+    },
+    respond(id, response) {
+      return writing((directory) => client.humanRespond({ directory, id, response }), humanDone, 'human');
+    },
+    dismissRequest(id, reason) {
+      return writing((directory) => client.humanDismiss({ directory, id, ...(reason ? { reason } : {}) }), humanDone, 'human');
+    },
+    remember(request) {
+      return writing((directory) => client.memoryRemember({ directory, ...request }), (value): WriteOutcome<MemoryWriteResult> => ({ kind: 'ok', value }), 'memories');
+    },
+    forget(key, expectedText) {
+      return writing((directory) => client.memoryForget({ directory, key, expectedText }), (value): WriteOutcome<MemoryWriteResult> => ({ kind: 'ok', value }), 'memories');
+    },
+    async enableEvents() {
+      let message = '';
+      const outcome = await writing(
+        async (directory) => {
+          try {
+            return await client.enableEvents({ directory, confirm: true });
+          } catch (thrown) {
+            message = asRequestError(thrown).message;
+            throw thrown;
+          }
+        },
+        (value): WriteOutcome<EnableEventsResult> => {
+          // The follower starts on the service's side; the next full answer carries the new capabilities.
+          void poll();
+          return { kind: 'ok', value };
+        },
+        'events',
+      );
+      if (outcome.kind !== 'uncertain') return outcome;
+      // The setting may or may not be in: read what the project says now, and keep the service's words.
+      const read = await reading((directory) => client.eventsStatus({ directory }), 'events');
+      // The project changed during that read: nothing here is about the shown project any more.
+      if (read.kind === 'dropped') return read;
+      return { ...outcome, message, status: read.kind === 'ok' ? read.value : null };
+    },
+    async updateProject() {
+      let message = '';
+      const outcome = await writing(
+        async (directory) => {
+          try {
+            return await client.migrateSchema({ directory, confirm: true });
+          } catch (thrown) {
+            message = asRequestError(thrown).message;
+            throw thrown;
+          }
+        },
+        (value): WriteOutcome<MigrateSchemaResult> => ({ kind: 'ok', value }),
+      );
+      // The update runs as a job on the service's side: `ok` means it started. Read the project now, so the job (running, or already
+      // ended) is in the snapshot when this returns; the workspace is detected again, which brings sync back once it has finished.
+      if (outcome.kind === 'ok') {
+        failures = 0;
+        await poll(true);
+      }
+      return outcome.kind === 'uncertain' ? { ...outcome, message } : outcome;
+    },
+    checkProject() {
+      failures = 0;
+      return poll(true);
+    },
+    readHistory(request) {
+      return reading((directory) => client.history({ directory, ...request }), 'history');
+    },
+    readMemories(query) {
+      return reading((directory) => client.memories({ directory, ...(query ? { query } : {}) }), 'memories');
+    },
+    readExplain(id) {
+      return reading((directory) => client.explain({ directory, id }), 'explain');
+    },
+    readEventsStatus() {
+      return reading((directory) => client.eventsStatus({ directory }), 'events');
     },
     create(input) {
       return writing(
@@ -867,6 +1214,9 @@ export function firstLoadError(state: State): PanelError | null {
   if (f.localRefreshedAt !== null || f.localError === null) return null;
   return { code: 'local', message: f.localError, ...(f.localErrorDetail ? { detail: f.localErrorDetail } : {}) };
 }
+
+/** The usable project was made with an older Beads and cannot be read until the person updates it (`freshness.schemaUpdate`). */
+export const needsUpdate = (state: State): boolean => state.snapshot?.workspace.kind === 'ok' && !!state.snapshot.freshness.schemaUpdate;
 
 export const StoreContext = createContext<Store | null>(null);
 

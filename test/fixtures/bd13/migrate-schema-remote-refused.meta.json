@@ -1,0 +1,1 @@
+{"cmd": "bd --actor X migrate schema (embedded store on schema v32 with a file:// dolt remote, bd 1.3.1; stdout empty, store unchanged afterwards)", "cwd_label": "scratch copy of the pre-1.3 test backup plus `dolt remote add origin file://...`", "exit": 1}

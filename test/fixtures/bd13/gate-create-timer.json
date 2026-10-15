@@ -1,0 +1,15 @@
+{
+  "await_type": "timer",
+  "created_at": "2026-10-15T05:36:40.651872Z",
+  "created_by": "Tester (panel)",
+  "description": "Ad-hoc gate blocking pl-2n0",
+  "id": "pl-9mg",
+  "issue_type": "gate",
+  "owner": "user@example.com",
+  "priority": 2,
+  "schema_version": 1,
+  "status": "open",
+  "timeout": 7200000000000,
+  "title": "Gate: timer",
+  "updated_at": "2026-10-15T05:36:40.651872Z"
+}

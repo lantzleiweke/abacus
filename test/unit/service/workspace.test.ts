@@ -384,6 +384,22 @@ describe('ok', () => {
     expect(await detect(root)).toMatchObject({ kind: 'ok', hasRemote: false });
   });
 
+  it('an older-schema store refuses the remote lookup: the project is still ok, with no remote known until it is updated', async () => {
+    const path = join(bin, 'bd');
+    await writeFile(
+      path,
+      `#!/bin/sh
+case "$*" in
+  "--version") echo "bd version 1.3.1 (Homebrew)" ;;
+  *) echo "Error: failed to open database: schema version mismatch: database is at v32, binary expects v66, and the read-only open cannot migrate it; run any bd write command in that workspace to migrate, or set BD_IGNORE_SCHEMA_SKEW=1 to read anyway (queries touching newer schema may fail)" >&2; exit 1 ;;
+esac
+`,
+    );
+    await chmod(path, 0o755);
+    const root = await project('old-store', { localVersion: '1.3.1' });
+    expect(await detect(root)).toEqual({ kind: 'ok', root, mode: 'embedded', bdVersion: '1.3.1', hasRemote: false, projectName: 'old-store' });
+  });
+
   it('finds the workspace from a folder inside the project', async () => {
     await fakeBd('1.2.2');
     const root = await project('p', { localVersion: '1.2.2' });

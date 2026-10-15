@@ -1,0 +1,15 @@
+[
+  {
+    "id": "pl-mcj",
+    "title": "Deferrable",
+    "notes": "waiting",
+    "status": "deferred",
+    "priority": 3,
+    "issue_type": "task",
+    "owner": "user@example.com",
+    "created_at": "2026-10-15T05:38:07Z",
+    "created_by": "Tester (panel)",
+    "updated_at": "2026-10-15T05:38:07Z",
+    "defer_until": "2026-10-20T05:38:07Z"
+  }
+]

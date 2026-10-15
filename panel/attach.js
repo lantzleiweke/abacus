@@ -2201,6 +2201,22 @@ ${GUEST_UI_LOOK_CSS}`;
       create: call("create"),
       comment: call("comment"),
       dependency: call("dependency"),
+      gateCreate: call("gateCreate"),
+      gateResolve: call("gateResolve"),
+      humanRespond: call("humanRespond"),
+      humanDismiss: call("humanDismiss"),
+      history: call("history"),
+      memories: call("memories"),
+      memoryRemember: call("memoryRemember"),
+      memoryForget: call("memoryForget"),
+      deferBead: call("deferBead"),
+      undeferBead: call("undeferBead"),
+      supersede: call("supersede"),
+      duplicate: call("duplicate"),
+      explain: call("explain"),
+      eventsStatus: call("eventsStatus"),
+      enableEvents: call("enableEvents"),
+      migrateSchema: call("migrateSchema"),
       seen: call("seen"),
       context: call("context"),
       syncPreview: call("sync-preview"),
@@ -2211,6 +2227,18 @@ ${GUEST_UI_LOOK_CSS}`;
   }
 
   // src/panel/format.ts
+  function ago(ms) {
+    const s3 = Math.floor(Math.max(0, ms) / 1e3);
+    if (s3 < 5) return "just now";
+    if (s3 < 60) return `${s3}s ago`;
+    const m3 = Math.floor(s3 / 60);
+    if (m3 < 60) return `${m3}m ago`;
+    const h4 = Math.floor(m3 / 60);
+    if (h4 < 24) return `${h4}h ago`;
+    const d3 = Math.floor(h4 / 24);
+    if (d3 < 7) return `${d3}d ago`;
+    return `${Math.floor(d3 / 7)}w ago`;
+  }
   function shortAgo(ms) {
     const m3 = Math.floor(Math.max(0, ms) / 6e4);
     if (m3 < 1) return "now";
@@ -2221,11 +2249,24 @@ ${GUEST_UI_LOOK_CSS}`;
     if (d3 < 7) return `${d3}d`;
     return `${Math.floor(d3 / 7)}w`;
   }
+  var DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+  function recordedDate(text2) {
+    const m3 = DATE_ONLY.exec(text2);
+    if (m3) return new Date(Number(m3[1]), Number(m3[2]) - 1, Number(m3[3]));
+    const t3 = Date.parse(text2);
+    return Number.isFinite(t3) ? new Date(t3) : null;
+  }
   var utc = (options) => new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" });
   var MONTH_DAY = utc({ month: "short", day: "numeric" });
   var MONTH_DAY_YEAR = utc({ month: "short", day: "numeric", year: "numeric" });
   var TIME = utc({ hour: "numeric", minute: "2-digit" });
   var FULL = utc({ month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  var wallClock = (d3) => Date.UTC(d3.getFullYear(), d3.getMonth(), d3.getDate(), d3.getHours(), d3.getMinutes());
+  var dayText = (date, now) => (date.getFullYear() === new Date(now).getFullYear() ? MONTH_DAY : MONTH_DAY_YEAR).format(wallClock(date));
+  var timeText = (date) => TIME.format(wallClock(date));
+
+  // src/shared/gates.ts
+  var PLAN_APPROVAL_REASON = "Approve the plan before work starts";
 
   // src/panel/list.ts
   var BUILT_IN = /* @__PURE__ */ new Map([
@@ -2274,6 +2315,18 @@ ${GUEST_UI_LOOK_CSS}`;
     const dash = base.lastIndexOf("-");
     return dash > 0 && dash < base.length - 1 ? id.slice(dash + 1) : id;
   }
+  function compareIds(a5, b2) {
+    const pa = a5.split(".");
+    const pb = b2.split(".");
+    for (let i3 = 0; i3 < Math.min(pa.length, pb.length); i3++) {
+      if (pa[i3] === pb[i3]) continue;
+      const na = Number(pa[i3]);
+      const nb = Number(pb[i3]);
+      if (pa[i3] !== "" && pb[i3] !== "" && Number.isInteger(na) && Number.isInteger(nb)) return na - nb;
+      return pa[i3] < pb[i3] ? -1 : 1;
+    }
+    return pa.length - pb.length;
+  }
   var WEEK_MS = 7 * 864e5;
   function nearestEpic(b2, byId) {
     let parent = b2.parentId ? byId.get(b2.parentId) : void 0;
@@ -2284,9 +2337,124 @@ ${GUEST_UI_LOOK_CSS}`;
     return null;
   }
 
+  // src/panel/gates.ts
+  function familyOf(kind, reason) {
+    if (kind === "human") return reason?.startsWith(PLAN_APPROVAL_REASON) ? "plan" : "review";
+    if (kind === "timer") return "timer";
+    if (kind === "gh:run" || kind === "gh:pr") return "github";
+    return "other";
+  }
+  var GATE_EVENTS = {
+    review: { requested: "Review requested", resolved: "Review resolved", deleted: "Review deleted", unlinked: "Review removed from this bead" },
+    plan: { requested: "Plan approval requested", resolved: "Plan approved", deleted: "Plan approval deleted", unlinked: "Plan approval removed from this bead" },
+    timer: { requested: "Timer set", resolved: "Timer ended", deleted: "Timer deleted", unlinked: "Timer removed from this bead" },
+    github: { requested: "GitHub check added", resolved: "GitHub check cleared", deleted: "GitHub check deleted", unlinked: "GitHub check removed from this bead" },
+    other: { requested: "Check added", resolved: "Check cleared", deleted: "Check deleted", unlinked: "Check removed from this bead" }
+  };
+  function gateEventWords(e3) {
+    const family = familyOf(e3.gateKind, e3.reason);
+    const head = GATE_EVENTS[family][e3.what];
+    if (e3.what !== "resolved" || e3.byPanel) return { head, by: null };
+    const people = family === "review" || family === "plan";
+    return { head, by: e3.actor ?? (people ? "someone else" : null) };
+  }
+  var gateEventOf = (e3) => ({
+    what: e3.kind === "gate_opened" ? "requested" : e3.ended ?? "resolved",
+    gateKind: e3.gateKind,
+    reason: e3.reason,
+    byPanel: e3.byPanel,
+    actor: e3.actor
+  });
+
   // src/panel/detail.ts
+  var DAY_MS = 864e5;
+  var SKEW_MS = 12e4;
+  function when(text2, now) {
+    const at2 = Date.parse(text2);
+    if (!Number.isFinite(at2)) return text2;
+    if (at2 - now < SKEW_MS && now - at2 < DAY_MS) return ago(now - at2);
+    const date = new Date(at2);
+    return `${dayText(date, now)}, ${timeText(date)}`;
+  }
+  function recordedDay(text2, now) {
+    const date = recordedDate(text2);
+    return date ? dayText(date, now) : text2;
+  }
+  var changeActor = (e3) => e3.byPanel ? "you (panel)" : e3.actor ?? "unknown";
   function latestUnseenChange(id, activity) {
     return activity.find((e3) => e3.beadId === id && e3.unseen) ?? null;
+  }
+  function statusWord(status, statuses) {
+    const label = statusLabel(status, statuses);
+    return /^[A-Z][a-z]/.test(label) ? label[0].toLowerCase() + label.slice(1) : label;
+  }
+  var priorityText = (value) => typeof value === "number" ? `P${value}` : "none";
+  var nameText = (value) => typeof value === "string" && value ? value : "nobody";
+  var KINDS = {
+    blocks: { out: "Blocked by", in: "Blocks", tone: "blocked" },
+    related: { out: "Related", in: "Related" },
+    "relates-to": { out: "Related", in: "Related" },
+    "discovered-from": { out: "Discovered from", in: "Led to" },
+    tracks: { out: "Tracks", in: "Tracked by" },
+    "caused-by": { out: "Caused by", in: "Caused" },
+    validates: { out: "Validates", in: "Validated by" },
+    supersedes: { out: "Supersedes", in: "Superseded by" }
+  };
+  function kindLabel(kind, direction) {
+    const known = KINDS[kind];
+    if (known) return known[direction];
+    const name = humanize(kind || "link");
+    return direction === "out" ? name : `${name} (incoming)`;
+  }
+  function changeLine(e3, statuses, now) {
+    const at2 = e3.changedAt ?? e3.observedAt;
+    const time = e3.historical ? `on ${recordedDay(at2, now)}` : when(at2, now);
+    const by = `${time} by ${changeActor(e3)}`;
+    switch (e3.kind) {
+      case "created":
+        return { lead: `Created ${by}`, what: null };
+      case "closed":
+        return { lead: `Closed ${by}`, what: e3.reason ?? null };
+      case "reopened":
+        return { lead: `Reopened ${by}`, what: null, ...typeof e3.to === "string" ? { from: statusWord(String(e3.from ?? ""), statuses), to: statusWord(e3.to, statuses), toLook: looker(statuses)(e3.to) } : {} };
+      case "comment":
+        return { lead: `New comment ${by}`, what: null };
+      case "deleted":
+        return { lead: `Deleted ${by}`, what: null };
+      case "dep_added":
+        return { lead: `Link added ${by}`, what: `${kindLabel(e3.field ?? "", "out").toLowerCase()} ${String(e3.to ?? "")}`.trim() };
+      case "dep_removed":
+        return { lead: `Link removed ${by}`, what: `${kindLabel(e3.field ?? "", "out").toLowerCase()} ${String(e3.from ?? "")}`.trim() };
+      case "gate_opened":
+      case "gate_resolved": {
+        const { head, by: named } = gateEventWords(gateEventOf(e3));
+        const ended = e3.kind === "gate_resolved" && e3.ended === "deleted";
+        const who = named ?? (ended || !e3.actor && !e3.byPanel ? null : changeActor(e3));
+        const reason = e3.reason?.trim().split("\n")[0]?.trim();
+        return { lead: who ? `${head} ${time} by ${who}` : `${head} ${time}`, what: reason || null };
+      }
+      case "field":
+        break;
+    }
+    const lead = `Changed ${by}`;
+    switch (e3.field) {
+      case "status": {
+        const to = String(e3.to ?? "");
+        return { lead, what: null, from: statusWord(String(e3.from ?? ""), statuses), to: statusWord(to, statuses), toLook: looker(statuses)(to) };
+      }
+      case "priority":
+        return { lead, what: `priority ${priorityText(e3.from)} \u2192 ${priorityText(e3.to)}` };
+      case "assignee":
+        return { lead, what: `assignee ${nameText(e3.from)} \u2192 ${nameText(e3.to)}` };
+      case "closeReason":
+        return { lead, what: "close reason edited" };
+      default:
+        return { lead, what: e3.field ? `${humanize(e3.field).toLowerCase()} edited` : null };
+    }
+  }
+  function changeText(line) {
+    if (line.to !== void 0) return `${line.lead}: ${line.from} \u2192 ${line.to}`;
+    return line.what ? `${line.lead}: ${line.what}` : line.lead;
   }
   function newerBead(read, listed) {
     if (!read || !listed) return read ?? listed;
@@ -2368,11 +2536,137 @@ ${GUEST_UI_LOOK_CSS}`;
     return nearestEpic(shown, byId)?.id ?? null;
   }
 
+  // src/shared/close.ts
+  var CLOSED = "closed";
+  var PINNED = "pinned";
+  var notClosedChildren = (rows, id) => rows.filter((b2) => b2.parentId === id && b2.status !== CLOSED).map((b2) => b2.id);
+  function closeBlockers(rows, id) {
+    const byId = new Map(rows.map((b2) => [b2.id, b2]));
+    const live = (s3) => s3 !== void 0 && s3 !== CLOSED && s3 !== PINNED;
+    const holdsLiveChild = (target) => rows.some((b2) => b2.parentId === target && live(b2.status));
+    const directTargets = (bead) => (bead?.dependencies ?? []).filter((d3) => d3.kind === "blocks" || d3.kind === "conditional-blocks" || d3.kind === "waits-for").map((d3) => d3.to);
+    const blockedState = (bead, seen) => {
+      if (bead === void 0 || !live(bead.status) || seen.has(bead.id)) return false;
+      seen.add(bead.id);
+      const links = bead.dependencies;
+      return links.some((d3) => (d3.kind === "blocks" || d3.kind === "conditional-blocks") && live(byId.get(d3.to)?.status)) || links.some((d3) => d3.kind === "waits-for" && byId.has(d3.to) && holdsLiveChild(d3.to)) || bead.parentId !== null && blockedState(byId.get(bead.parentId), seen);
+    };
+    const request = byId.get(id);
+    const waitingOn = blockedState(request, /* @__PURE__ */ new Set()) ? directTargets(request).filter((to) => live(byId.get(to)?.status)) : [];
+    const blockers = [...waitingOn, ...notClosedChildren(rows, id)];
+    return blockers.filter((blocker, index) => blockers.indexOf(blocker) === index);
+  }
+
+  // src/panel/needs.ts
+  var KEEP_MS = WEEK_MS;
+  var DAY_MS2 = 864e5;
+  var DEFAULT_STALE_DAYS = 3;
+  var needsOf = (state, now) => needsSections({ snapshot: state.snapshot, staleDays: state.settings.staleDays, keep: state.keep }, now);
+  var EMPTY_NEEDS = { waiting: [], asked: [], stuck: [], changed: [], count: 0 };
+  var WAITING_FALLBACK = "Waiting for your review";
+  var timeOf = (iso) => {
+    const at2 = Date.parse(iso);
+    return Number.isFinite(at2) ? at2 : NaN;
+  };
+  function span(ms) {
+    const days = Math.floor(ms / DAY_MS2);
+    if (days >= 1) return days === 1 ? "1 day" : `${days} days`;
+    const hours = Math.floor(ms / 36e5);
+    if (hours >= 1) return hours === 1 ? "1 hour" : `${hours} hours`;
+    const minutes = Math.floor(ms / 6e4);
+    return minutes >= 1 ? minutes === 1 ? "1 minute" : `${minutes} minutes` : "a moment";
+  }
+  var askedText = (bead) => bead.description.trim() ? bead.description.trim() : bead.title;
+  function waiting(beads, gates, done) {
+    const byId = new Map(beads.map((b2) => [b2.id, b2]));
+    const held = /* @__PURE__ */ new Map();
+    for (const gate of gates) {
+      if (gate.kind !== "human") continue;
+      for (const id of gate.blocks) held.set(id, [...held.get(id) ?? [], gate]);
+    }
+    const rows = [];
+    for (const [id, own] of held) {
+      const bead = byId.get(id);
+      if (!bead || done(bead)) continue;
+      rows.push({ bead, gates: own, reason: own.find((g3) => g3.reason)?.reason ?? WAITING_FALLBACK });
+    }
+    return rows.sort((a5, b2) => compareIds(a5.bead.id, b2.bead.id));
+  }
+  function stuck(beads, leases, keep, staleDays, now, look) {
+    const expired = /* @__PURE__ */ new Map();
+    for (const lease of leases) {
+      const until = timeOf(lease.expiresAt);
+      if (until <= now) expired.set(lease.beadId, lease);
+    }
+    const rows = [];
+    for (const bead of beads) {
+      if (look(bead.status) === "done") continue;
+      if ((keep[bead.id] ?? 0) > now) continue;
+      const touched = timeOf(bead.updatedAt);
+      const quiet = bead.status === "in_progress" && Number.isFinite(touched) && now - touched > staleDays * DAY_MS2;
+      const lease = bead.status === "in_progress" ? expired.get(bead.id) : void 0;
+      if (!quiet && !lease) continue;
+      const parts = [];
+      if (quiet) parts.push(`No update in ${span(now - touched)}`);
+      if (lease) parts.push(`${lease.holder}'s claim ran out ${span(now - timeOf(lease.expiresAt))} ago`);
+      rows.push({ bead, why: parts.join(". "), kind: quiet ? "quiet" : "lease", at: Number.isFinite(touched) ? touched : 0 });
+    }
+    return rows.sort((a5, b2) => a5.at - b2.at || compareIds(a5.bead.id, b2.bead.id)).map(({ at: _at, ...row }) => row);
+  }
+  var gateRow = (g3) => ({
+    id: g3.id,
+    title: g3.reason ?? "Gate",
+    status: "open",
+    priority: 2,
+    type: "gate",
+    assignee: null,
+    labels: [],
+    parentId: null,
+    description: "",
+    design: "",
+    acceptance: "",
+    notes: "",
+    createdAt: g3.createdAt,
+    createdBy: g3.createdBy,
+    updatedAt: g3.createdAt,
+    closedAt: null,
+    closeReason: null,
+    dependencies: [],
+    comments: [],
+    extra: {}
+  });
+  function changed(snapshot, now) {
+    const byId = new Map(snapshot.beads.map((b2) => [b2.id, b2]));
+    const rows = [];
+    for (const id of snapshot.unseenIds) {
+      const bead = byId.get(id);
+      if (!bead) continue;
+      const event = latestUnseenChange(id, snapshot.activity);
+      const order = event ? snapshot.activity.indexOf(event) : Number.MAX_SAFE_INTEGER;
+      rows.push({ bead, event, summary: event ? changeText(changeLine(event, snapshot.statuses, now)) : "Changed since you last looked", order });
+    }
+    return rows.sort((a5, b2) => a5.order - b2.order).map(({ order: _order, ...row }) => row);
+  }
+  function needsSections(input, now) {
+    const { snapshot } = input;
+    if (!snapshot) return EMPTY_NEEDS;
+    const look = looker(snapshot.statuses);
+    const done = (b2) => look(b2.status) === "done";
+    const waitingRows = waiting(snapshot.beads, snapshot.gates, done);
+    const waitingIds = new Set(waitingRows.map((r3) => r3.bead.id));
+    const withGates = [...snapshot.beads, ...snapshot.gates.map(gateRow)];
+    const asked = snapshot.beads.filter((b2) => b2.labels.includes("human") && !done(b2) && !waitingIds.has(b2.id)).map((bead) => ({ bead, text: askedText(bead), blockers: closeBlockers(withGates, bead.id) }));
+    const stuckRows = stuck(snapshot.beads, snapshot.leases, input.keep, input.staleDays, now, look);
+    const changedRows = changed(snapshot, now);
+    return { waiting: waitingRows, asked, stuck: stuckRows, changed: changedRows, count: waitingRows.length + asked.length + stuckRows.length + changedRows.length };
+  }
+
   // src/panel/store.ts
-  var VIEWS = ["epic", "status", "activity"];
-  var DEFAULT_FILTERS = { status: "open", assignee: "any", priorities: [], ready: false };
+  var VIEWS = ["needs", "epic", "status", "activity"];
+  var DEFAULT_FILTERS = { status: "open", assignee: "any", priorities: [], ready: false, due: "any" };
   var DEFAULT_COLLAPSED = ["status:deferred", "status:closed"];
   var POLL_MS = 2e3;
+  var LIVE_POLL_MS = 500;
   var MAX_BACKOFF_MS = 3e4;
   var HIDDEN_POLL_MS = 6e4;
   function fnv(text2, seed) {
@@ -2384,16 +2678,30 @@ ${GUEST_UI_LOOK_CSS}`;
     return h4.toString(16).padStart(8, "0");
   }
   var uiKey = (directory) => `ui:${fnv(directory, 2166136261)}${fnv(directory, 16777619)}`;
+  var projectKey = (directory) => `project:${fnv(directory, 2166136261)}${fnv(directory, 16777619)}`;
+  var DEFAULT_SETTINGS = { staleDays: DEFAULT_STALE_DAYS };
+  var NO_CAPABILITIES = { eventsJournal: false, leases: false };
+  var MAX_STALE_DAYS = 30;
+  function readProject(value, now) {
+    const v5 = isObject2(value) ? value : {};
+    const days = v5.staleDays;
+    const keep = {};
+    if (isObject2(v5.keep)) {
+      for (const [id, until] of Object.entries(v5.keep)) if (typeof until === "number" && Number.isFinite(until) && until > now) keep[id] = until;
+    }
+    return { settings: { staleDays: typeof days === "number" && Number.isInteger(days) && days >= 1 && days <= MAX_STALE_DAYS ? days : DEFAULT_SETTINGS.staleDays }, keep };
+  }
   var isObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   var isStrings = (value) => Array.isArray(value) && value.every((v5) => typeof v5 === "string");
   function readFilters(value) {
     if (!isObject2(value)) return DEFAULT_FILTERS;
-    const { status, assignee, priorities, ready } = value;
+    const { status, assignee, priorities, ready, due } = value;
     return {
       status: status === "open" || status === "all" ? status : isObject2(status) && isStrings(status.only) ? { only: status.only } : "open",
       assignee: assignee === "any" || assignee === "unassigned" ? assignee : isObject2(assignee) && typeof assignee.name === "string" ? { name: assignee.name } : "any",
       priorities: Array.isArray(priorities) ? priorities.filter((p3) => Number.isInteger(p3) && p3 >= 0 && p3 <= 4) : [],
-      ready: ready === true
+      ready: ready === true,
+      due: due === "overdue" || due === "week" ? due : "any"
     };
   }
   function readUi(value) {
@@ -2443,7 +2751,15 @@ ${GUEST_UI_LOOK_CSS}`;
       generation: 0,
       workspace: null,
       snapshot: null,
+      capabilities: NO_CAPABILITIES,
+      gates: [],
+      leases: [],
+      unsupported: /* @__PURE__ */ new Set(),
+      sharedUpdates: {},
+      settings: DEFAULT_SETTINGS,
+      keep: {},
       view: "epic",
+      page: "list",
       filters: DEFAULT_FILTERS,
       collapsed: [...DEFAULT_COLLAPSED],
       query: "",
@@ -2460,7 +2776,12 @@ ${GUEST_UI_LOOK_CSS}`;
     let timer = null;
     let latest = 0;
     let failures = 0;
+    let following = false;
     let touched = false;
+    let projectTouched = false;
+    let storedLoaded = false;
+    let viewDecided = false;
+    let chosenView = null;
     let disposed = false;
     let inFlight = false;
     let wasVisible = visibility.isVisible();
@@ -2498,6 +2819,17 @@ ${field}`;
       if (visibility.isVisible()) timer = setTimeout(() => void poll(), ms);
       else if (!visibility.isDocumentHidden?.()) timer = setTimeout(() => void poll(), Math.max(ms, HIDDEN_POLL_MS));
     };
+    function rememberShared(directory, freshness) {
+      const job = freshness.schemaUpdateJob;
+      if (job?.kind === "failed" && job.code === "update-blocked-shared") {
+        const kept = state.sharedUpdates[directory];
+        if (kept?.message === job.message && kept.detail === job.detail) return;
+        set({ sharedUpdates: { ...state.sharedUpdates, [directory]: { message: job.message, ...job.detail ? { detail: job.detail } : {} } } });
+      } else if (!freshness.schemaUpdate && directory in state.sharedUpdates) {
+        const { [directory]: _gone, ...rest } = state.sharedUpdates;
+        set({ sharedUpdates: rest });
+      }
+    }
     async function poll(refreshWorkspace = false) {
       clearTimer();
       const { directory, generation } = state;
@@ -2514,16 +2846,26 @@ ${field}`;
         const answer = await client.snapshot({ directory, ...cursor ? { cursor } : {}, ...refreshWorkspace ? { refreshWorkspace: true } : {} });
         if (!current()) return;
         failures = 0;
+        following = answer.following === true;
+        rememberShared(directory, answer.freshness);
         if (!answer.unchanged) {
           listedBeads = answer.beads;
-          set({ snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) }, workspace: answer.workspace, error: null });
+          set({
+            snapshot: { ...answer, beads: holding(answer.beads, answer.freshness) },
+            capabilities: answer.capabilities ?? NO_CAPABILITIES,
+            gates: answer.gates ?? [],
+            leases: answer.leases ?? [],
+            workspace: answer.workspace,
+            error: null
+          });
+          decideView();
           followDetail();
         } else if (state.snapshot) {
           const held = answered.size;
           const beads = holding(listedBeads, answer.freshness);
           set({ snapshot: { ...state.snapshot, cursor: answer.cursor, freshness: answer.freshness, sync: answer.sync, ...answered.size !== held ? { beads } : {} }, error: null });
         }
-        schedule(POLL_MS);
+        schedule(following ? LIVE_POLL_MS : POLL_MS);
       } catch (thrown) {
         if (!current()) return;
         const error = asRequestError(thrown);
@@ -2535,6 +2877,19 @@ ${field}`;
         set({ error: toPanelError(error) });
         schedule(Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));
       }
+    }
+    function decideView() {
+      if (viewDecided || !storedLoaded || state.snapshot === null || state.workspace?.kind !== "ok") return;
+      viewDecided = true;
+      if (touched) return;
+      if (needsOf(state, now()).count > 0 && state.view !== "needs") {
+        chosenView = state.view;
+        set({ view: "needs" });
+      }
+    }
+    function markUnsupported(feature) {
+      if (state.unsupported.has(feature)) return;
+      set({ unsupported: /* @__PURE__ */ new Set([...state.unsupported, feature]) });
     }
     const answered = /* @__PURE__ */ new Map();
     let listedBeads = [];
@@ -2652,8 +3007,9 @@ ${field}`;
       void poll();
       if (readBead && state.detail) void loadDetail();
     }
-    function refused(thrown) {
+    function refused(thrown, feature) {
       const error = asRequestError(thrown);
+      if (error.code === "unsupported" && feature) markUnsupported(feature);
       if (error.code === "uncertain" || ANSWER_LOST.has(error.code)) {
         refreshAfterWrite(true);
         return { kind: "uncertain", current: null, saved: error.saved === true };
@@ -2662,7 +3018,7 @@ ${field}`;
       else if (error.code === "writes-blocked" || error.code === "sync-running" || error.code === "merge-conflict" || error.workspace) void poll();
       return { kind: "error", error: toPanelError(error) };
     }
-    async function writing(send, done) {
+    async function writing(send, done, feature) {
       const { directory, generation } = state;
       if (directory === null || disposed) return { kind: "dropped" };
       const here = () => generation === state.generation && !disposed;
@@ -2670,16 +3026,61 @@ ${field}`;
         const answer = await send(directory);
         return here() ? done(answer) : { kind: "dropped" };
       } catch (thrown) {
-        return here() ? refused(thrown) : { kind: "dropped" };
+        return here() ? refused(thrown, feature) : { kind: "dropped" };
       }
+    }
+    async function reading(send, feature) {
+      const { directory, generation } = state;
+      if (directory === null || disposed) return { kind: "dropped" };
+      const here = () => generation === state.generation && !disposed;
+      try {
+        const value = await send(directory);
+        return here() ? { kind: "ok", value } : { kind: "dropped" };
+      } catch (thrown) {
+        if (!here()) return { kind: "dropped" };
+        const error = asRequestError(thrown);
+        if (error.code === "unsupported") markUnsupported(feature);
+        return { kind: "error", error: toPanelError(error) };
+      }
+    }
+    function humanDone(result) {
+      if (result.ok) applyWritten(result.bead);
+      else if (result.current) applyWritten(result.current);
+      void poll();
+      return { kind: "ok", value: result };
+    }
+    function writtenBead(result) {
+      if (result.ok) {
+        applyWritten(result.bead);
+        void poll();
+        if (result.detail) {
+          host2.toast({ kind: "info", message: "Saved. It may show as a change from someone else.", copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {
+          });
+        }
+        return { kind: "ok", value: result.bead };
+      }
+      if ("conflict" in result) {
+        applyWritten(result.current);
+        return { kind: "conflict", current: result.current };
+      }
+      if (result.current) applyWritten(result.current);
+      refreshAfterWrite(result.current === null);
+      return { kind: "uncertain", current: result.current, saved: result.saved === true };
     }
     const known = (id) => newerBead(state.detail?.data?.bead.id === id ? state.detail.data.bead : null, listed(id) ?? null);
     const persist = () => {
       const { directory, view, filters, collapsed } = state;
       if (directory === null) return;
       touched = true;
-      const value = { view, filters, collapsed };
+      const value = { view: chosenView ?? view, filters, collapsed };
       host2.storage.set(uiKey(directory), value).catch(() => {
+      });
+    };
+    const persistProject = () => {
+      const { directory, settings, keep } = state;
+      if (directory === null) return;
+      projectTouched = true;
+      host2.storage.set(projectKey(directory), { staleDays: settings.staleDays, keep }).catch(() => {
       });
     };
     const stopVisibility = visibility.onChange(() => {
@@ -2712,12 +3113,24 @@ ${field}`;
         bannered.clear();
         answered.clear();
         listedBeads = [];
+        projectTouched = false;
+        storedLoaded = false;
+        viewDecided = false;
+        chosenView = null;
         const generation = state.generation + 1;
         set({
           directory,
           generation,
           workspace: null,
           snapshot: null,
+          capabilities: NO_CAPABILITIES,
+          gates: [],
+          leases: [],
+          unsupported: /* @__PURE__ */ new Set(),
+          // A different project never sees this one's kept rows or threshold, not even while its own load is in flight.
+          settings: DEFAULT_SETTINGS,
+          keep: {},
+          page: "list",
           error: null,
           selectedId: null,
           detail: null,
@@ -2729,9 +3142,16 @@ ${field}`;
           ...readUi(void 0)
         });
         if (directory === null) return;
-        host2.storage.get(uiKey(directory)).then((stored) => {
-          if (!disposed && generation === state.generation && !touched && stored !== void 0) set(readUi(stored));
-        }).catch(() => {
+        const load = (key) => host2.storage.get(key).catch(() => void 0);
+        void Promise.all([load(uiKey(directory)), load(projectKey(directory))]).then(([ui, project]) => {
+          if (disposed || generation !== state.generation) return;
+          if (!touched && ui !== void 0) set(readUi(ui));
+          if (project !== void 0) {
+            const read = readProject(project, now());
+            set({ keep: { ...read.keep, ...state.keep }, settings: projectTouched ? state.settings : read.settings });
+          }
+          storedLoaded = true;
+          decideView();
         });
         void poll();
       },
@@ -2761,8 +3181,23 @@ ${field}`;
         }
       },
       setView(view) {
+        chosenView = null;
         set({ view });
         persist();
+      },
+      setPage(page) {
+        if (page !== state.page) set({ page });
+      },
+      markUnsupported,
+      keepStuck(id) {
+        set({ keep: { ...state.keep, [id]: now() + KEEP_MS } });
+        persistProject();
+      },
+      setStaleDays(days) {
+        const staleDays = Math.min(MAX_STALE_DAYS, Math.max(1, Math.round(days)));
+        if (!Number.isFinite(staleDays) || staleDays === state.settings.staleDays) return;
+        set({ settings: { ...state.settings, staleDays } });
+        persistProject();
       },
       setFilters(filters) {
         set({ filters });
@@ -2817,6 +3252,10 @@ ${field}`;
         const prefix = draftKey(id, "");
         for (const key of [...drafts.keys()]) if (key.startsWith(prefix)) drafts.delete(key);
       },
+      draftFields(id) {
+        const prefix = draftKey(id, "");
+        return [...drafts.keys()].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+      },
       reloadDetail() {
         void loadDetail();
       },
@@ -2859,27 +3298,108 @@ ${field}`;
         });
       },
       update(id, expectedUpdatedAt, patch, expected) {
+        return writing((directory) => client.update({ directory, id, expectedUpdatedAt, patch, ...expected ? { expected } : {} }), writtenBead);
+      },
+      defer(id, expectedUpdatedAt, until, reason) {
+        return writing((directory) => client.deferBead({ directory, id, expectedUpdatedAt, until, ...reason ? { reason } : {} }), writtenBead, "defer");
+      },
+      undefer(id, expectedUpdatedAt) {
+        return writing((directory) => client.undeferBead({ directory, id, expectedUpdatedAt }), writtenBead, "defer");
+      },
+      supersede(id, withId, expectedUpdatedAt) {
+        return writing((directory) => client.supersede({ directory, id, with: withId, expectedUpdatedAt }), writtenBead, "supersede");
+      },
+      duplicate(id, of, expectedUpdatedAt) {
+        return writing((directory) => client.duplicate({ directory, id, of, expectedUpdatedAt }), writtenBead, "supersede");
+      },
+      requestReview(id, reason) {
         return writing(
-          (directory) => client.update({ directory, id, expectedUpdatedAt, patch, ...expected ? { expected } : {} }),
-          (result) => {
-            if (result.ok) {
-              applyWritten(result.bead);
-              void poll();
-              if (result.detail) {
-                host2.toast({ kind: "info", message: "Saved. It may show as a change from someone else.", copy: { text: result.detail.slice(0, COPY_MAX) } }).catch(() => {
-                });
-              }
-              return { kind: "ok", value: result.bead };
-            }
-            if ("conflict" in result) {
-              applyWritten(result.current);
-              return { kind: "conflict", current: result.current };
-            }
-            if (result.current) applyWritten(result.current);
-            refreshAfterWrite(result.current === null);
-            return { kind: "uncertain", current: result.current, saved: result.saved === true };
-          }
+          (directory) => client.gateCreate({ directory, id, ...reason ? { reason } : {} }),
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "gates"
         );
+      },
+      resolveReview(gateId, reason) {
+        return writing(
+          (directory) => client.gateResolve({ directory, gateId, ...reason ? { reason } : {} }),
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "gates"
+        );
+      },
+      respond(id, response) {
+        return writing((directory) => client.humanRespond({ directory, id, response }), humanDone, "human");
+      },
+      dismissRequest(id, reason) {
+        return writing((directory) => client.humanDismiss({ directory, id, ...reason ? { reason } : {} }), humanDone, "human");
+      },
+      remember(request) {
+        return writing((directory) => client.memoryRemember({ directory, ...request }), (value) => ({ kind: "ok", value }), "memories");
+      },
+      forget(key, expectedText) {
+        return writing((directory) => client.memoryForget({ directory, key, expectedText }), (value) => ({ kind: "ok", value }), "memories");
+      },
+      async enableEvents() {
+        let message = "";
+        const outcome = await writing(
+          async (directory) => {
+            try {
+              return await client.enableEvents({ directory, confirm: true });
+            } catch (thrown) {
+              message = asRequestError(thrown).message;
+              throw thrown;
+            }
+          },
+          (value) => {
+            void poll();
+            return { kind: "ok", value };
+          },
+          "events"
+        );
+        if (outcome.kind !== "uncertain") return outcome;
+        const read = await reading((directory) => client.eventsStatus({ directory }), "events");
+        if (read.kind === "dropped") return read;
+        return { ...outcome, message, status: read.kind === "ok" ? read.value : null };
+      },
+      async updateProject() {
+        let message = "";
+        const outcome = await writing(
+          async (directory) => {
+            try {
+              return await client.migrateSchema({ directory, confirm: true });
+            } catch (thrown) {
+              message = asRequestError(thrown).message;
+              throw thrown;
+            }
+          },
+          (value) => ({ kind: "ok", value })
+        );
+        if (outcome.kind === "ok") {
+          failures = 0;
+          await poll(true);
+        }
+        return outcome.kind === "uncertain" ? { ...outcome, message } : outcome;
+      },
+      checkProject() {
+        failures = 0;
+        return poll(true);
+      },
+      readHistory(request) {
+        return reading((directory) => client.history({ directory, ...request }), "history");
+      },
+      readMemories(query) {
+        return reading((directory) => client.memories({ directory, ...query ? { query } : {} }), "memories");
+      },
+      readExplain(id) {
+        return reading((directory) => client.explain({ directory, id }), "explain");
+      },
+      readEventsStatus() {
+        return reading((directory) => client.eventsStatus({ directory }), "events");
       },
       create(input) {
         return writing(
@@ -2955,6 +3475,7 @@ ${field}`;
     if (f5.localRefreshedAt !== null || f5.localError === null) return null;
     return { code: "local", message: f5.localError, ...f5.localErrorDetail ? { detail: f5.localErrorDetail } : {} };
   }
+  var needsUpdate = (state) => state.snapshot?.workspace.kind === "ok" && !!state.snapshot.freshness.schemaUpdate;
   var StoreContext = X(null);
   function useStoreApi() {
     const store = x2(StoreContext);
@@ -2994,6 +3515,136 @@ ${field}`;
     if ("function" == typeof e3 && (a5 = e3.defaultProps)) for (c3 in a5) void 0 === p3[c3] && (p3[c3] = a5[c3]);
     return l.vnode && l.vnode(l3), l3;
   }
+
+  // src/panel/ui/EmptyState.tsx
+  function Thread({ tone: tone2 }) {
+    return /* @__PURE__ */ u3("svg", { class: "bd-thread", "data-tone": tone2, width: "72", height: "20", viewBox: "0 0 72 20", "aria-hidden": "true", focusable: "false", children: [
+      /* @__PURE__ */ u3("path", { class: "bd-thread-line", d: "M2 10h68" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "16", cy: "10", r: "5" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-mid", cx: "36", cy: "10", r: "6" }),
+      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "56", cy: "10", r: "5" })
+    ] });
+  }
+  function EmptyState({ tone: tone2, title, body, children }) {
+    return /* @__PURE__ */ u3("section", { class: "bd-empty", "data-tone": tone2, children: [
+      /* @__PURE__ */ u3(Thread, { tone: tone2 }),
+      /* @__PURE__ */ u3("h2", { class: "bd-empty-title", children: title }),
+      body !== void 0 && /* @__PURE__ */ u3("p", { class: "bd-empty-body", children: body }),
+      children !== void 0 && /* @__PURE__ */ u3("div", { class: "bd-empty-actions", children })
+    ] });
+  }
+  var MIN_BD = "1.2.2";
+  function workspaceCopy(workspace) {
+    switch (workspace.kind) {
+      case "no-bd":
+        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
+      case "bd-too-old":
+        return {
+          tone: "warning",
+          title: "This version of Beads is too old.",
+          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
+        };
+      case "no-workspace":
+        return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
+      case "pre-dolt":
+        return {
+          tone: "warning",
+          title: "This project uses an older Beads format.",
+          body: "The panel can't read this format. Ask your agent to upgrade the project's Beads data to the current format, then retry."
+        };
+      case "needs-first-contact":
+        return {
+          tone: "ask",
+          title: `Open this project with Beads ${workspace.bdVersion}?`,
+          // Opening updates nothing: a project on an older format is shown the update, which asks again before it runs.
+          body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it lets Beads check the project. If it is on an older format, Abacus will ask before updating it.`
+        };
+      case "server-down":
+        return {
+          tone: "error",
+          title: "This project's Beads server isn't running.",
+          body: "Start it the way you usually do, then retry. The panel never starts it for you.",
+          detail: `The Beads database server for ${workspace.root} is expected on port ${workspace.port} and did not answer.`
+        };
+      case "ok":
+        return { tone: "neutral", title: "This project is ready.", body: "" };
+      default:
+        return { tone: "neutral", title: "Beads can't open this project right now.", body: "Retry in a moment. If this keeps happening, update the Beads extension." };
+    }
+  }
+  function RetryButton({ primary: primary2 = false }) {
+    const store = useStoreApi();
+    const [checking, setChecking] = d2(false);
+    h2(() => {
+      if (!checking) return;
+      const id = setTimeout(() => setChecking(false), 900);
+      return () => clearTimeout(id);
+    }, [checking]);
+    return /* @__PURE__ */ u3(
+      "button",
+      {
+        type: "button",
+        class: primary2 ? "bd-btn bd-btn-primary" : "bd-btn",
+        "aria-busy": checking,
+        disabled: checking,
+        onClick: () => {
+          setChecking(true);
+          store.retry();
+        },
+        children: [
+          checking && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+          "Retry"
+        ]
+      }
+    );
+  }
+  function CopyDetails({ error, always = false }) {
+    const store = useStoreApi();
+    if (!error.detail && !always) return null;
+    return /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", onClick: () => store.copyDetails(error), children: "Copy details" });
+  }
+  function WorkspaceEmpty({ workspace }) {
+    const state = useStore();
+    const store = useStoreApi();
+    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
+    if (workspace.kind !== "needs-first-contact") {
+      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
+        /* @__PURE__ */ u3(RetryButton, { primary: true }),
+        detail && /* @__PURE__ */ u3(CopyDetails, { error: { code: "workspace", message: title, detail } })
+      ] });
+    }
+    return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", disabled: state.confirming, "aria-busy": state.confirming, onClick: () => void store.confirmFirstContact(), children: [
+        state.confirming && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
+        "Open project"
+      ] }),
+      /* @__PURE__ */ u3("p", { class: "bd-empty-note", children: "You only need to confirm this once for this project." }),
+      state.confirmError && /* @__PURE__ */ u3("p", { class: "bd-empty-error", role: "alert", children: [
+        state.confirmError.message,
+        " ",
+        /* @__PURE__ */ u3(CopyDetails, { error: state.confirmError })
+      ] })
+    ] });
+  }
+  function LoadError() {
+    const error = firstLoadError(useStore());
+    if (!error) return null;
+    return /* @__PURE__ */ u3(EmptyState, { tone: "error", title: "Couldn't load this project's beads.", children: [
+      /* @__PURE__ */ u3(RetryButton, { primary: true }),
+      /* @__PURE__ */ u3(CopyDetails, { error, always: true })
+    ] });
+  }
+  function Loading() {
+    const widths = [72, 54, 88, 61, 79, 46, 67];
+    return /* @__PURE__ */ u3("div", { class: "bd-skeleton", "aria-busy": "true", "aria-label": "Loading beads", children: widths.map((w4, i3) => /* @__PURE__ */ u3("div", { class: "bd-skel-row", style: { "--w": `${w4}%`, "--d": `${i3 * 70}ms` }, children: [
+      /* @__PURE__ */ u3("i", { class: "bd-skel-dot" }),
+      /* @__PURE__ */ u3("i", { class: "bd-skel-id" }),
+      /* @__PURE__ */ u3("i", { class: "bd-skel-bar" })
+    ] }, i3)) });
+  }
+
+  // src/panel/ui/ProjectUpdate.tsx
+  var UPDATE_TITLE = "This project needs a one-time update for the newer Beads.";
 
   // src/panel/ui/icons.tsx
   function Icon({ size = 14, children }) {
@@ -6495,132 +7146,6 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   ];
   var EDITABLE = ["title", ...TEXT_SECTIONS.map((s3) => s3.field)];
 
-  // src/panel/ui/EmptyState.tsx
-  function Thread({ tone: tone2 }) {
-    return /* @__PURE__ */ u3("svg", { class: "bd-thread", "data-tone": tone2, width: "72", height: "20", viewBox: "0 0 72 20", "aria-hidden": "true", focusable: "false", children: [
-      /* @__PURE__ */ u3("path", { class: "bd-thread-line", d: "M2 10h68" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "16", cy: "10", r: "5" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-mid", cx: "36", cy: "10", r: "6" }),
-      /* @__PURE__ */ u3("circle", { class: "bd-thread-bead", cx: "56", cy: "10", r: "5" })
-    ] });
-  }
-  function EmptyState({ tone: tone2, title, body, children }) {
-    return /* @__PURE__ */ u3("section", { class: "bd-empty", "data-tone": tone2, children: [
-      /* @__PURE__ */ u3(Thread, { tone: tone2 }),
-      /* @__PURE__ */ u3("h2", { class: "bd-empty-title", children: title }),
-      body !== void 0 && /* @__PURE__ */ u3("p", { class: "bd-empty-body", children: body }),
-      children !== void 0 && /* @__PURE__ */ u3("div", { class: "bd-empty-actions", children })
-    ] });
-  }
-  var MIN_BD = "1.2.2";
-  function workspaceCopy(workspace) {
-    switch (workspace.kind) {
-      case "no-bd":
-        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
-      case "bd-too-old":
-        return {
-          tone: "warning",
-          title: "This version of Beads is too old.",
-          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
-        };
-      case "no-workspace":
-        return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
-      case "pre-dolt":
-        return {
-          tone: "warning",
-          title: "This project uses an older Beads format.",
-          body: "The panel can't read this format. Ask your agent to upgrade the project's Beads data to the current format, then retry."
-        };
-      case "needs-first-contact":
-        return {
-          tone: "ask",
-          title: `Open this project with Beads ${workspace.bdVersion}?`,
-          body: `This project was last opened with Beads ${workspace.lastOpenedWith}. Opening it here lets Beads update it to ${workspace.bdVersion}, which may change its files.`
-        };
-      case "server-down":
-        return {
-          tone: "error",
-          title: "This project's Beads server isn't running.",
-          body: "Start it the way you usually do, then retry. The panel never starts it for you.",
-          detail: `The Beads database server for ${workspace.root} is expected on port ${workspace.port} and did not answer.`
-        };
-      case "ok":
-        return { tone: "neutral", title: "This project is ready.", body: "" };
-      default:
-        return { tone: "neutral", title: "Beads can't open this project right now.", body: "Retry in a moment. If this keeps happening, update the Beads extension." };
-    }
-  }
-  function RetryButton({ primary: primary2 = false }) {
-    const store = useStoreApi();
-    const [checking, setChecking] = d2(false);
-    h2(() => {
-      if (!checking) return;
-      const id = setTimeout(() => setChecking(false), 900);
-      return () => clearTimeout(id);
-    }, [checking]);
-    return /* @__PURE__ */ u3(
-      "button",
-      {
-        type: "button",
-        class: primary2 ? "bd-btn bd-btn-primary" : "bd-btn",
-        "aria-busy": checking,
-        disabled: checking,
-        onClick: () => {
-          setChecking(true);
-          store.retry();
-        },
-        children: [
-          checking && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
-          "Retry"
-        ]
-      }
-    );
-  }
-  function CopyDetails({ error, always = false }) {
-    const store = useStoreApi();
-    if (!error.detail && !always) return null;
-    return /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", onClick: () => store.copyDetails(error), children: "Copy details" });
-  }
-  function WorkspaceEmpty({ workspace }) {
-    const state = useStore();
-    const store = useStoreApi();
-    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
-    if (workspace.kind !== "needs-first-contact") {
-      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
-        /* @__PURE__ */ u3(RetryButton, { primary: true }),
-        detail && /* @__PURE__ */ u3(CopyDetails, { error: { code: "workspace", message: title, detail } })
-      ] });
-    }
-    return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
-      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary", disabled: state.confirming, "aria-busy": state.confirming, onClick: () => void store.confirmFirstContact(), children: [
-        state.confirming && /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }),
-        "Open project"
-      ] }),
-      /* @__PURE__ */ u3("p", { class: "bd-empty-note", children: "You only need to confirm this once for this project." }),
-      state.confirmError && /* @__PURE__ */ u3("p", { class: "bd-empty-error", role: "alert", children: [
-        state.confirmError.message,
-        " ",
-        /* @__PURE__ */ u3(CopyDetails, { error: state.confirmError })
-      ] })
-    ] });
-  }
-  function LoadError() {
-    const error = firstLoadError(useStore());
-    if (!error) return null;
-    return /* @__PURE__ */ u3(EmptyState, { tone: "error", title: "Couldn't load this project's beads.", children: [
-      /* @__PURE__ */ u3(RetryButton, { primary: true }),
-      /* @__PURE__ */ u3(CopyDetails, { error, always: true })
-    ] });
-  }
-  function Loading() {
-    const widths = [72, 54, 88, 61, 79, 46, 67];
-    return /* @__PURE__ */ u3("div", { class: "bd-skeleton", "aria-busy": "true", "aria-label": "Loading beads", children: widths.map((w4, i3) => /* @__PURE__ */ u3("div", { class: "bd-skel-row", style: { "--w": `${w4}%`, "--d": `${i3 * 70}ms` }, children: [
-      /* @__PURE__ */ u3("i", { class: "bd-skel-dot" }),
-      /* @__PURE__ */ u3("i", { class: "bd-skel-id" }),
-      /* @__PURE__ */ u3("i", { class: "bd-skel-bar" })
-    ] }, i3)) });
-  }
-
   // src/panel/ui/styles.css
   var styles_default = `/*
  * Abacus panel. Colors come only from the host's --oc-* tokens (applyHostReady); the literals after each token are
@@ -6963,7 +7488,6 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   background: transparent;
   color: var(--bd-muted);
   font-size: 11.5px;
-  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .bd-seg button:hover {
@@ -7088,6 +7612,16 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
 
 .bd-btn:disabled {
   opacity: 0.75;
+}
+
+/* Saving, with focus kept on the button: it reads as working, not as off. */
+.bd-btn[aria-busy='true'] {
+  cursor: progress;
+}
+
+.bd-btn[aria-disabled='true']:not([aria-busy='true']) {
+  opacity: 0.75;
+  cursor: default;
 }
 
 .bd-link {
@@ -7245,6 +7779,103 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   margin: 2px 0 0;
   color: var(--bd-err-text);
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- the one-time project update */
+
+/* The empty state's column, with a left-aligned stack under it: the confirm, the note and the details read as text, not as a caption. */
+.bd-upd-acts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  align-self: stretch;
+  margin-top: 16px;
+}
+
+.bd-upd-ask,
+.bd-upd-note {
+  align-self: stretch;
+  text-align: left;
+}
+
+.bd-upd-ask {
+  padding: 10px 11px;
+  font-size: 12px;
+}
+
+.bd-upd-ask .bd-pm-ask-t {
+  font-size: 12.5px;
+}
+
+.bd-upd-ask .bd-pm-ask-acts {
+  margin-top: 4px;
+}
+
+.bd-upd-note {
+  font-size: 12px;
+}
+
+.bd-upd-note:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.bd-upd-note[data-tone='ok'] {
+  border-left-color: var(--bd-ok);
+}
+
+.bd-upd-note[data-tone='info'] {
+  border-left-color: var(--bd-accent);
+}
+
+.bd-upd-say {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  /* A live region that stays in the accessibility tree while empty (display:none would drop it, and the first message would not be announced). One line is kept, so nothing shifts when text arrives. */
+  min-height: 1.4em;
+}
+
+.bd-upd-more {
+  align-self: stretch;
+  text-align: left;
+}
+
+.bd-upd-more > summary {
+  width: max-content;
+  margin: 0 auto;
+  padding: 2px 4px;
+  border-radius: var(--bd-radius);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.bd-upd-more > summary:hover {
+  color: var(--bd-fg);
+}
+
+.bd-upd-more > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-upd-raw {
+  max-height: 10.5em;
+  margin: 6px 0 0;
+  padding: 7px 8px;
+  overflow: auto;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-family: var(--bd-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- loading */
@@ -7948,7 +8579,8 @@ button.bd-chev:hover {
   margin: 4px -4px -4px;
   padding: 5px 12px 6px;
   border-top: 1px solid var(--bd-line);
-  color: var(--bd-dim);
+  /* Which bead the menu is for: information, so muted (readable in both themes), never the dim of something switched off. */
+  color: var(--bd-muted);
   font: 10.5px/1.3 var(--bd-mono);
   overflow: hidden;
   white-space: nowrap;
@@ -8073,7 +8705,8 @@ button.bd-chev:hover {
 
 .bd-foot [data-tone='blocked'],
 .bd-foot [data-tone='blocked'] b {
-  color: var(--bd-err-text);
+  /* Toward the foreground: darker on light, lighter on dark, so the red reads in both themes. */
+  color: color-mix(in srgb, var(--bd-err-text) 80%, var(--bd-fg));
 }
 
 /* ---------------------------------------------------------------- detail */
@@ -8244,6 +8877,11 @@ button.bd-chev:hover {
 .bd-pop[data-align='end'] {
   right: 0;
   left: auto;
+}
+
+/* Over the detail's header, a menu keeps a band of the page around it, so the words it covers end at a clean edge, not mid-letter. */
+.bd-dnav .bd-pop {
+  box-shadow: 0 0 0 6px var(--bd-bg), 0 12px 30px rgba(0, 0, 0, 0.24), 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .bd-pop .bd-menu-item[aria-checked='true'] {
@@ -9014,7 +9652,9 @@ button.bd-chev:hover {
 .bd-dbody {
   flex: 1;
   min-height: 0;
-  padding-bottom: 18px;
+  /* Clear of the Attach footer's fade, also when a field scrolls into view. */
+  padding-bottom: 36px;
+  scroll-padding-bottom: 40px;
   overflow-x: clip;
   overflow-y: auto;
 }
@@ -9113,10 +9753,103 @@ button.bd-chev:hover {
   color: var(--bd-fg);
 }
 
-.bd-dtype {
-  margin-left: 8px;
-  color: var(--bd-dim);
+/* The id, type and parent share a line and wrap under one another at the same indent when the panel is narrow. */
+.bd-didrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 6px 0 0 24px;
+}
+
+.bd-didrow .bd-did {
+  margin: 0;
+  max-width: 100%;
+}
+
+.bd-didrow .bd-chipbtn {
+  gap: 3px;
+  min-width: 0;
+  color: var(--bd-muted);
   font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.bd-didrow .bd-chipbtn .bd-i:last-child {
+  width: 10px;
+  height: 10px;
+  opacity: 0.7;
+}
+
+.bd-didrow .bd-chipbtn:hover:not(:disabled),
+.bd-didrow .bd-chipbtn[aria-expanded='true'] {
+  color: var(--bd-fg);
+}
+
+.bd-parentwrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bd-parent .bd-i:first-child {
+  flex-shrink: 0;
+  color: var(--bd-accent-text);
+}
+
+.bd-parent-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-parent[data-none] .bd-parent-t {
+  font-style: italic;
+}
+
+.bd-menu-rule {
+  height: 1px;
+  margin: 2px -4px;
+  background: var(--bd-line);
+}
+
+/* A long list of epics scrolls inside the menu instead of running off the panel. */
+.bd-menu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 232px;
+  overflow-y: auto;
+}
+
+.bd-menu-epic .bd-i {
+  flex-shrink: 0;
+  color: var(--bd-accent-text);
+}
+
+.bd-menu-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-menu-sub {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--bd-muted);
+  font: 10.5px/1 var(--bd-mono);
+}
+
+/* A menu item that only says something: muted (readable), not the dim of a switched-off choice. */
+.bd-menu-item.bd-menu-note:disabled {
+  height: auto;
+  padding: 4px 8px 6px;
+  color: var(--bd-muted);
+  cursor: default;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 .bd-dmeta {
@@ -9540,6 +10273,131 @@ button.bd-chev:hover {
   color: var(--bd-muted);
 }
 
+/* Criteria that mix prose and lists: each block keeps a little air. */
+.bd-acwrap > * + * {
+  margin-top: 6px;
+}
+
+.bd-ac li {
+  align-items: flex-start;
+}
+
+.bd-ac li[data-depth] {
+  padding-left: 18px;
+}
+
+/* A written box is a checkbox: an 18 px target around a 12 px box, its text the label (a click there ticks too). */
+.bd-ac-tick {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.bd-ac-tick .bd-ac-box {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border-color: var(--bd-muted);
+  border-radius: 3px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.bd-ac-tick:hover:not([aria-disabled]) .bd-ac-box {
+  border-color: var(--bd-accent);
+  background: color-mix(in srgb, var(--bd-accent) 10%, transparent);
+}
+
+.bd-ac-tick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-ac-tick[aria-disabled] {
+  cursor: default;
+}
+
+.bd-ac li[data-done] .bd-ac-tick .bd-ac-box {
+  border-color: var(--bd-ok);
+  background: var(--bd-ok);
+  box-shadow: none;
+}
+
+/* The tick mark itself, drawn in the page colour on the filled box. */
+.bd-ac li[data-done] .bd-ac-tick .bd-ac-box::after {
+  position: absolute;
+  top: 1px;
+  left: 3.5px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bd-bg);
+  border-width: 0 1.6px 1.6px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+/* Saving: the box already shows where it is going, and breathes until Beads answers. */
+.bd-ac li[data-busy] .bd-ac-box {
+  animation: bd-breathe 900ms ease-in-out infinite;
+}
+
+.bd-ac-text {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.bd-ac-tick[aria-disabled] + .bd-ac-text {
+  cursor: default;
+}
+
+/* A list line without a box: a bullet, so it never looks like something to tick. */
+.bd-ac-dot {
+  flex-shrink: 0;
+  width: 4px;
+  height: 4px;
+  margin: 7.5px 4px 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bd-muted) 75%, transparent);
+}
+
+.bd-ac-note {
+  margin-top: 6px;
+}
+
+/* No criteria: one quiet line where the section would be, with its Add. */
+.bd-noac {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 4px 0 30px;
+  border-top: 1px solid var(--bd-line);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-noac span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-noac .bd-edit {
+  opacity: 1;
+  color: var(--bd-muted);
+}
+
 /* relationships */
 
 .bd-rgroup + .bd-rgroup {
@@ -9648,6 +10506,121 @@ button.bd-rel:focus-visible {
   font: 11px/1.45 var(--bd-mono);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Due and defer dates: the same label column as the fields under them, each value with its own small actions. */
+.bd-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-dates + .bd-more {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-daterow {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-datelab {
+  color: var(--bd-muted);
+}
+
+.bd-dateval {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The value, then its actions on a line of their own, so they start at the same edge at every width. */
+.bd-dateline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 22px;
+}
+
+.bd-datetext {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  color: var(--bd-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-datetext[data-none] {
+  color: var(--bd-muted);
+}
+
+.bd-overdue {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-err) 12%, transparent);
+  color: var(--bd-err-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+}
+
+.bd-dateacts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  /* The buttons' own padding: their text lines up with the value above. */
+  margin-left: -7px;
+}
+
+/* Quiet text actions that read as what they do, framed on hover like the section Edit buttons. */
+.bd-datebtn {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.bd-datebtn:hover:not(:disabled),
+.bd-datebtn:focus-visible {
+  border-color: var(--bd-line);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+}
+
+.bd-datebtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.bd-daterow[data-busy] .bd-datetext {
+  opacity: 0.6;
+}
+
+.bd-dateedit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-dateedit .bd-input {
+  width: 100%;
+}
+
+.bd-wnote-date {
+  margin: 0;
 }
 
 /* comments */
@@ -9865,6 +10838,15 @@ button.bd-rel:focus-visible {
   color: var(--bd-err-text);
   font-size: 10.5px;
   line-height: 15px;
+}
+
+/* Activity rows: the menu button sits on the first line, in place of the time, so it never covers who made the change. */
+.bd-act-row .bd-rowmore {
+  top: 13px;
+}
+
+.bd-act-row:is(:hover, [data-cursor]) .bd-act-when {
+  visibility: hidden;
 }
 
 .bd-act-who {
@@ -10900,6 +11882,1913 @@ button.bd-rel:focus-visible {
   color: var(--bd-muted);
   font-size: 11px;
 }
+
+/* ---------------------------------------------------------------- needs me */
+
+/*
+ * A calm inbox: each section is a sentence-case heading with a tinted mark, each row a bead, the reason it is here, and its
+ * actions under it. Decisions (Resolve, Respond) carry the accent; ways out (Keep, Dismiss, Defer) stay quiet.
+ */
+.bd-needs {
+  padding-top: 0;
+  /* Room for the last row's actions above the footer's fade. */
+  padding-bottom: 56px;
+}
+
+.bd-nsec {
+  padding-bottom: 6px;
+}
+
+.bd-nsec + .bd-nsec {
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-nsec-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 12px 5px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.bd-nsec-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bd-accent) 13%, transparent);
+  color: var(--bd-accent-text);
+}
+
+.bd-nsec-ic[data-section='stuck'] {
+  background: color-mix(in srgb, var(--bd-prog) 18%, transparent);
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-nsec-ic[data-section='changed'] {
+  background: color-mix(in srgb, var(--bd-fg) 7%, transparent);
+}
+
+.bd-nsec-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-nsec-title {
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-fg);
+}
+
+.bd-nsec-act {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+/* A two-line row: the bead, then why it is here and what can be done, set under the id. */
+.bd-nrow {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 6px 12px 7px 14px;
+}
+
+/* The section already says these changed: the tint stays, the unseen dot (which read as an indent) does not. */
+.bd-nrow[data-unseen]::before {
+  display: none;
+}
+
+.bd-nrow-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 20px;
+}
+
+/* The list is plain; each item holds the focusable part (bead and why) and, beside it, the row's actions. */
+.bd-nlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A question is the point of the row: its title gets two lines before it is cut. */
+.bd-nrow-top .bd-title {
+  display: -webkit-box;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bd-nrow-top :is(.bd-id, .bd-age) {
+  line-height: 18px;
+}
+
+.bd-nrow-top .bd-sd {
+  margin-top: 4.5px;
+}
+
+.bd-nmain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  outline: none;
+}
+
+/* The row shows keyboard focus as the list's cursor ring does. */
+.bd-nrow:has(> .bd-nmain:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+.bd-nwhy,
+.bd-nrow > :not(.bd-nmain) {
+  margin-left: 16px;
+}
+
+.bd-nwhy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bd-why-by {
+  color: var(--bd-dim);
+}
+
+.bd-nreason {
+  align-self: center;
+  margin-left: 2px;
+}
+
+.bd-why {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in srgb, var(--bd-muted) 82%, var(--bd-fg));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bd-why-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bd-why > .bd-i {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.bd-why[data-tone='hold'] {
+  color: var(--bd-warn-text);
+}
+
+.bd-why[data-tone='done'] {
+  color: var(--bd-dim);
+}
+
+.bd-why-more {
+  flex-shrink: 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-tag {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-accent) 12%, transparent);
+  color: var(--bd-accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bd-tag[data-kind='plan'] {
+  background: color-mix(in srgb, var(--bd-ok) 18%, transparent);
+  color: color-mix(in srgb, var(--bd-ok) 58%, var(--bd-fg));
+}
+
+/* A help request is someone's words: set as a quote, three lines at most. */
+.bd-quote {
+  display: -webkit-box;
+  margin: 1px 0;
+  padding: 0 0 0 8px;
+  overflow: hidden;
+  border-left: 2px solid color-mix(in srgb, var(--bd-accent) 45%, var(--bd-line));
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-line;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.bd-nacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 3px;
+}
+
+.bd-nacts-row,
+.bd-nstep-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bd-nstep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  cursor: auto;
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-nstep .bd-input {
+  width: 100%;
+}
+
+.bd-ntext {
+  height: auto;
+  min-height: 62px;
+  padding: 6px 8px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.bd-nstep-hint {
+  margin: 0;
+  /* Muted, not dim: it says what the button will do, and dim text was the faintest on screen in dark mode. */
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* A date as typed, with what Beads will store under it. */
+.bd-date {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-date-preview {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-date-preview[data-kind='ok'] {
+  color: var(--bd-fg);
+  font-weight: 500;
+}
+
+.bd-nquiet {
+  margin: 0;
+  padding: 32px 16px;
+  color: var(--bd-dim);
+  font-size: 12.5px;
+  text-align: center;
+  animation: bd-rise 260ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Something changed under the person (an agent got there first): said once, at the top, until hidden. */
+.bd-nnotes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 2px;
+}
+
+.bd-nnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 5px 6px 9px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  animation: bd-drop 180ms ease-out;
+}
+
+.bd-nnote > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-nnote-x {
+  display: flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--bd-dim);
+}
+
+.bd-nnote-x:hover {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+/* ---------------------------------------------------------------- header: Needs me tab, project menu */
+
+/* Its count rides in the tab; zero shows none. The rail badge is a different count (unseen beads). */
+.bd-seg-n {
+  min-width: 16px;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bd-accent) 16%, transparent);
+  color: var(--bd-accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.bd-seg button[aria-pressed='true'] .bd-seg-n {
+  background: var(--bd-accent);
+  color: var(--bd-accent-fg);
+}
+
+/* Four tabs and the tools do not fit one line in a narrow panel: the tabs take a line of their own, the search gets its room back. */
+.bd-head {
+  container: bdhead / inline-size;
+}
+
+@container bdhead (max-width: 419px) {
+  .bd-tools {
+    flex-wrap: wrap;
+    row-gap: 7px;
+  }
+
+  .bd-tools .bd-seg {
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .bd-tools .bd-seg button {
+    flex: 1 0 auto;
+    justify-content: center;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+}
+
+/* Too narrow for the name and the freshness line both: the menu's chevron gives its room to the name (hover still shows the button). */
+@container bdhead (max-width: 359px) {
+  .bd-projbtn > .bd-i:last-child {
+    display: none;
+  }
+}
+
+/* The project name opens the project menu. */
+/* The frame reaches past the name so the folder icon stays where the plain name had it; the wrapper takes the offset, so the button keeps its full width. */
+.bd-pm {
+  min-width: 0;
+  margin: -3px -6px;
+}
+
+.bd-projbtn {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--bd-radius);
+  background: none;
+  font-size: inherit;
+}
+
+.bd-projbtn:hover,
+.bd-projbtn[aria-expanded='true'] {
+  background: var(--bd-hover);
+}
+
+.bd-projbtn > .bd-i:last-child {
+  color: var(--bd-dim);
+  transition: transform 140ms ease;
+}
+
+.bd-projbtn[aria-expanded='true'] > .bd-i:last-child {
+  transform: rotate(180deg);
+}
+
+.bd-pm .bd-pop {
+  left: 10px;
+}
+
+.bd-pm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 244px;
+  padding: 6px 6px 5px;
+}
+
+.bd-pm-h {
+  margin: 0;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-pm-set {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-pm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.bd-pm-days {
+  width: 44px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.bd-pm-unit {
+  color: var(--bd-muted);
+}
+
+/* Live updates: a hairline above sets it apart from the panel's own settings, since this one is written to the project. */
+.bd-pm-live {
+  padding-top: 8px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-pm-live .bd-pm-label {
+  font-weight: 500;
+}
+
+.bd-pm-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--bd-fg);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-pm-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bd-muted);
+}
+
+.bd-pm-state[data-tone='ok'] .bd-pm-dot {
+  background: var(--bd-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bd-ok) 22%, transparent);
+}
+
+.bd-pm-state[data-tone='warn'] .bd-pm-dot {
+  background: var(--bd-warn);
+}
+
+.bd-pm-state[data-tone='err'] .bd-pm-dot {
+  background: var(--bd-err);
+}
+
+.bd-pm-state[data-tone='off'] .bd-pm-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--bd-muted);
+}
+
+.bd-pm-say {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* The status line and the note take focus only so their words are read out; they are not controls, so no ring. */
+.bd-pm-say:focus,
+.bd-pm-note:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.bd-pm-note {
+  margin: 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--bd-warn);
+  border-radius: 0 var(--bd-radius) var(--bd-radius) 0;
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-pm-note[data-tone='error'] {
+  border-left-color: var(--bd-err);
+  color: var(--bd-err-text);
+}
+
+/* The confirm sits in the menu itself: the panel's frame allows no pop-up windows or modal dialogs. */
+.bd-pm-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  font-size: 11.5px;
+  line-height: 1.45;
+  animation: bd-pm-ask-in 160ms ease-out;
+}
+
+.bd-pm-ask p {
+  margin: 0;
+}
+
+.bd-pm-ask-d {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-pm-ask-t {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bd-pm-file {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bd-on);
+  font-family: var(--bd-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.bd-pm-ask-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+@keyframes bd-pm-ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-pm-ask {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------- gates on the detail */
+
+/* What holds the bead, right under its header: a held card, warm like a waiting hint, quieter than an error. */
+.bd-gates-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 12px 12px;
+}
+
+.bd-gates {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 26%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 5%, var(--bd-bg));
+  animation: bd-drop 200ms ease-out;
+}
+
+/* A rail down the left edge: the bead is held until these clear. */
+.bd-gates::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: color-mix(in srgb, var(--bd-warn) 70%, var(--bd-bg));
+}
+
+.bd-gates-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px 4px 14px;
+  color: var(--bd-warn-text);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-gates-h .bd-n {
+  letter-spacing: 0;
+}
+
+.bd-glist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px 9px 14px;
+  outline: none;
+}
+
+.bd-gate + .bd-gate {
+  border-top: 1px solid color-mix(in srgb, var(--bd-warn) 14%, var(--bd-line));
+}
+
+.bd-gate:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+/* An ask that found this gate already open: it lights up once, so the eye lands on it. */
+.bd-gate[data-found] {
+  animation: bd-gate-found 1.4s ease-out;
+}
+
+@keyframes bd-gate-found {
+  from {
+    background: color-mix(in srgb, var(--bd-accent) 16%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.bd-gate-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bd-gate-reason {
+  min-width: 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.bd-gate-reason[data-none] {
+  color: var(--bd-dim);
+  font-style: italic;
+}
+
+.bd-gate-meta {
+  margin: 0;
+  color: color-mix(in srgb, var(--bd-muted) 82%, var(--bd-fg));
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-gate-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.bd-gate .bd-gstep {
+  margin-top: 4px;
+  background: var(--bd-bg);
+}
+
+.bd-gate-settled {
+  padding-top: 2px;
+}
+
+/* Kinds that only say where they stand: neutral, so a person's review keeps the colour. */
+.bd-tag[data-kind='timer'],
+.bd-tag[data-kind='github'],
+.bd-tag[data-kind='bead'],
+.bd-tag[data-kind='other'] {
+  background: color-mix(in srgb, var(--bd-fg) 8%, transparent);
+  color: var(--bd-muted);
+}
+
+/* Asking with a reason: which kind, as two pressed-or-not buttons. */
+.bd-gkind {
+  display: flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-bg);
+}
+
+.bd-gkind-opt {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-gkind-opt:hover:not(:disabled) {
+  color: var(--bd-fg);
+}
+
+.bd-gkind-opt[aria-pressed='true'] {
+  background: var(--bd-on);
+  color: var(--bd-fg);
+  font-weight: 600;
+  box-shadow: inset 0 1px 1px var(--bd-inset);
+}
+
+.bd-gnote {
+  padding: 0 2px;
+}
+
+/* Beside Design's Edit: the way to ask for the plan's approval, as quiet as Edit until the section is hovered. */
+.bd-planask {
+  margin-right: 0;
+  color: var(--bd-accent-text);
+}
+
+/* A bead Beads named that this list does not have: an id, not a link. */
+.bd-hint-id[data-plain] {
+  cursor: default;
+}
+
+.bd-menu-rule {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--bd-line);
+}
+
+/* ---------------------------------------------------------------- history */
+
+/* A timeline: a rail down the left, a dot per version, the day as a quiet label on the rail. */
+[data-section='history'] .bd-sec-body {
+  padding: 0 12px 10px 16px;
+}
+
+.bd-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bd-hist-load,
+.bd-hist-none,
+.bd-hist-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 4px 14px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+}
+
+.bd-hist-note {
+  margin-top: 6px;
+}
+
+.bd-hist-err {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 2px 0 4px 14px;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+}
+
+.bd-hist-newer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0 0 4px;
+  padding: 5px 8px;
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-hday-h {
+  position: relative;
+  margin: 6px 0 2px;
+  padding-left: 14px;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-hes,
+.bd-hcs,
+.bd-diff-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-he {
+  position: relative;
+  padding: 3px 0 9px 14px;
+  border-left: 1px solid var(--bd-line);
+  margin-left: 3px;
+}
+
+.bd-hday:last-of-type .bd-he:last-child {
+  border-left-color: transparent;
+}
+
+/* The dot: hollow for a change, filled for a review event, accent-ringed for the bead's creation. */
+.bd-he::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid color-mix(in srgb, var(--bd-muted) 70%, var(--bd-bg));
+  border-radius: 50%;
+  background: var(--bd-bg);
+}
+
+.bd-he[data-kind='gate']::before {
+  border-color: color-mix(in srgb, var(--bd-warn) 70%, var(--bd-bg));
+  background: color-mix(in srgb, var(--bd-warn) 40%, var(--bd-bg));
+}
+
+.bd-he[data-kind='gate'][data-what='resolved']::before {
+  border-color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-bg));
+  background: color-mix(in srgb, var(--bd-ok) 40%, var(--bd-bg));
+}
+
+.bd-he[data-kind='created']::before {
+  border-color: var(--bd-accent);
+}
+
+.bd-he-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.bd-he-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-he-who {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-he-who[data-unknown] {
+  color: var(--bd-dim);
+  font-weight: 400;
+  font-style: italic;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+.bd-he-gate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+}
+
+.bd-he[data-kind='gate'] .bd-he-gate .bd-i {
+  color: var(--bd-warn-text);
+}
+
+.bd-he[data-what='resolved'] .bd-he-gate .bd-i {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-he-reason {
+  margin: 1px 0 0 18px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* One field per line: its name, before and after, and Restore at the end. */
+.bd-hc {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'f v a'
+    'd d d';
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.bd-hc-f {
+  grid-area: f;
+  overflow: hidden;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-hv,
+.bd-hc-what {
+  grid-area: v;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bd-hc-what {
+  color: var(--bd-muted);
+}
+
+.bd-hv[data-stacked] {
+  flex-direction: column;
+  gap: 1px;
+}
+
+.bd-hv-to {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  /* Names and statuses break between words, never inside one. */
+  overflow-wrap: normal;
+}
+
+.bd-hv[data-stacked] .bd-hv-to {
+  display: block;
+}
+
+.bd-rs-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bd-hv-old {
+  color: var(--bd-dim);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.bd-hv-new {
+  color: var(--bd-fg);
+}
+
+.bd-hv-arrow {
+  color: var(--bd-dim);
+}
+
+.bd-hv-new[data-look='blocked'] {
+  color: var(--bd-err-text);
+}
+
+.bd-hv-new[data-look='progress'] {
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-hv-new[data-look='done'] {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-hv-labels .bd-lb[data-diff='add'] {
+  background: color-mix(in srgb, var(--bd-ok) 16%, transparent);
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-fg));
+}
+
+.bd-hv-labels .bd-lb[data-diff='add']::before {
+  content: '+';
+}
+
+.bd-hv-labels .bd-lb[data-diff='del'] {
+  text-decoration: line-through;
+}
+
+.bd-hc-act {
+  grid-area: a;
+  justify-self: end;
+  min-width: 0;
+}
+
+/* A refusal or a message takes the whole line under the change. */
+.bd-hc-act:has(.bd-rs[data-refused], .bd-wmsg) {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  justify-self: stretch;
+}
+
+.bd-hc-diff {
+  grid-area: d;
+  min-width: 0;
+}
+
+/* The restore action: readable at rest (muted text, a visible outline), so it never depends on hover, which touch does not have. */
+.bd-rs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--bd-line) 70%, transparent);
+  border-radius: var(--bd-radius);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.bd-hc:hover .bd-rs-btn,
+.bd-rs-btn:focus-visible {
+  border-color: var(--bd-line);
+  color: var(--bd-fg);
+}
+
+.bd-rs-btn:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-accent-text);
+}
+
+.bd-rs-btn[aria-busy='true'] {
+  color: var(--bd-muted);
+}
+
+/* Changed again since: a small mark says a choice comes first. */
+.bd-rs[data-state='changed'] .bd-rs-btn .bd-i {
+  color: var(--bd-warn-text);
+}
+
+.bd-rs-tag {
+  display: block;
+  max-width: 7.5em;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.bd-rs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  outline: none;
+}
+
+.bd-rs[data-refused] {
+  align-items: stretch;
+  margin: 4px 0 2px;
+  padding: 7px 9px 8px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 32%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 7%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-rs-msg {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bd-rs-msg b {
+  color: var(--bd-warn-text);
+  font-weight: 600;
+}
+
+.bd-rs-msg[data-tone='done'] {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-rs-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bd-rs-acts .bd-btn {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-block: 3px;
+  text-align: left;
+}
+
+/* Compact diff: removed and added lines tinted, unchanged runs folded into a count. */
+.bd-diff {
+  margin: 3px 0 2px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--bd-line) 80%, transparent);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  font-family: var(--bd-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.bd-diff-line {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+}
+
+.bd-diff-mark {
+  flex-shrink: 0;
+  width: 9px;
+  color: var(--bd-dim);
+  text-align: center;
+}
+
+.bd-diff-t {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-diff-line[data-kind='same'] .bd-diff-t {
+  color: var(--bd-muted);
+}
+
+.bd-diff-line[data-kind='del'] {
+  background: color-mix(in srgb, var(--bd-err) 9%, transparent);
+}
+
+.bd-diff-line[data-kind='del'] .bd-diff-t {
+  color: var(--bd-err-text);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.bd-diff-line[data-kind='add'] {
+  background: color-mix(in srgb, var(--bd-ok) 11%, transparent);
+}
+
+.bd-diff-line[data-kind='add'] .bd-diff-mark,
+.bd-diff-line[data-kind='add'] .bd-diff-t {
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-fg));
+}
+
+.bd-diff-skip {
+  padding: 1px 8px 1px 19px;
+  color: var(--bd-dim);
+  font-family: var(--oc-font, system-ui, sans-serif);
+  font-size: 10.5px;
+  font-style: italic;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--bd-line) 45%, transparent) 4px 5px);
+}
+
+.bd-diff-more {
+  margin: 2px 8px 4px 19px;
+  font-family: var(--oc-font, system-ui, sans-serif);
+  font-size: 11px;
+}
+
+.bd-hc-cut {
+  margin: 2px 0 0;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-hist-older {
+  align-self: flex-start;
+  margin: 4px 0 0 14px;
+}
+
+/* Activity: a restore chosen from a row's menu, above the feed. */
+.bd-act-rs {
+  position: sticky;
+  top: var(--bd-act-bar);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 12px 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-accent) 22%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 5%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-act-rs-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.bd-act-rs-top > .bd-i {
+  color: var(--bd-accent-text);
+}
+
+.bd-act-rs-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-act-rs-what .bd-title {
+  color: var(--bd-muted);
+}
+
+.bd-act-rs .bd-rs {
+  align-items: flex-start;
+}
+
+.bd-act-rs .bd-rs[data-refused] {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- project menu: pages */
+
+/* A page the menu opens: its name, what it holds, and an arrow that says it goes somewhere. */
+.bd-pm-go {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1px 8px;
+  width: 100%;
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  text-align: left;
+}
+
+.bd-pm-go:hover {
+  background: color-mix(in srgb, var(--bd-fg) 6%, var(--bd-field));
+}
+
+.bd-pm-go-t {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.bd-pm-go-d {
+  grid-row: 2;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.bd-pm-go .bd-i {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  color: var(--bd-muted);
+  transform: rotate(-90deg);
+}
+
+/* ---------------------------------------------------------------- memories page */
+
+/*
+ * What every agent session in the project starts with. Set like notes on a board: the name small and exact, the text at
+ * reading size, and nothing destructive that is one click away. Each memory hangs off a hairline rule on its left that
+ * warms to the accent while it is being changed, and red while a forget is asked.
+ */
+.bd-mem {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  animation: bd-enter 170ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.bd-mem-h {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+
+.bd-mem-h .bd-n {
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+.bd-mem-addbtn .bd-i {
+  margin-left: -2px;
+}
+
+.bd-mem-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px 20px;
+  overflow-y: auto;
+}
+
+.bd-mem-lede {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-mem-search {
+  flex: none;
+  height: 28px;
+}
+
+.bd-mem-body > .bd-paused {
+  margin: 0;
+}
+
+.bd-mem-note {
+  align-items: center;
+  color: var(--bd-fg);
+  font-size: 12px;
+}
+
+.bd-mem-note-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.bd-mem-note-body > span {
+  overflow-wrap: anywhere;
+}
+
+/* After a forget: tinted with the accent so it is seen, with Undo as the one strong button on it. */
+.bd-mem-note[data-kind='forgot'] {
+  border-color: color-mix(in srgb, var(--bd-accent) 45%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 10%, var(--bd-bg));
+  font-weight: 500;
+}
+
+.bd-mem-note .bd-mem-quote {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 400;
+}
+
+.bd-mem-note[data-kind='taken'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+}
+
+.bd-mem-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-mem-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0 10px 11px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-mem-item:last-child {
+  border-bottom: 0;
+}
+
+.bd-mem-item::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--bd-muted) 30%, transparent);
+  transition: background 160ms ease;
+}
+
+.bd-mem-item:hover::before,
+.bd-mem-item:focus-within::before,
+.bd-mem-item[data-mode='edit']::before {
+  background: var(--bd-accent);
+}
+
+.bd-mem-item[data-mode='forget']::before {
+  background: var(--bd-err);
+}
+
+/* Just written: a short warm wash, so the eye finds it at the top of the list. */
+.bd-mem-item[data-fresh] {
+  animation: bd-mem-fresh 1400ms ease-out;
+}
+
+@keyframes bd-mem-fresh {
+  from {
+    background: color-mix(in srgb, var(--bd-accent) 14%, transparent);
+  }
+}
+
+.bd-mem-key {
+  overflow: hidden;
+  color: var(--bd-fg);
+  font-family: var(--bd-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-mem-text {
+  margin: 0;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-mem-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -2px 0 0;
+}
+
+.bd-mem-top .bd-mem-key {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-mem-meta {
+  margin: 1px 0 0;
+  /* Between muted and the text colour: above 4.5:1 on both themes (preview tokens: light 6.3:1, dark 7.8:1). */
+  color: color-mix(in srgb, var(--bd-muted) 70%, var(--bd-fg));
+  font-size: 11px;
+}
+
+.bd-mem-tools {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-right: -4px;
+}
+
+/* Quiet at rest but plainly readable, touch has no hover (preview tokens: light 7.2:1, dark 9.6:1). */
+.bd-mem-act {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 1px);
+  background: none;
+  color: color-mix(in srgb, var(--bd-muted) 45%, var(--bd-fg));
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-mem-act:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-mem-act[id^='bd-memforget-']:hover:not(:disabled) {
+  color: var(--bd-err-text);
+}
+
+.bd-mem-act:disabled {
+  opacity: 0.6;
+}
+
+/* Changing a memory: what it says now stays on screen, above the new text, until Save. */
+.bd-mem-was {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px 7px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-mem-was[data-refused='changed'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 45%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 7%, var(--bd-field));
+}
+
+.bd-mem-was[data-refused='gone'] .bd-mem-text {
+  color: var(--bd-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--bd-muted) 60%, transparent);
+}
+
+.bd-mem-label {
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bd-mem-item > .bd-mem-label {
+  margin-top: 4px;
+}
+
+.bd-mem-field {
+  width: 100%;
+  min-height: 72px;
+}
+
+.bd-mem-hint {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bd-mem-alert {
+  margin: 0;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.bd-mem-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* The forget step: the text that goes, what happens, and a red button that is not where Forget was. */
+.bd-mem-forget {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 9px 9px;
+  border: 1px solid color-mix(in srgb, var(--bd-err) 35%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-err) 6%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-mem-forget-h {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.bd-mem-quote {
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--bd-err) 45%, var(--bd-line));
+}
+
+.bd-mem-forget .bd-mem-hint {
+  color: var(--bd-fg);
+}
+
+.bd-mem-danger {
+  border-color: transparent;
+  background: var(--bd-err);
+  color: var(--bd-bg);
+  font-weight: 600;
+}
+
+.bd-mem-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bd-err) 86%, var(--bd-fg));
+}
+
+/* A new memory: the text first, then an optional name. */
+.bd-mem-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--bd-accent) 30%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-mem-name {
+  width: 100%;
+  font-family: var(--bd-mono);
+  font-size: 12px;
+}
+
+.bd-mem-taken {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bd-mem-quiet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 28px 12px;
+  color: var(--bd-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.bd-mem-quiet p {
+  margin: 0;
+}
+
+.bd-mem-quiet-sub {
+  max-width: 30ch;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bd-mem-err {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--bd-err-text);
+  font-size: 12px;
+}
+
+/* Focus lands on the page title only so Tab and screen readers start there; it draws no ring. */
+.bd .bd-mem-h:focus-visible {
+  outline: none;
+}
+
+/* "Discard your changes?": in place of the step's buttons, or under the top bar when leaving the page. */
+.bd-mem-ask {
+  flex-wrap: wrap;
+  gap: 6px 6px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+  color: var(--bd-fg);
+  outline: none;
+  animation: bd-drop 140ms ease-out;
+}
+
+.bd-mem-ask:focus-visible {
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-mem-ask-q {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.bd-mem-ask-d {
+  color: var(--bd-muted);
+  font-weight: 400;
+}
+
+.bd-mem > .bd-mem-ask {
+  margin: 8px 12px 0;
+}
+
+/* Leaving the page: the question and what it means take the full width, the two buttons a row of their own. */
+.bd-mem > .bd-mem-ask .bd-mem-ask-q {
+  flex-basis: 100%;
+}
+
+/* ---------------------------------------------------------------- supersede and duplicate */
+
+.bd-replace .bd-input {
+  width: 100%;
+}
+
+.bd-replace .bd-opts {
+  margin: 0 -2px;
+}
+
+/* The confirmation closes the bead: tinted like the other questions that cannot be taken back in one click. */
+.bd-replace[data-stage='confirm'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 6%, var(--bd-field));
+}
+
+.bd-replace-q {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+
+.bd-replace-lab {
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-replace-pick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.bd-replace-pick .bd-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-fg);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-replace-says {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-replace-says b {
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- close dialog */
+
+.bd-closeform {
+  gap: 4px;
+}
+
+.bd-closeq {
+  margin: 0 0 2px;
+  color: var(--bd-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bd-closeform .bd-flab {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.bd-closeform .bd-input {
+  width: 100%;
+}
+
+.bd-closenote {
+  min-height: 48px;
+  max-height: 160px;
+  padding: 5px 8px;
+  line-height: 1.45;
+  resize: none;
+}
+
+.bd-closeform .bd-popacts,
+.bd-closeform .bd-confirm {
+  margin-top: 4px;
+}
+
+.bd-closeform .bd-confirm {
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------- epics ready to close */
+
+/* Under the epic's group, lined up with its progress bar: the one thing left to do for it. */
+.bd-epic-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 12px 4px 54px;
+}
+
+.bd-epic-ready[data-where='detail'] {
+  margin: 8px 0 0 24px;
+}
+
+.bd-epic-ready-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.bd-epic-ready-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--bd-ok-text, var(--bd-ok));
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.bd-epic-ready[data-where='detail'] .bd-epic-ready-t {
+  margin-right: 0;
+}
+
+/* A small filled tick, the same mark as a done acceptance box. */
+.bd-epic-ready-mark {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bd-ok);
+}
+
+.bd-epic-ready-mark::after {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bd-bg);
+  border-width: 0 1.6px 1.6px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.bd-epic-ready .bd-nstep {
+  margin-top: 0;
+}
 `;
 
   // src/panel/ui/App.tsx
@@ -11002,14 +13891,14 @@ button.bd-rel:focus-visible {
       host2.close().catch(() => {
       });
     }
-    const confirm = () => void attach(at2);
+    const chooseNow = () => void attach(at2);
     const onKeyDown = (e3) => {
       if (composing(e3)) return;
       const ctrl = e3.ctrlKey && !e3.metaKey && !e3.altKey;
       if (e3.key === "ArrowDown" || ctrl && e3.key === "n") move(1);
       else if (e3.key === "ArrowUp" || ctrl && e3.key === "p") move(-1);
       else if (e3.key === "Enter") {
-        if (!e3.shiftKey) confirm();
+        if (!e3.shiftKey) chooseNow();
       } else if (e3.key === "Escape") {
         if (query) setQuery("");
         else host2.close().catch(() => {
@@ -11085,7 +13974,7 @@ button.bd-rel:focus-visible {
         ] }),
         /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm", onClick: () => host2.close().catch(() => {
         }), children: "Cancel" }),
-        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: busy || !at2, onClick: confirm, children: busy ? /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-sm bd-btn-primary", disabled: busy || !at2, onClick: chooseNow, children: busy ? /* @__PURE__ */ u3(S, { children: [
           /* @__PURE__ */ u3(IconSpinner, { size: 12 }),
           "Attaching\u2026"
         ] }) : "Attach" })
@@ -11129,6 +14018,7 @@ button.bd-rel:focus-visible {
       if (isSyncChip(item)) return /* @__PURE__ */ u3(SyncChipView, { host: host2, here: chipDirectory(item) === state.directory });
       if (chipId === null && chipDirectory(item) !== null) return /* @__PURE__ */ u3(EmptyState, { tone: "neutral", title: "That bead is in another project.", body: "Open that project to see it." });
       if (state.workspace && state.workspace.kind !== "ok") return /* @__PURE__ */ u3(WorkspaceEmpty, { workspace: state.workspace });
+      if (needsUpdate(state)) return /* @__PURE__ */ u3(EmptyState, { tone: "ask", title: UPDATE_TITLE, body: "Update it from the Abacus panel, then pick beads here." });
       if (firstLoadError(state)) return /* @__PURE__ */ u3(LoadError, {});
       if (!state.snapshot) return /* @__PURE__ */ u3(Loading, {});
       if (chipId) return /* @__PURE__ */ u3(ChipView, { id: chipId, host: host2 });

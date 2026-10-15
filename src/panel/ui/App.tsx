@@ -3,7 +3,8 @@ import { useLayoutEffect, useRef } from 'preact/hooks';
 import type { HostClient } from '@openchamber/sdk';
 import { AgentContext, createAgent } from '../agent';
 import { createClient } from '../client';
-import { createStore, firstLoadError, StoreContext, useStore, type State, type Store, type StoreDeps } from '../store';
+import { createStore, firstLoadError, needsUpdate, StoreContext, useStore, type State, type Store, type StoreDeps } from '../store';
+import { ProjectUpdate } from './ProjectUpdate';
 import { AttachFooter } from './AttachFooter';
 import { WorktreeSheet } from './WorktreeSheet';
 import { createSync, SyncContext } from '../sync';
@@ -13,6 +14,8 @@ import { Header } from './Header';
 import { Detail } from './Detail';
 import { List } from './List';
 import { ActivityView } from './ActivityView';
+import { NeedsView } from './NeedsView';
+import { MemoriesPage } from './MemoriesPage';
 import { Footer } from './Footer';
 import { CreateForm } from './CreateForm';
 import { Loading, LoadError, NoProject, WorkspaceEmpty } from './EmptyState';
@@ -23,24 +26,34 @@ import css from './styles.css';
 const listing = (state: State): boolean =>
   state.directory !== null && (!state.workspace || state.workspace.kind === 'ok') && !firstLoadError(state) && (state.snapshot?.beads.length ?? 0) > 0;
 
-/** A bead's detail is open over a usable project. */
-export const showingDetail = (state: State): boolean => state.detail !== null && state.snapshot !== null && (!state.workspace || state.workspace.kind === 'ok');
+/**
+ * A bead's detail is open over a usable project. Never while the project waits for its one-time update: a comment or a new bead
+ * would open the store for writing, and Beads updates the store the moment it does, so only the update's own confirm may do that.
+ */
+export const showingDetail = (state: State): boolean => state.detail !== null && state.snapshot !== null && (!state.workspace || state.workspace.kind === 'ok') && !needsUpdate(state);
+
+/** The project's memories are open over a usable project, in place of the list and any detail (both come back as they were). */
+export const showingMemories = (state: State): boolean => state.page === 'memories' && state.directory !== null && state.workspace?.kind === 'ok' && !needsUpdate(state);
 
 /** What the panel shows below the header, in order of precedence. */
 function Body() {
   const state = useStore();
   if (state.directory === null) return <NoProject />;
   if (state.workspace && state.workspace.kind !== 'ok') return <WorkspaceEmpty workspace={state.workspace} />;
+  // Made with an older Beads: the update takes the list's place, ahead of the generic "couldn't load".
+  if (needsUpdate(state)) return <ProjectUpdate key={state.directory} />;
   if (firstLoadError(state)) return <LoadError />;
   if (!state.snapshot) return <Loading />;
   // Keyed on the project so the keyboard cursor and expanded sections start fresh in each one.
   if (state.view === 'activity') return <ActivityView key={state.directory} />;
+  if (state.view === 'needs') return <NeedsView key={state.directory} />;
   return <List key={state.directory} />;
 }
 
 export function App() {
   const state = useStore();
   const detail = showingDetail(state);
+  const memories = showingMemories(state);
   // What a sheet or confirmation covers cannot be reached; the leave confirmation sits inside the detail, so only a sheet makes the detail inert.
   const covered = state.overlays.length > 0;
   const sheet = state.overlays.some((name) => name !== 'leave');
@@ -64,23 +77,35 @@ export function App() {
     row?.closest<HTMLElement>('[role="listbox"]')?.focus({ preventScroll: true });
   }, [detail]);
 
+  // Back from the memories: focus goes to the project menu that opened them, unless the person already moved it.
+  const wasMemories = useRef(memories);
+  useLayoutEffect(() => {
+    const leaving = wasMemories.current && !memories;
+    wasMemories.current = memories;
+    const active = document.activeElement;
+    if (!leaving || (active && active !== document.body)) return;
+    document.querySelector<HTMLElement>('.bd-projbtn')?.focus({ preventScroll: true });
+  }, [memories]);
+
   return (
     <div class="bd">
       <Header />
       {/* Keyed on the project so its folded beads start fresh in each one. */}
       <SyncCard key={state.directory ?? ''} />
       {/* The list stays mounted under a detail, so its cursor, open sections and place are kept for Back. */}
-      <main class="bd-body" ref={body} hidden={detail} inert={covered} onScroll={(e) => {
+      <main class="bd-body" ref={body} hidden={detail || memories} inert={covered} onScroll={(e) => {
           // Hiding the list under a detail can report a scroll to 0; only the visible list's position counts.
           if (!detail) scrolled.current = e.currentTarget.scrollTop;
         }}>
         <Body />
       </main>
-      {detail && <Detail inert={sheet} footer={<AttachFooter id={state.detail!.stack[state.detail!.stack.length - 1]!.id} />} />}
-      {listing(state) && !detail && <Footer />}
-      {state.create && state.snapshot && <CreateForm />}
+      {/* Keyed on the project so nothing typed on one project's memories shows on another's. */}
+      {memories && <MemoriesPage key={state.directory} />}
+      {detail && !memories && <Detail inert={sheet} footer={<AttachFooter id={state.detail!.stack[state.detail!.stack.length - 1]!.id} />} />}
+      {listing(state) && !detail && !memories && <Footer />}
+      {state.create && state.snapshot && !needsUpdate(state) && <CreateForm />}
       <WorktreeSheet />
-      <PublishSheet />
+      {!needsUpdate(state) && <PublishSheet />}
     </div>
   );
 }

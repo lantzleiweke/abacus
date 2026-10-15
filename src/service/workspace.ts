@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { WorkspaceState } from '../shared/types';
 import { BdError, resolveExecutable, runBd, runBdJson } from './bd/exec';
+import { schemaSkewOf } from './errors';
 
 /** Oldest `bd` the panel supports. */
 export const MIN_BD_VERSION = '1.2.2';
@@ -18,16 +19,16 @@ export interface DetectOptions {
   searchDirs?: string[];
 }
 
-type Version = [number, number, number];
+export type Version = [number, number, number];
 
 /** `1.2.2`, `v1.3.0-rc1` and `bd version 1.2.2 (Homebrew)` all parse; anything without a x.y.z does not. */
-function parseVersion(text: string): Version | null {
+export function parseVersion(text: string): Version | null {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(text);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
 /** Negative when `a` is older than `b`. */
-function compareVersions(a: Version, b: Version): number {
+export function compareVersions(a: Version, b: Version): number {
   for (let i = 0; i < 3; i += 1) {
     const diff = a[i]! - b[i]!;
     if (diff !== 0) return diff;
@@ -269,6 +270,9 @@ export async function detectWorkspace(directory: string, opts: DetectOptions = {
     if (cause instanceof BdError && cause.kind === 'exit' && NO_DATABASE.test(`${cause.message}\n${cause.stderr}`)) {
       return { kind: 'no-workspace' };
     }
+    // A store from an older bd refuses every read-only open, this one too. The project is still the person's to open: the
+    // snapshot says it needs the update, and the remote is looked up again once it has been updated (`readFailureDropped`).
+    if (schemaSkewOf(cause)) return { kind: 'ok', root, mode, bdVersion, hasRemote: false, projectName: basename(root) };
     throw cause;
   }
   return { kind: 'ok', root, mode, bdVersion, hasRemote, projectName: basename(root) };

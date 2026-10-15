@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/preact';
 import type { ComponentChildren } from 'preact';
 import { createClient } from '../../../src/panel/client';
-import { createStore, StoreContext, uiKey, type Store } from '../../../src/panel/store';
+import { createStore, projectKey, StoreContext, uiKey, type Store } from '../../../src/panel/store';
 import { Header } from '../../../src/panel/ui/Header';
 import { App } from '../../../src/panel/ui/App';
 import { WorkspaceEmpty, workspaceCopy } from '../../../src/panel/ui/EmptyState';
 import type { WorkspaceState } from '../../../src/shared/types';
-import { envelope, fakeHost, flush, freshness, json, OK, snapshot, type Answer, type Call } from './helpers';
+import { deferred, envelope, fakeHost, flush, freshness, json, OK, snapshot, type Answer, type Call } from './helpers';
 
 const NOW = new Date('2026-10-14T12:00:00Z').getTime();
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
@@ -323,6 +323,10 @@ describe('Empty states', () => {
     await open(store);
     wrap(<WorkspaceEmpty workspace={workspace} />);
     expect(screen.getByText(/last opened with Beads 1\.2\.2/)).toBeTruthy();
+    // It does not promise that opening changes the project: an older format is asked about separately, in plain words.
+    const said = document.querySelector('.bd-empty-body')!.textContent!;
+    expect(said).toBe('This project was last opened with Beads 1.2.2. Opening it lets Beads check the project. If it is on an older format, Abacus will ask before updating it.');
+    expect(said).not.toMatch(/lets Beads update it|change its files|—/);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open project' }));
       await flush();
@@ -372,5 +376,372 @@ describe('Empty states', () => {
     wrap(<App />);
     await open(store);
     expect(screen.getByText('When your agent creates beads, they show up here within a few seconds.')).toBeTruthy();
+  });
+});
+
+describe('Needs me tab and project menu', () => {
+  const fresh = freshness({ localRefreshedAt: iso(0) });
+  const task = (id: string, over: Record<string, unknown> = {}) => ({
+    id, title: `Title ${id}`, status: 'open', priority: 2, type: 'task', assignee: null, labels: [], parentId: null, description: '', design: '', acceptance: '', notes: '',
+    createdAt: iso(864e6), createdBy: null, updatedAt: iso(86_400_000), closedAt: null, closeReason: null, dependencies: [], comments: [], extra: {}, ...over,
+  });
+  const review = { id: 'p-g', kind: 'human', reason: 'Look', blocks: ['p-1'], createdBy: null, createdAt: iso(0), timeoutMs: null, planApproval: false };
+  const statuses = [{ name: 'open', category: 'active', icon: null }, { name: 'in_progress', category: 'wip', icon: null }, { name: 'closed', category: 'done', icon: null }];
+
+  it('Needs me count is on the tab, the rail badge is unchanged', async () => {
+    const { store, wrap, host } = setup(() =>
+      json(snapshot({ beads: [task('p-1'), task('p-2', { labels: ['human'] })] as never, statuses, gates: [review] as never, unseenIds: ['p-2'], freshness: fresh })),
+    );
+    const setBadge = vi.fn(async () => {});
+    (host as unknown as { setBadge: unknown }).setBadge = setBadge;
+    wrap(<Header />);
+    await open(store);
+    // Waiting (p-1), Asked (p-2) and Changed (p-2): three rows.
+    const tab = screen.getByRole('button', { name: 'Needs me 3' });
+    expect(tab.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getAllByRole('group', { name: 'View' })[0]!.firstElementChild).toBe(tab);
+    // The unseen chip (the rail badge's number) still counts unseen beads only.
+    expect(screen.getByRole('button', { name: '1 bead changed since you last looked' })).toBeTruthy();
+    expect(setBadge).toHaveBeenLastCalledWith(1);
+  });
+
+  it('hides the count when nothing needs the person', async () => {
+    const { store, wrap } = setup(() => json(snapshot({ beads: [task('p-1')] as never, statuses, freshness: fresh })));
+    wrap(<Header />);
+    await open(store);
+    expect(screen.getByRole('button', { name: 'Needs me' }).querySelector('.bd-seg-n')).toBeNull();
+  });
+
+  it('the project menu sets the Stuck days for this project, on this computer only', async () => {
+    const { store, wrap, stored, calls } = setup(() => json(snapshot({ beads: [task('p-1')] as never, statuses, freshness: fresh })));
+    wrap(<Header />);
+    await open(store);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'demo' }));
+      await flush();
+    });
+    const menu = screen.getByRole('dialog', { name: 'Project menu' });
+    const days = screen.getByRole('spinbutton', { name: 'Stuck after' }) as HTMLInputElement;
+    expect([days.getAttribute('aria-valuemin'), days.getAttribute('aria-valuemax'), days.getAttribute('aria-valuenow')]).toEqual(['1', '30', '3']);
+    expect(days.value).toBe('3');
+    // The menu opens on its first entry, the memories page. This Beads is too old for live updates: it says so, with nothing to press.
+    expect(document.activeElement).toBe(within(menu).getByRole('button', { name: 'Memories' }));
+    expect(menu.textContent).toMatch(/Live updatesNeeds a newer version of Beads \(1\.3 or later\)\./);
+    expect(within(menu).queryByRole('button', { name: /live updates/i })).toBeNull();
+    expect(menu.querySelector('.bd-pm-live')?.hasAttribute('aria-busy')).toBe(false);
+    await act(async () => {
+      fireEvent.input(days, { target: { value: '5' } });
+      await flush();
+    });
+    expect(store.get().settings.staleDays).toBe(5);
+    expect(stored.get(projectKey('/p/a'))).toMatchObject({ staleDays: 5 });
+    await act(async () => {
+      fireEvent.input(days, { target: { value: '0' } });
+      await flush();
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Enter a whole number of days from 1 to 30.');
+    expect(store.get().settings.staleDays).toBe(5);
+    await act(async () => {
+      fireEvent.input(days, { target: { value: '31' } });
+      await flush();
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Enter a whole number of days from 1 to 30.');
+    expect(store.get().settings.staleDays).toBe(5);
+    await act(async () => {
+      fireEvent.input(days, { target: { value: '5' } });
+      await flush();
+    });
+    await act(async () => {
+      fireEvent.keyDown(days, { key: 'ArrowUp' });
+      await flush();
+    });
+    expect(store.get().settings.staleDays).toBe(6);
+    // Nothing went to Beads.
+    expect(calls.map((c) => c.route).filter((r) => r !== 'snapshot')).toEqual([]);
+    await act(async () => {
+      fireEvent.keyDown(days, { key: 'Escape' });
+      await flush();
+    });
+    expect(screen.queryByRole('dialog', { name: 'Project menu' })).toBeNull();
+  });
+
+  it('offers no project menu before a project answers', async () => {
+    const { store, wrap } = setup(() => new Promise(() => {}));
+    wrap(<Header />);
+    await open(store);
+    expect(screen.getByText('a')).toBeTruthy();
+    expect(document.querySelector('[aria-haspopup]')).toBeNull();
+  });
+});
+
+describe('Project menu: live updates', () => {
+  type Status = { available: boolean; journal: 'on' | 'off' | 'unknown'; live: string };
+  const status = (over: Partial<Status> = {}): Status => ({ available: true, journal: 'off', live: 'off', ...over });
+  // Effects run as an act ends, and the reads they start answer after it: give those their own act.
+  const settle = async () => {
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        for (let j = 0; j < 4; j++) await flush();
+      });
+    }
+  };
+  const full = () => json(snapshot({ capabilities: { eventsJournal: true, leases: true }, freshness: freshness({ localRefreshedAt: iso(0) }) }));
+
+  /** Opens the menu on a 1.3 project whose routes answer as `routes` says; anything else is the snapshot. */
+  async function menu(routes: Partial<Record<'eventsStatus' | 'enableEvents', (call: Call) => Answer | Promise<Answer>>>) {
+    const env = setup((call) => (call.route === 'eventsStatus' || call.route === 'enableEvents' ? (routes[call.route]?.(call) ?? full()) : full()));
+    env.wrap(<Header />);
+    await open(env.store);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'demo' }));
+    });
+    await settle();
+    return { ...env, menu: screen.getByRole('dialog', { name: 'Project menu' }) };
+  }
+  const click = async (el: HTMLElement) => {
+    await act(async () => {
+      fireEvent.click(el);
+    });
+    await settle();
+  };
+  const routes = (calls: Call[]) => calls.map((c) => c.route).filter((r) => r !== 'snapshot');
+
+  it('says when the installed Beads is too old, with nothing to press', async () => {
+    const { menu: m, calls } = await menu({ eventsStatus: () => json(status({ available: false })) });
+    expect(m.textContent).toContain('Live updatesNeeds a newer version of Beads (1.3 or later). Until then, the panel checks for changes every few seconds.');
+    expect(within(m).queryByRole('button', { name: /turn on/i })).toBeNull();
+    expect(routes(calls)).toEqual(['eventsStatus']);
+  });
+
+  it('turn on live updates needs the confirm and names the file', async () => {
+    let journal: Status['journal'] = 'off';
+    const { menu: m, calls } = await menu({
+      eventsStatus: () => json(status({ journal })),
+      enableEvents: () => {
+        journal = 'on';
+        return json({ ok: true, status: status({ journal: 'on', live: 'following' }) });
+      },
+    });
+    expect(m.textContent).toContain('Off');
+    expect(m.textContent).toContain('Off for this project, so the panel checks for changes every few seconds.');
+    const turnOn = within(m).getByRole('button', { name: 'Turn on live updates' });
+    await click(turnOn);
+    // Pressing it only asks: nothing is sent until the confirm.
+    expect(routes(calls)).toEqual(['eventsStatus']);
+    const ask = within(m).getByRole('alertdialog', { name: 'Turn on live updates?' });
+    expect(ask.textContent).toContain('Beads will keep a log of changes on this computer for 7 days.');
+    expect(ask.textContent).toContain("This changes the project's settings file, .beads/config.yaml, which is shared with your team if you commit it.");
+    expect(ask.textContent).not.toMatch(/Teammates are not affected/);
+    expect(ask.getAttribute('aria-describedby')).toBe('bd-pm-ask-d');
+    // Focus lands on the safe answer.
+    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }));
+    await click(within(ask).getByRole('button', { name: 'Cancel' }));
+    expect(within(m).queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    // Escape answers the question and leaves the menu open.
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await act(async () => {
+      fireEvent.keyDown(within(m).getByRole('alertdialog'), { key: 'Escape' });
+    });
+    await settle();
+    expect(within(m).queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Project menu' })).toBe(m);
+    expect(routes(calls)).toEqual(['eventsStatus']);
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    expect(calls.filter((c) => c.route === 'enableEvents').map((c) => c.body)).toEqual([{ directory: '/p/a', confirm: true }]);
+    expect(m.textContent).toContain('On');
+    expect(within(m).getByRole('status').textContent).toBe('Following changes as they happen.');
+    expect(within(m).queryByRole('button', { name: /turn on/i })).toBeNull();
+  });
+
+  it.each([
+    ['following', 'Following changes as they happen.'],
+    ['starting', 'Starting. Until then, the panel checks for changes every few seconds.'],
+    ['off', 'Starting. Until then, the panel checks for changes every few seconds.'],
+    ['backoff', 'Reconnecting. Until then, the panel checks for changes every few seconds.'],
+    ['failed', 'Not working right now, so the panel checks for changes every few seconds.'],
+  ])('when on and %s, says what it is doing in plain words', async (live, text) => {
+    const { menu: m } = await menu({ eventsStatus: () => json(status({ journal: 'on', live })) });
+    expect(m.querySelector('.bd-pm-state')?.textContent).toBe('On');
+    expect(within(m).getByRole('status').textContent).toBe(text);
+    expect(within(m).queryByRole('button', { name: /turn on/i })).toBeNull();
+  });
+
+  it('when the setting cannot be read, offers Try again', async () => {
+    let answer: Answer = json(status({ journal: 'unknown' }));
+    const { menu: m, calls } = await menu({ eventsStatus: () => answer });
+    expect(m.textContent).toContain("Couldn't read this setting for the project.");
+    answer = envelope(500, { code: 'beads-error', message: 'no' });
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    expect(m.textContent).toContain("Couldn't read this setting for the project.");
+    answer = json(status({ journal: 'off' }));
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    expect(within(m).getByRole('button', { name: 'Turn on live updates' })).toBeTruthy();
+    expect(routes(calls)).toEqual(['eventsStatus', 'eventsStatus', 'eventsStatus']);
+  });
+
+  it('a sync running says to wait, for the read and for turning it on', async () => {
+    const busy = () => envelope(409, { code: 'sync-running', message: 'Sync in progress. Try again when it finishes.' });
+    let read: () => Answer = busy;
+    const { menu: m } = await menu({ eventsStatus: () => read(), enableEvents: busy });
+    expect(m.textContent).toContain('Wait for the sync to finish, then try again.');
+    read = () => json(status());
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    expect(within(m).getByRole('alert').textContent).toBe('Wait for the sync to finish, then try again.');
+    // Still off, with the button back and focused.
+    expect(document.activeElement).toBe(within(m).getByRole('button', { name: 'Turn on live updates' }));
+  });
+
+  it("an uncertain answer shows the service's words and the status read again, not the generic saved text", async () => {
+    const MESSAGE = "Live updates may be on now, but Beads didn't confirm it.";
+    let reads = 0;
+    const { menu: m, toast } = await menu({
+      eventsStatus: () => json(++reads === 1 ? status() : status({ journal: 'on', live: 'starting' })),
+      enableEvents: () => envelope(504, { code: 'uncertain', message: MESSAGE, saved: true }),
+    });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    expect(m.querySelector('.bd-pm-note')?.textContent).toBe(MESSAGE);
+    expect(m.querySelector('.bd-pm-state')?.textContent).toBe('On');
+    expect(m.textContent).toContain('Starting. Until then, the panel checks for changes every few seconds.');
+    expect(document.body.textContent).not.toMatch(/Refreshing to show it/);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('an uncertain answer whose status cannot be read either keeps the words and offers Try again', async () => {
+    const MESSAGE = "Live updates may be on now, but Beads didn't confirm it.";
+    let reads = 0;
+    const { menu: m } = await menu({
+      eventsStatus: () => (++reads === 1 ? json(status()) : envelope(500, { code: 'beads-error', message: 'no' })),
+      enableEvents: () => envelope(504, { code: 'uncertain', message: MESSAGE }),
+    });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    expect(m.querySelector('.bd-pm-note')?.textContent).toBe(MESSAGE);
+    expect(m.textContent).toContain("Couldn't read this setting for the project.");
+    expect(within(m).getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('an unconfirmed answer whose read-again lands after the project changed is dropped, not kept for later', async () => {
+    const UNSURE = "Live updates may be on now, but Beads didn't confirm it.";
+    const slow = deferred<Answer>();
+    let reads = 0;
+    const { menu: m, store } = await menu({
+      eventsStatus: () => (++reads === 2 ? slow.promise : json(status())),
+      enableEvents: () => envelope(504, { code: 'uncertain', message: UNSURE }),
+    });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    expect(reads).toBe(2);
+    await open(store, '/p/b');
+    slow.resolve(json(status({ journal: 'on', live: 'following' })));
+    await settle();
+    await open(store, '/p/a');
+    await settle();
+    if (!screen.queryByRole('dialog', { name: 'Project menu' })) await click(screen.getByRole('button', { name: 'demo' }));
+    // The answer was about a project no longer shown: nothing of it comes back with the project.
+    expect(screen.getByRole('dialog', { name: 'Project menu' }).textContent).toContain('Off for this project');
+    expect(document.body.textContent).not.toContain(UNSURE);
+  });
+
+  it('Try again keeps focus in the menu, says the answer, and Escape still closes the menu', async () => {
+    let answer: Answer = json(status({ journal: 'unknown' }));
+    const { menu: m } = await menu({ eventsStatus: () => answer });
+    const line = m.querySelector('.bd-pm-say')!;
+    answer = json(status({ journal: 'on', live: 'following' }));
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    // The same live line, now focused, carries the answer.
+    expect(m.querySelector('.bd-pm-say')).toBe(line);
+    expect(document.activeElement).toBe(line);
+    expect(line.getAttribute('role')).toBe('status');
+    expect(line.textContent).toBe('Following changes as they happen.');
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    });
+    expect(screen.queryByRole('dialog', { name: 'Project menu' })).toBeNull();
+  });
+
+  it('Try again that still cannot read keeps focus on the line and offers Try again again', async () => {
+    const { menu: m } = await menu({ eventsStatus: () => envelope(500, { code: 'beads-error', message: 'no' }) });
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    expect(document.activeElement).toBe(m.querySelector('.bd-pm-say'));
+    expect(within(m).getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('an unsupported answer shows the too-old line', async () => {
+    const { menu: m } = await menu({ eventsStatus: () => envelope(501, { code: 'unsupported', message: 'Live updates need a newer version of Beads.' }) });
+    expect(m.textContent).toContain('Needs a newer version of Beads (1.3 or later).');
+    expect(within(m).queryByRole('button')?.textContent).not.toMatch(/Try again|Turn on/);
+    expect(m.querySelector('.bd-pm-live')?.hasAttribute('aria-busy')).toBe(false);
+  });
+
+  it('Escape on the confirm answers it and gives focus back to Turn on live updates', async () => {
+    const { menu: m } = await menu({ eventsStatus: () => json(status()) });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    });
+    await settle();
+    expect(within(m).queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(within(m).getByRole('button', { name: 'Turn on live updates' }));
+  });
+
+  it('Escape while it turns on does nothing, so the answer is seen', async () => {
+    const slow = deferred<Answer>();
+    const { menu: m } = await menu({ eventsStatus: () => json(status()), enableEvents: () => slow.promise });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    // A click leaves focus on the button it pressed.
+    const busy = within(m).getByRole('button', { name: 'Turning on…' });
+    busy.focus();
+    await act(async () => {
+      fireEvent.keyDown(busy, { key: 'Escape' });
+    });
+    expect(screen.getByRole('dialog', { name: 'Project menu' })).toBe(m);
+    slow.resolve(envelope(409, { code: 'sync-running', message: 'Sync in progress. Try again when it finishes.' }));
+    await settle();
+    expect(within(m).getByRole('alert').textContent).toBe('Wait for the sync to finish, then try again.');
+  });
+
+  it('an answer that arrives after the menu closed is shown when it opens again', async () => {
+    const slow = deferred<Answer>();
+    const { menu: m } = await menu({ eventsStatus: () => json(status()), enableEvents: () => slow.promise });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    // A click outside closes the menu while the change runs.
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+    });
+    expect(screen.queryByRole('dialog', { name: 'Project menu' })).toBeNull();
+    slow.resolve(envelope(409, { code: 'sync-running', message: 'Sync in progress. Try again when it finishes.' }));
+    await settle();
+    await click(screen.getByRole('button', { name: 'demo' }));
+    const again = screen.getByRole('dialog', { name: 'Project menu' });
+    expect(within(again).getByRole('alert').textContent).toBe('Wait for the sync to finish, then try again.');
+    // Shown once.
+    await click(screen.getByRole('button', { name: 'demo' }));
+    await click(screen.getByRole('button', { name: 'demo' }));
+    expect(screen.getByRole('dialog', { name: 'Project menu' }).querySelector('.bd-pm-note')).toBeNull();
+  });
+
+  it('the unconfirmed note clears once a later read finds it on', async () => {
+    const UNSURE = "Live updates may be on now, but Beads didn't confirm it.";
+    let reads = 0;
+    const { menu: m } = await menu({
+      eventsStatus: () => (++reads === 1 ? json(status()) : reads === 2 ? envelope(500, { code: 'beads-error', message: 'no' }) : json(status({ journal: 'on', live: 'following' }))),
+      enableEvents: () => envelope(504, { code: 'uncertain', message: UNSURE }),
+    });
+    await click(within(m).getByRole('button', { name: 'Turn on live updates' }));
+    await click(within(m).getByRole('button', { name: 'Turn on' }));
+    const note = m.querySelector<HTMLElement>('.bd-pm-note')!;
+    expect(note.textContent).toBe(UNSURE);
+    // Focus goes to the service's words, so they are read out.
+    expect(document.activeElement).toBe(note);
+    await click(within(m).getByRole('button', { name: 'Try again' }));
+    expect(m.querySelector('.bd-pm-note')).toBeNull();
+    expect(m.querySelector('.bd-pm-say')?.textContent).toBe('Following changes as they happen.');
   });
 });
