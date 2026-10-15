@@ -17,12 +17,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-ACCENT = "#DA4B36"     # vermilion: 4.2:1 on #fff, 4.0:1 on #1e1e1e, 4.5:1 on #0d1117
-INK_LIGHT = "#1C1B1A"  # mark and wordmark on light pages
-INK_DARK = "#F2EFE9"   # mark and wordmark on dark pages
-TILE = "#1A1918"       # app tile behind the 512 logo
-PAPER = "#F4F1EC"      # social preview background
-MUTED = "#6B665F"      # social preview tagline
+ACCENT = "#12A37F"     # jade: 3.2:1 on #fff, 5.9:1 on #0d1117 (3:1 is the bar for graphics)
+INK_LIGHT = "#111418"  # mark and wordmark on light pages
+INK_DARK = "#F3F4F6"   # mark and wordmark on dark pages
+TILE = "#111418"       # app tile behind the 512 logo
+PAPER = "#F4F5F7"      # social preview background
+MUTED = "#5B6170"      # social preview tagline
 TAGLINE = "Your beads in the OpenChamber right rail"
 
 # The tagline font. JetBrains Mono is OFL; any TTF works.
