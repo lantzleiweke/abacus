@@ -89,7 +89,7 @@ If a newer `bd` than the one that last opened the project is installed, the pane
 - Beads in server mode that stop partway through a merge are handled on a best-effort basis. That path has been tested against a simulated half-merge, not a real one over git and https.
 - Sync and Publish run with the environment OpenChamber gives extensions. That includes `HOME`, so stored Git credentials work. It does not include `SSH_AUTH_SOCK`, so use an SSH key that needs no agent (set up in `~/.ssh/config`) or an HTTPS remote with stored credentials.
 
-The full list is in [decisions](docs/decisions.md#deferred).
+Each known limit has an [issue](https://github.com/lantzleiweke/abacus/issues), and the [Roadmap](https://github.com/lantzleiweke/abacus/issues/18) lists what is planned. The reasoning behind each limit is in [decisions](docs/decisions.md#deferred).
 
 ## Documentation
 
