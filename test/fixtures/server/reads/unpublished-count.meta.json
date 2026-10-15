@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT COUNT(*) AS unpublished FROM dolt_log('remotes/origin/main..main')"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 220
+}

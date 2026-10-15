@@ -1,0 +1,14 @@
+[
+  {
+    "id": "scr-lha",
+    "title": "Milestone: beta launch",
+    "description": "Beta launch gate.",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "milestone",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:54Z",
+    "created_by": "Alice Tester",
+    "updated_at": "2026-10-14T08:30:34Z"
+  }
+]

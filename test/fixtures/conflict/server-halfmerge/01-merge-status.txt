@@ -1,0 +1,9 @@
+[
+  {
+    "is_merging": 1,
+    "source": "remotes/gitorigin/main",
+    "source_commit": "0gf1rlramf6lf4rehgcpd4ka7io0ft4f",
+    "target": "refs/heads/main",
+    "unmerged_tables": "issues"
+  }
+]

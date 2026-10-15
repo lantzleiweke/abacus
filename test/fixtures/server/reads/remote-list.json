@@ -1,0 +1,14 @@
+[
+  {
+    "name": "origin",
+    "url": "file://<scratch>/remotes/server-remote",
+    "sql_url": "file://<scratch>/remotes/server-remote",
+    "status": "ok"
+  },
+  {
+    "name": "gitorigin",
+    "url": "git+file://<scratch>/remotes/git-remote.git",
+    "sql_url": "git+file://<scratch>/remotes/git-remote.git",
+    "status": "ok"
+  }
+]

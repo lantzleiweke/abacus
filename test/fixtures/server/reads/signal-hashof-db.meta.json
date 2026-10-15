@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT DOLT_HASHOF_DB() AS db"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 223
+}

@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT id, issue_id, event_type, actor, old_value, new_value, comment, created_at FROM events ORDER BY id DESC LIMIT 50"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 179
+}

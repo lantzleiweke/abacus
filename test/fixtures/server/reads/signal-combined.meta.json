@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT DOLT_HASHOF('HEAD') AS head, DOLT_HASHOF_DB() AS working, (SELECT COUNT(*) FROM dolt_status) AS dirty_tables"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 256
+}

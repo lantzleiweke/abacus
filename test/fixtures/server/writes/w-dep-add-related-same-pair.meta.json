@@ -1,0 +1,17 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "dep",
+    "add",
+    "scr-8nw.1",
+    "scr-m0h",
+    "-t",
+    "related",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 1,
+  "ms": 165
+}

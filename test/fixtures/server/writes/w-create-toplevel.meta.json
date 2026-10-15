@@ -1,0 +1,17 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "create",
+    "Panel-created top level",
+    "-t",
+    "bug",
+    "-p",
+    "1",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 268
+}

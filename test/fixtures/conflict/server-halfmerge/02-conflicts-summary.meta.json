@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT * FROM dolt_conflicts"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 189
+}

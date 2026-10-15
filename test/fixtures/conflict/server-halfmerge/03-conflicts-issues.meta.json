@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT base_id, our_title, their_title, base_title, our_priority, their_priority, base_priority FROM dolt_conflicts_issues"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 236
+}

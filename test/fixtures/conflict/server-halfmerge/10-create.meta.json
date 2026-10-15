@@ -1,0 +1,17 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Bob Builder",
+    "create",
+    "Created during half merge",
+    "-t",
+    "task",
+    "-p",
+    "3",
+    "--json"
+  ],
+  "cwd_label": "server-b",
+  "exit": 1,
+  "ms": 206
+}

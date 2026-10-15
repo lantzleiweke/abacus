@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT event_type, COUNT(*) AS n FROM events GROUP BY event_type ORDER BY n DESC"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 173
+}

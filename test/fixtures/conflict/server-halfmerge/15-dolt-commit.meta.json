@@ -1,0 +1,10 @@
+{
+  "cmd": [
+    "bd",
+    "dolt",
+    "commit"
+  ],
+  "cwd_label": "server-b",
+  "exit": 1,
+  "ms": 173
+}

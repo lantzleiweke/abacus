@@ -1,0 +1,334 @@
+<style>
+  .bp-three { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
+  .bp-three .mockup { flex: 0 0 auto; margin: 0; }
+  .bp-three .mockup-body { padding: 12px; }
+  .bp-cap { font-size: 12px; color: var(--text-secondary); max-width: 380px; margin-top: 8px; line-height: 1.4; }
+
+  .bp { --bg: #141210; --surf: #1b1916; --surf2: #221f1b; --line: #2d2924; --text: #e9e2d6; --muted: #9a8f81; --dim: #6c645a; --tan: #c8a874;
+        --amber: #e0a64a; --red: #d3695a; --green: #84a56c; --gray: #6f675e;
+        width: 380px; height: 640px; background: var(--bg); color: var(--text); border: 1px solid #000; border-radius: 10px; overflow: hidden;
+        display: flex; flex-direction: column; font: 12.5px/1.35 "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  .bp svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .bp .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 11px; }
+
+  /* header */
+  .bp-top { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surf); }
+  .bp-proj { display: flex; align-items: center; gap: 6px; font-weight: 600; padding: 3px 6px 3px 4px; border-radius: 5px; background: var(--surf2); border: 1px solid var(--line); }
+  .bp-proj svg { color: var(--tan); }
+  .bp-live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; margin-left: auto; }
+  .bp-live b { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(132,165,108,.18); }
+  .bp-tools { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .bp-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 6px; background: var(--surf2); border: 1px solid var(--line); color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .bp-iconbtn { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); background: var(--surf); flex-shrink: 0; }
+  .bp-new { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border-radius: 6px; background: rgba(200,168,116,.14); color: var(--tan); font-weight: 600; }
+  .bp-new::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--tan); }
+  .bp-seg { display: flex; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--surf2); padding: 2px; flex-shrink: 0; }
+  .bp-seg span { display: flex; align-items: center; padding: 0 8px; border-radius: 4px; color: var(--dim); font-size: 11.5px; }
+  .bp-seg span.on { background: #34302a; color: var(--text); font-weight: 600; box-shadow: 0 1px 0 rgba(255,255,255,.04) inset; }
+
+  .bp-list { flex: 1; overflow: hidden; padding: 4px 0; }
+  .bp-foot { border-top: 1px solid var(--line); padding: 7px 12px; color: var(--muted); font-size: 11.5px; display: flex; gap: 10px; background: var(--surf); }
+  .bp-foot b { color: var(--text); font-weight: 600; }
+
+  /* rows (A density) */
+  .bp-row { position: relative; display: flex; align-items: center; gap: 7px; min-height: 26px; padding: 0 12px 0 calc(14px + var(--l, 0) * 16px); }
+  .bp-row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp-row .id { color: var(--dim); }
+  .bp-row.done .t { color: var(--dim); }
+  .bp-row.u { background: rgba(200,168,116,.07); }
+  .bp-row.u::before { content: ''; position: absolute; left: 4px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--tan); }
+  .bp-row .ty { color: var(--tan); display: flex; }
+  .bp-row.done .ty { color: var(--dim); }
+  .bp-chev { color: var(--dim); display: flex; width: 12px; }
+  .bp-chev svg.i { width: 12px; height: 12px; }
+  .ep { display: inline-flex; align-items: center; gap: 3px; color: var(--dim); font-size: 11px; max-width: 92px; flex-shrink: 0; }
+  .ep svg.i { width: 11px; height: 11px; }
+  .ep em { font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* status dots */
+  .sd { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; }
+  .s-open { border: 1.5px solid #a99a86; }
+  .s-prog { border: 1.5px solid var(--amber); background: conic-gradient(var(--amber) 0 50%, transparent 0); }
+  .s-blk { background: var(--red); box-shadow: inset 0 0 0 2px var(--bg), 0 0 0 1.5px var(--red); width: 8px; height: 8px; }
+  .s-def { border: 1.5px dashed var(--gray); }
+  .s-done { background: var(--green); }
+
+  .pr { font: 600 10px/1 "IBM Plex Mono", ui-monospace, monospace; padding: 3px 4px; border-radius: 4px; flex-shrink: 0; }
+  .p0 { background: #5a2520; color: #f2a798; }
+  .p1 { background: #4a3417; color: #ebba6c; }
+  .p2 { color: #c9b9a3; box-shadow: inset 0 0 0 1px #4a423a; }
+  .p3, .p4 { color: #7f766b; box-shadow: inset 0 0 0 1px #312c27; }
+  .lb { font-size: 10.5px; color: #b7a58b; background: #26221d; border-radius: 3px; padding: 1px 5px; flex-shrink: 0; }
+
+  /* epics */
+  .bp-epic { padding: 6px 0 4px; border-bottom: 1px solid var(--line); }
+  .bp-epic > .bp-row { font-weight: 600; }
+  .bp-prog { display: flex; align-items: center; gap: 8px; padding: 2px 12px 4px 54px; font-size: 11px; color: var(--muted); }
+  .bp-bar { flex: 1; height: 4px; border-radius: 2px; background: #2a2621; overflow: hidden; display: flex; }
+  .bp-bar i { display: block; height: 100%; }
+  .bp-sect { padding: 8px 14px 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+
+  /* status groups */
+  .bp-grp { display: flex; align-items: center; gap: 7px; padding: 8px 12px 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+  .bp-grp + .bp-grp { border-top: 1px solid var(--line); }
+  .bp-grp .n { color: var(--dim); font-weight: 500; }
+  .bp-grp .ux { margin-left: auto; color: var(--tan); font-weight: 500; font-size: 11px; }
+  .bp-more { padding: 2px 12px 6px 51px; color: var(--tan); font-size: 11.5px; }
+
+  /* detail */
+  .dt-nav { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  .dt-nav .crumb { display: flex; align-items: center; gap: 5px; color: var(--muted); min-width: 0; white-space: nowrap; }
+  .dt-nav .crumb .sepr { color: var(--dim); }
+  .dt-nav .crumb .here { color: var(--text); }
+  .dt-nav .acts { margin-left: auto; display: flex; gap: 4px; }
+  .dt-statbtn { display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--text); background: var(--surf2); font-size: 11.5px; }
+  .dt-statbtn svg.i { width: 12px; height: 12px; color: var(--dim); }
+  .dt-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3a342d transparent; }
+  .dt-head { padding: 10px 14px 8px; }
+  .dt-title { display: flex; gap: 8px; font-size: 15px; font-weight: 600; line-height: 1.3; }
+  .dt-title svg.i { width: 16px; height: 16px; color: var(--tan); margin-top: 2px; }
+  .dt-id { display: inline-flex; align-items: center; gap: 5px; margin: 5px 0 0 24px; color: var(--muted); padding: 1px 5px; border-radius: 4px; background: var(--surf2); }
+  .dt-id svg.i { width: 11px; height: 11px; color: var(--dim); }
+  .dt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 9px 0 0 24px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 7px 2px 6px; border-radius: 10px; }
+  .pill.blk { background: rgba(211,105,90,.16); color: #e79384; }
+  .who { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: 11.5px; }
+  .who i { width: 14px; height: 14px; border-radius: 50%; border: 1px dashed #4a423a; }
+  .dt-banner { margin: 0 12px 6px; display: flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 6px; background: rgba(200,168,116,.1); border: 1px solid rgba(200,168,116,.22); color: #d8c09a; font-size: 11.5px; }
+  .dt-banner::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--tan); flex-shrink: 0; }
+  .dt-banner .x { margin-left: auto; color: var(--dim); }
+  .dt-banner .to { color: #e79384; font-weight: 600; }
+  .dt-sec { border-top: 1px solid var(--line); }
+  .dt-sh { display: flex; align-items: center; gap: 6px; padding: 8px 12px 5px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .dt-sh .n { color: var(--dim); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .dt-sh .peek { flex: 1; min-width: 0; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dt-txt { padding: 0 14px 9px 30px; color: #d6cdbf; line-height: 1.45; }
+  .dt-ac { list-style: none; padding: 0 14px 9px 30px; margin: 0; }
+  .dt-ac li { display: flex; gap: 7px; color: #d6cdbf; line-height: 1.4; margin-bottom: 3px; }
+  .dt-ac li::before { content: ''; width: 9px; height: 9px; border: 1.3px solid #5a5148; border-radius: 2px; margin-top: 3px; flex-shrink: 0; }
+  .dt-rl { padding: 0 0 6px; }
+  .dt-rlab { display: flex; align-items: center; gap: 6px; padding: 4px 12px 1px 30px; font-size: 11px; color: var(--dim); }
+  .dt-rlab b { color: var(--muted); font-weight: 600; }
+  .dt-rlab .bp-bar { max-width: 70px; }
+  .dt-r { display: flex; align-items: center; gap: 7px; min-height: 24px; padding: 0 12px 0 30px; }
+  .dt-r .mono { color: var(--dim); }
+  .dt-r .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dt-r.done .t { color: var(--dim); }
+  .dt-r .rs { font-size: 10.5px; color: var(--dim); }
+  .dt-cm { display: flex; gap: 8px; padding: 4px 12px 8px 14px; }
+  .av { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font: 600 9.5px/1 "IBM Plex Mono", monospace; }
+  .av.ag { background: #2c2720; color: var(--tan); border: 1px solid #4a3f30; }
+  .av.me { background: #3b3326; color: #f0dcb8; }
+  .dt-cm .who2 { font-size: 11.5px; color: var(--muted); }
+  .dt-cm .who2 b { color: var(--text); font-weight: 600; margin-right: 4px; }
+  .dt-cm .txt { color: #d6cdbf; line-height: 1.45; margin-top: 1px; }
+  .dt-add { margin: 2px 12px 8px 42px; height: 28px; display: flex; align-items: center; padding: 0 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--surf2); color: var(--dim); }
+  .dt-add kbd { margin-left: auto; font: 10px ui-monospace, monospace; color: var(--dim); }
+  .dt-stamp { padding: 6px 14px 14px; color: var(--dim); font-size: 11px; line-height: 1.6; }
+  .dt-stamp b { color: var(--muted); font-weight: 500; }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="v2-bug" viewBox="0 0 16 16"><path d="M5.6 5.4a2.4 2.4 0 0 1 4.8 0"/><rect x="4.6" y="5.4" width="6.8" height="7.6" rx="3.4"/><path d="M8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3"/></symbol>
+  <symbol id="v2-feat" viewBox="0 0 16 16"><path d="M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z"/></symbol>
+  <symbol id="v2-task" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2.2"/><path d="M5.4 8.1l1.9 1.9 3.4-3.7"/></symbol>
+  <symbol id="v2-epic" viewBox="0 0 16 16"><path d="M8 2l6 3-6 3-6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/></symbol>
+  <symbol id="v2-chore" viewBox="0 0 16 16"><path d="M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z"/></symbol>
+  <symbol id="v2-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2l3.3 3.3"/></symbol>
+  <symbol id="v2-filter" viewBox="0 0 16 16"><path d="M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z"/></symbol>
+  <symbol id="v2-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="v2-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+  <symbol id="v2-back" viewBox="0 0 16 16"><path d="M13 8H3.5M7.5 4l-4 4 4 4"/></symbol>
+  <symbol id="v2-folder" viewBox="0 0 16 16"><path d="M2 4.5c0-.6.4-1 1-1h3.2l1.3 1.5H13c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/></symbol>
+  <symbol id="v2-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7"/></symbol>
+  <symbol id="v2-open" viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M11.5 9.5v3c0 .6-.4 1-1 1h-7c-.6 0-1-.4-1-1v-7c0-.6.4-1 1-1h3"/></symbol>
+  <symbol id="v2-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+</svg>
+
+<h2>Beads panel v2: grouping toggle + bead detail</h2>
+<p class="subtitle">One design, three states. Builds on layout A. The Epic / Status toggle switches the grouping; clicking any row opens its detail inside the same panel.</p>
+
+<div class="bp-three">
+
+  <!-- ===================== 1: GROUPED BY EPIC ===================== -->
+  <div class="mockup">
+    <div class="mockup-header">1 · Grouped by epic</div>
+    <div class="mockup-body">
+      <div class="bp">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#v2-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#v2-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="bp-tools">
+          <div class="bp-search"><svg class="i"><use href="#v2-search"/></svg>Search 24 issues</div>
+          <div class="bp-seg"><span class="on">Epic</span><span>Status</span></div>
+          <div class="bp-iconbtn"><svg class="i"><use href="#v2-filter"/></svg></div>
+          <div class="bp-new">4</div>
+        </div>
+
+        <div class="bp-list">
+          <div class="bp-epic">
+            <div class="bp-row u"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span><span class="ty"><svg class="i"><use href="#v2-epic"/></svg></span><span class="t">Offline sync &amp; upload queue</span><span class="pr p1">P1</span></div>
+            <div class="bp-prog"><div class="bp-bar"><i style="width:43%;background:#84a56c"></i><i style="width:14%;background:#e0a64a"></i><i style="width:14%;background:#d3695a"></i></div><span>3/7 done</span><span style="color:#d3695a">1 blocked</span></div>
+            <div class="bp-row done" style="--l:1"><span class="sd s-done"></span><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="mono id">.1</span><span class="t">Persist upload queue across restarts</span><span class="pr p2">P2</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-prog"></span><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="mono id">.2</span><span class="t">Uploads stall at 99% on slow networks</span><span class="pr p1">P1</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#v2-feat"/></svg></span><span class="mono id">.3</span><span class="t">Storage usage meter in Settings</span><span class="pr p2">P2</span></div>
+            <div class="bp-row u" style="--l:1"><span class="sd s-blk"></span><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="mono id">.4</span><span class="t">Background sync for queued uploads</span><span class="pr p1">P1</span></div>
+            <div class="bp-row done u" style="--l:2"><span class="sd s-done"></span><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="mono id">.4.1</span><span class="t">Register background task identifier</span><span class="pr p2">P2</span></div>
+            <div class="bp-row" style="--l:2"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="mono id">.4.2</span><span class="t">Resume partial files with HTTP Range</span><span class="pr p2">P2</span></div>
+          </div>
+
+          <div class="bp-epic">
+            <div class="bp-row"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span><span class="ty"><svg class="i"><use href="#v2-epic"/></svg></span><span class="t">Timeline scrubber redesign</span><span class="pr p2">P2</span></div>
+            <div class="bp-prog"><div class="bp-bar"><i style="width:20%;background:#84a56c"></i><i style="width:20%;background:#e0a64a"></i></div><span>1/5 done</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-prog"></span><span class="ty"><svg class="i"><use href="#v2-feat"/></svg></span><span class="mono id">.1</span><span class="t">Render timeline from cached thumbnails</span><span class="pr p2">P2</span></div>
+            <div class="bp-row u" style="--l:1"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="mono id">.2</span><span class="t">Scrubber jumps back 2s after seek</span><span class="lb">regression</span><span class="pr p0">P0</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-def"></span><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="mono id">.3</span><span class="t">Snap to chapter markers</span><span class="pr p3">P3</span></div>
+          </div>
+
+          <div class="bp-epic">
+            <div class="bp-row"><span class="bp-chev"><svg class="i"><use href="#v2-right"/></svg></span><span class="ty"><svg class="i"><use href="#v2-epic"/></svg></span><span class="t">Captions &amp; in-document search</span><span class="pr p3">P3</span></div>
+            <div class="bp-prog"><div class="bp-bar"></div><span>0/4 done</span></div>
+          </div>
+
+          <div class="bp-sect">Not in an epic · 2</div>
+          <div class="bp-row u"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="lb">crash</span><span class="pr p0">P0</span></div>
+          <div class="bp-row"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#v2-chore"/></svg></span><span class="t">Raise minimum target to Node 22</span><span class="pr p4">P4</span></div>
+        </div>
+
+        <div class="bp-foot"><span><b>18</b> open</span><span><b>2</b> in progress</span><span style="color:#d3695a"><b style="color:#d3695a">1</b> blocked</span><span><b>6</b> closed this week</span></div>
+      </div>
+      <div class="bp-cap">Layout A as picked, plus the Epic / Status toggle next to search. The filter shrinks to an icon to make room.</div>
+    </div>
+  </div>
+
+  <!-- ===================== 2: GROUPED BY STATUS ===================== -->
+  <div class="mockup">
+    <div class="mockup-header">2 · Grouped by status</div>
+    <div class="mockup-body">
+      <div class="bp">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#v2-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#v2-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="bp-tools">
+          <div class="bp-search"><svg class="i"><use href="#v2-search"/></svg>Search 24 issues</div>
+          <div class="bp-seg"><span>Epic</span><span class="on">Status</span></div>
+          <div class="bp-iconbtn"><svg class="i"><use href="#v2-filter"/></svg></div>
+          <div class="bp-new">4</div>
+        </div>
+
+        <div class="bp-list">
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span><span class="sd s-prog"></span>In progress <span class="n">2</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="t">Uploads stall at 99% on slow networks</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Offline sync</em></span><span class="pr p1">P1</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-feat"/></svg></span><span class="t">Render timeline from cached thumbnails</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Waveform</em></span><span class="pr p2">P2</span></div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span><span class="sd s-blk"></span>Blocked <span class="n">1</span><span class="ux">1 changed</span></div>
+          <div class="bp-row u" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="t">Background sync for queued uploads</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Offline sync</em></span><span class="pr p1">P1</span></div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span><span class="sd s-open"></span>Ready <span class="n">9</span><span class="ux">2 new</span></div>
+          <div class="bp-row u" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="lb">crash</span><span class="pr p0">P0</span></div>
+          <div class="bp-row u" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-bug"/></svg></span><span class="t">Scrubber jumps back 2s after seek</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Waveform</em></span><span class="pr p0">P0</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-feat"/></svg></span><span class="t">Storage usage meter in Settings</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Offline sync</em></span><span class="pr p2">P2</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-task"/></svg></span><span class="t">Resume partial files with HTTP Range</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Offline sync</em></span><span class="pr p2">P2</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-feat"/></svg></span><span class="t">Generate captions on device</span><span class="ep"><svg class="i"><use href="#v2-epic"/></svg><em>Transcripts</em></span><span class="pr p3">P3</span></div>
+          <div class="bp-row" style="--l:1"><span class="ty"><svg class="i"><use href="#v2-chore"/></svg></span><span class="t">Raise minimum target to Node 22</span><span class="pr p4">P4</span></div>
+          <div class="bp-more">Show 3 more ready</div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#v2-right"/></svg></span><span class="sd s-def"></span>Deferred <span class="n">2</span></div>
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#v2-right"/></svg></span><span class="sd s-done"></span>Closed, last 7 days <span class="n">6</span><span class="ux">1 new</span></div>
+        </div>
+
+        <div class="bp-foot"><span><b>18</b> open</span><span><b>2</b> in progress</span><span style="color:#d3695a"><b style="color:#d3695a">1</b> blocked</span><span><b>6</b> closed this week</span></div>
+      </div>
+      <div class="bp-cap">Same rows, regrouped. The status dot moves up to the section header; each row's epic shows as a dimmed tag before the priority. Items with no epic just skip the tag.</div>
+    </div>
+  </div>
+
+  <!-- ===================== 3: BEAD DETAIL ===================== -->
+  <div class="mockup">
+    <div class="mockup-header">3 · Bead detail (scrolls)</div>
+    <div class="mockup-body">
+      <div class="bp">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#v2-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#v2-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="dt-nav">
+          <div class="bp-iconbtn" style="border:0;background:transparent"><svg class="i"><use href="#v2-back"/></svg></div>
+          <div class="crumb"><svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#v2-epic"/></svg>Offline sync<span class="sepr">›</span><span class="here mono">.4</span></div>
+          <div class="acts">
+            <div class="dt-statbtn"><span class="sd s-blk"></span>Blocked<svg class="i"><use href="#v2-down"/></svg></div>
+            <div class="bp-iconbtn" style="width:24px;height:24px"><svg class="i"><use href="#v2-open"/></svg></div>
+          </div>
+        </div>
+
+        <div class="dt-body">
+          <div class="dt-head">
+            <div class="dt-title"><svg class="i"><use href="#v2-task"/></svg>Background sync for queued uploads</div>
+            <div class="dt-id mono">demo-k3f2.4<svg class="i"><use href="#v2-copy"/></svg></div>
+            <div class="dt-meta">
+              <span class="pill blk"><span class="sd s-blk"></span>Blocked</span>
+              <span class="pr p1">P1</span>
+              <span class="who"><i></i>unassigned</span>
+              <span class="lb">mobile</span><span class="lb">uploads</span>
+            </div>
+          </div>
+
+          <div class="dt-banner">Changed 9m ago by agent: open → <span class="to">blocked</span><svg class="i x" style="width:12px;height:12px"><use href="#v2-x"/></svg></div>
+
+          <div class="dt-sec">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span>Description</div>
+            <div class="dt-txt">Queued uploads only run while demo is in the foreground. Schedule a background task so the queue keeps draining when the window is closed, as long as it's on Wi-Fi.</div>
+          </div>
+
+          <div class="dt-sec">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span>Acceptance criteria <span class="n">4</span></div>
+            <ul class="dt-ac">
+              <li>Queue keeps uploading with the app backgrounded for 30+ minutes</li>
+              <li>Respects the "Upload on Wi-Fi only" setting</li>
+              <li>Pauses in Low Power Mode and resumes after</li>
+              <li>Partial files resume instead of starting over</li>
+            </ul>
+          </div>
+
+          <div class="dt-sec">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-right"/></svg></span>Design <span class="peek">Reuse UploadCoordinator; one background task per drain…</span></div>
+          </div>
+          <div class="dt-sec">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-right"/></svg></span>Notes <span class="peek">Wait for k3f2.2: it moves uploads to a background worker…</span></div>
+          </div>
+
+          <div class="dt-sec dt-rl">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span>Relationships</div>
+            <div class="dt-rlab"><b>Parent</b></div>
+            <div class="dt-r"><svg class="i" style="color:#c8a874"><use href="#v2-epic"/></svg><span class="mono">k3f2</span><span class="t">Offline sync &amp; upload queue</span><span class="rs">3/7</span></div>
+            <div class="dt-rlab"><b>Children</b> 1/2 done <div class="bp-bar"><i style="width:50%;background:#84a56c"></i></div></div>
+            <div class="dt-r done"><span class="sd s-done"></span><span class="mono">.4.1</span><span class="t">Register background task identifier</span></div>
+            <div class="dt-r"><span class="sd s-open"></span><span class="mono">.4.2</span><span class="t">Resume partial files with HTTP Range</span></div>
+            <div class="dt-rlab"><b style="color:#e79384">Blocked by</b></div>
+            <div class="dt-r"><span class="sd s-prog"></span><span class="mono">k3f2.2</span><span class="t">Uploads stall at 99% on slow networks</span></div>
+            <div class="dt-rlab"><b>Blocks</b></div>
+            <div class="dt-r"><span class="sd s-open"></span><span class="mono">k3f2.5</span><span class="t">Auto-upload new files overnight</span></div>
+            <div class="dt-rlab"><b>Discovered from</b></div>
+            <div class="dt-r done"><span class="sd s-done"></span><span class="mono">k3f2.1</span><span class="t">Persist upload queue across restarts</span></div>
+          </div>
+
+          <div class="dt-sec">
+            <div class="dt-sh"><span class="bp-chev"><svg class="i"><use href="#v2-down"/></svg></span>Activity <span class="n">3 comments</span></div>
+            <div class="dt-cm"><div class="av me">AL</div><div><div class="who2"><b>Ann</b>Oct 13, 5:02 PM</div><div class="txt">Make sure this backs off in Low Power Mode. Users complained about battery drain on the old version.</div></div></div>
+            <div class="dt-cm"><div class="av ag">AI</div><div><div class="who2"><b>agent</b>Oct 13, 5:06 PM</div><div class="txt">Added to acceptance criteria.</div></div></div>
+            <div class="dt-cm"><div class="av ag">AI</div><div><div class="who2"><b>agent</b>9m ago</div><div class="txt">Moved to blocked. k3f2.2 switches uploads to a background worker. Building this first would mean redoing the worker setup.</div></div></div>
+            <div class="dt-add">Add a comment…<kbd>⌘↵</kbd></div>
+            <div class="dt-stamp"><b>Created</b> Oct 12, 4:18 PM by agent · <b>Updated</b> 9m ago<br>Closed items also show <b>Closed</b> date and the close reason here.</div>
+          </div>
+        </div>
+      </div>
+      <div class="bp-cap">Opens in place of the list. The status button and the open-in-full-page icon sit top right. Empty sections are hidden, and long sections start collapsed with a one-line preview.</div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin:1.5rem 0 0">Does the detail view have what you'd expect in a ticket? Anything missing, or anything you'd cut?</p>

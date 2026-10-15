@@ -1,0 +1,434 @@
+[
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "id",
+    "Key": "PRI",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "content_hash",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(64)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "title",
+    "Key": "",
+    "Null": "NO",
+    "Type": "varchar(500)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "description",
+    "Key": "",
+    "Null": "NO",
+    "Type": "longtext"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "design",
+    "Key": "",
+    "Null": "NO",
+    "Type": "longtext"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "acceptance_criteria",
+    "Key": "",
+    "Null": "NO",
+    "Type": "longtext"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "notes",
+    "Key": "",
+    "Null": "NO",
+    "Type": "longtext"
+  },
+  {
+    "Default": "'open'",
+    "Extra": "",
+    "Field": "status",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "2",
+    "Extra": "",
+    "Field": "priority",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "int"
+  },
+  {
+    "Default": "'task'",
+    "Extra": "",
+    "Field": "issue_type",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "assignee",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "estimated_minutes",
+    "Key": "",
+    "Null": "YES",
+    "Type": "int"
+  },
+  {
+    "Default": "CURRENT_TIMESTAMP",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "created_at",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "datetime"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "created_by",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "owner",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "CURRENT_TIMESTAMP",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "updated_at",
+    "Key": "",
+    "Null": "NO",
+    "Type": "datetime"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "closed_at",
+    "Key": "",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "closed_by_session",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "external_ref",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "spec_id",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(1024)"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "compaction_level",
+    "Key": "",
+    "Null": "YES",
+    "Type": "int"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "compacted_at",
+    "Key": "",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "compacted_at_commit",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(64)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "original_size",
+    "Key": "",
+    "Null": "YES",
+    "Type": "int"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "sender",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "ephemeral",
+    "Key": "",
+    "Null": "YES",
+    "Type": "tinyint(1)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "wisp_type",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "pinned",
+    "Key": "",
+    "Null": "YES",
+    "Type": "tinyint(1)"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "is_template",
+    "Key": "",
+    "Null": "YES",
+    "Type": "tinyint(1)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "mol_type",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "'mutex'",
+    "Extra": "",
+    "Field": "work_type",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "source_system",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "(json_object())",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "metadata",
+    "Key": "",
+    "Null": "YES",
+    "Type": "json"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "source_repo",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(512)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "close_reason",
+    "Key": "",
+    "Null": "YES",
+    "Type": "longtext"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "event_kind",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "actor",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "target",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "payload",
+    "Key": "",
+    "Null": "YES",
+    "Type": "text"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "await_type",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "await_id",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "timeout_ns",
+    "Key": "",
+    "Null": "YES",
+    "Type": "bigint"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "waiters",
+    "Key": "",
+    "Null": "YES",
+    "Type": "text"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "hook_bead",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "role_bead",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "agent_state",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "last_activity",
+    "Key": "",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "role_type",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "rig",
+    "Key": "",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "due_at",
+    "Key": "",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "defer_until",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "no_history",
+    "Key": "",
+    "Null": "YES",
+    "Type": "tinyint(1)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "started_at",
+    "Key": "",
+    "Null": "YES",
+    "Type": "datetime"
+  },
+  {
+    "Default": "0",
+    "Extra": "",
+    "Field": "is_blocked",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "tinyint(1)"
+  }
+]

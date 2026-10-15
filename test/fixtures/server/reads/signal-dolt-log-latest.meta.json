@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT commit_hash, committer, date, message FROM dolt_log ORDER BY date DESC LIMIT 5"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 215
+}

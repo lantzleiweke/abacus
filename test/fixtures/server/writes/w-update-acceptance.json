@@ -1,0 +1,23 @@
+[
+  {
+    "id": "scr-8nw.1",
+    "title": "Edited title from panel",
+    "description": "Edited description\nwith a second line and **markdown**.",
+    "design": "Keep JWT format.",
+    "acceptance_criteria": "Edited acceptance criteria",
+    "notes": "Needs secrets rotated.",
+    "status": "blocked",
+    "priority": 0,
+    "issue_type": "feature",
+    "assignee": "Panel Tester",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:51Z",
+    "created_by": "Bob Builder",
+    "updated_at": "2026-10-14T08:28:05Z",
+    "started_at": "2026-10-14T08:19:54Z",
+    "labels": [
+      "alpha",
+      "beta"
+    ]
+  }
+]

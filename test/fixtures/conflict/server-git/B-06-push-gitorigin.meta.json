@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "dolt",
+    "push",
+    "--remote",
+    "gitorigin"
+  ],
+  "cwd_label": "server-b",
+  "exit": 1,
+  "ms": 310
+}

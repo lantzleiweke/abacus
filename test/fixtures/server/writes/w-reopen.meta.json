@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "reopen",
+    "scr-8nw.1",
+    "--reason",
+    "Reopened from panel",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 238
+}

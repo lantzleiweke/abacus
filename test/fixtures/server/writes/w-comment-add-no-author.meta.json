@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "comments",
+    "add",
+    "scr-8nw.1",
+    "A comment with no --author",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 233
+}

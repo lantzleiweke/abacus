@@ -1,0 +1,310 @@
+<style>
+  .bp-opts { flex-direction: row !important; flex-wrap: wrap; align-items: stretch; gap: 1rem !important; }
+  .bp-opts .option { flex: 1 1 420px; flex-direction: column; gap: 0.6rem; max-width: 460px; }
+  .bp-opts .option .content h3 { margin-bottom: 0.2rem; }
+  .bp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: -0.5rem 0 1rem; align-items: center; }
+  .bp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+  .bp { --bg: #141210; --surf: #1b1916; --surf2: #221f1b; --line: #2d2924; --text: #e9e2d6; --muted: #9a8f81; --dim: #6c645a; --tan: #c8a874;
+        --amber: #e0a64a; --red: #d3695a; --green: #84a56c; --gray: #6f675e;
+        width: 380px; height: 640px; background: var(--bg); color: var(--text); border: 1px solid #000; border-radius: 10px; overflow: hidden;
+        display: flex; flex-direction: column; font: 12.5px/1.35 "IBM Plex Sans", system-ui, -apple-system, sans-serif; margin-top: 0.6rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35); cursor: default; }
+  .bp svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  .bp .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 11px; }
+
+  /* header */
+  .bp-top { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surf); }
+  .bp-proj { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); padding: 3px 6px 3px 4px; border-radius: 5px; background: var(--surf2); border: 1px solid var(--line); }
+  .bp-proj svg { color: var(--tan); }
+  .bp-live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; margin-left: auto; }
+  .bp-live b { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(132,165,108,.18); }
+  .bp-ico { color: var(--muted); display: flex; }
+  .bp-tools { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .bp-search { flex: 1; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 6px; background: var(--surf2); border: 1px solid var(--line); color: var(--dim); }
+  .bp-search kbd { margin-left: auto; font: 10px ui-monospace, monospace; color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+  .bp-btn { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); background: var(--surf); white-space: nowrap; }
+  .bp-new { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border-radius: 6px; background: rgba(200,168,116,.14); color: var(--tan); font-weight: 600; white-space: nowrap; }
+  .bp-new::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--tan); }
+
+  .bp-list { flex: 1; overflow: hidden; padding: 4px 0; }
+  .bp-foot { border-top: 1px solid var(--line); padding: 7px 12px; color: var(--muted); font-size: 11.5px; display: flex; gap: 10px; background: var(--surf); }
+  .bp-foot b { color: var(--text); font-weight: 600; }
+
+  /* rows */
+  .bp-row { position: relative; display: flex; align-items: center; gap: 7px; min-height: 26px; padding: 0 12px 0 calc(14px + var(--l, 0) * 16px); color: var(--text); }
+  .bp-row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp-row .id { color: var(--dim); }
+  .bp-row.done .t { color: var(--dim); }
+  .bp-row.u { background: rgba(200,168,116,.07); }
+  .bp-row.u::before { content: ''; position: absolute; left: 4px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--tan); }
+  .bp-row .ty { color: var(--tan); display: flex; }
+  .bp-row.done .ty { color: var(--dim); }
+  .bp-chev { color: var(--dim); display: flex; width: 12px; }
+  .bp-chev svg.i { width: 12px; height: 12px; }
+
+  .bp-two { position: relative; padding: 6px 12px 6px 16px; }
+  .bp-two.u { background: rgba(200,168,116,.07); }
+  .bp-two.u::before { content: ''; position: absolute; left: 5px; top: 13px; width: 5px; height: 5px; border-radius: 50%; background: var(--tan); }
+  .bp-two .l1 { display: flex; align-items: center; gap: 7px; }
+  .bp-two .l1 .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp-two .l1 .ty { color: var(--tan); display: flex; }
+  .bp-two .l2 { display: flex; align-items: center; gap: 6px; margin: 2px 0 0 35px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+  .bp-two .l2 .sep { color: var(--dim); }
+  .bp-crumb { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  .bp-crumb svg.i { width: 11px; height: 11px; color: var(--dim); }
+
+  /* status dots */
+  .sd { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; }
+  .s-open { border: 1.5px solid #a99a86; }
+  .s-prog { border: 1.5px solid var(--amber); background: conic-gradient(var(--amber) 0 50%, transparent 0); }
+  .s-blk { background: var(--red); box-shadow: inset 0 0 0 2px var(--bg), 0 0 0 1.5px var(--red); width: 8px; height: 8px; }
+  .s-def { border: 1.5px dashed var(--gray); }
+  .s-done { background: var(--green); }
+
+  /* priority + labels */
+  .pr { font: 600 10px/1 "IBM Plex Mono", ui-monospace, monospace; padding: 3px 4px; border-radius: 4px; flex-shrink: 0; }
+  .p0 { background: #5a2520; color: #f2a798; }
+  .p1 { background: #4a3417; color: #ebba6c; }
+  .p2 { color: #c9b9a3; box-shadow: inset 0 0 0 1px #4a423a; }
+  .p3, .p4 { color: #7f766b; box-shadow: inset 0 0 0 1px #312c27; }
+  .lb { font-size: 10.5px; color: #b7a58b; background: #26221d; border-radius: 3px; padding: 1px 5px; }
+  .tag { font: 600 9.5px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .04em; padding: 3px 5px; border-radius: 3px; }
+  .tag.new { background: rgba(200,168,116,.18); color: var(--tan); }
+  .tag.chg { background: rgba(224,166,74,.14); color: var(--amber); }
+  .tag.cls { background: rgba(132,165,108,.16); color: var(--green); }
+
+  /* A: epics */
+  .bp-epic { padding: 6px 0 4px; border-bottom: 1px solid var(--line); }
+  .bp-epic > .bp-row { font-weight: 600; }
+  .bp-prog { display: flex; align-items: center; gap: 8px; padding: 2px 12px 4px 54px; font-size: 11px; color: var(--muted); }
+  .bp-bar { flex: 1; height: 4px; border-radius: 2px; background: #2a2621; overflow: hidden; display: flex; }
+  .bp-bar i { display: block; height: 100%; }
+  .bp-sect { padding: 8px 14px 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+
+  /* B/C: groups */
+  .bp-grp { display: flex; align-items: center; gap: 7px; padding: 7px 12px 5px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
+  .bp-grp .n { color: var(--dim); font-weight: 500; }
+  .bp-grp .ux { margin-left: auto; color: var(--tan); font-weight: 500; font-size: 11px; }
+  .bp-more { padding: 3px 12px 6px 51px; color: var(--tan); font-size: 11.5px; }
+
+  /* C: feed */
+  .bp-feed { margin: 8px 10px 4px; border: 1px solid #3a3229; border-radius: 8px; background: linear-gradient(180deg, rgba(200,168,116,.07), rgba(200,168,116,.02)); }
+  .bp-feed-h { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid #2f2923; font-size: 11.5px; color: var(--muted); }
+  .bp-feed-h strong { color: var(--text); font-weight: 600; }
+  .bp-feed-h a { margin-left: auto; color: var(--tan); text-decoration: none; }
+  .bp-fi { padding: 6px 10px; border-bottom: 1px solid #262119; }
+  .bp-fi:last-child { border-bottom: 0; }
+  .bp-fi .l1 { display: flex; align-items: center; gap: 7px; }
+  .bp-fi .l1 .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp-fi .l1 .ty { color: var(--tan); display: flex; }
+  .bp-fi .ago { color: var(--dim); font-size: 11px; }
+  .bp-fi .l2 { margin: 2px 0 0 0; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bp-fi .l2 .arrow { color: var(--dim); }
+  .bp-c-head { display: flex; align-items: center; padding: 8px 14px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .bp-c-head span { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .bp-c .bp-row { min-height: 24px; }
+  .bp-c .bp-grp { padding: 5px 12px 2px; }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="bp-bug" viewBox="0 0 16 16"><path d="M5.6 5.4a2.4 2.4 0 0 1 4.8 0"/><rect x="4.6" y="5.4" width="6.8" height="7.6" rx="3.4"/><path d="M8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3"/></symbol>
+  <symbol id="bp-feat" viewBox="0 0 16 16"><path d="M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z"/></symbol>
+  <symbol id="bp-task" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2.2"/><path d="M5.4 8.1l1.9 1.9 3.4-3.7"/></symbol>
+  <symbol id="bp-epic" viewBox="0 0 16 16"><path d="M8 2l6 3-6 3-6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/></symbol>
+  <symbol id="bp-chore" viewBox="0 0 16 16"><path d="M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z"/></symbol>
+  <symbol id="bp-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2l3.3 3.3"/></symbol>
+  <symbol id="bp-filter" viewBox="0 0 16 16"><path d="M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z"/></symbol>
+  <symbol id="bp-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="bp-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+  <symbol id="bp-folder" viewBox="0 0 16 16"><path d="M2 4.5c0-.6.4-1 1-1h3.2l1.3 1.5H13c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/></symbol>
+  <symbol id="bp-sort" viewBox="0 0 16 16"><path d="M4 3v10M2 11l2 2 2-2M10 4h4M10 8h3M10 12h2"/></symbol>
+</svg>
+
+<h2>Beads panel: main list layout</h2>
+<p class="subtitle">Three ways to scan the same demo issues in the right rail. Same header in all three: project switcher, live freshness, search, filter, unread count.</p>
+
+<div class="bp-legend">
+  <span><i class="sd s-open" style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid #a99a86"></i>open</span>
+  <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid #e0a64a;background:conic-gradient(#e0a64a 0 50%,transparent 0)"></i>in progress</span>
+  <span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#d3695a;box-shadow:inset 0 0 0 2px #141210,0 0 0 1.5px #d3695a"></i>blocked</span>
+  <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px dashed #6f675e"></i>deferred</span>
+  <span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#84a56c"></i>closed</span>
+  <span><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#c8a874"></i>new or changed since you last looked</span>
+  <span>P0 highest … P4 lowest</span>
+</div>
+
+<div class="options bp-opts">
+
+  <!-- ===================== A: HIERARCHY TREE ===================== -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Hierarchy tree</h3>
+      <p>Epics open into their children, each with an x/y done bar. Best for "is this epic complete, is anything missing under it."</p>
+
+      <div class="bp">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#bp-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#bp-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="bp-tools">
+          <div class="bp-search"><svg class="i"><use href="#bp-search"/></svg>Search 24 issues<kbd>/</kbd></div>
+          <div class="bp-btn"><svg class="i"><use href="#bp-filter"/></svg>Open</div>
+          <div class="bp-new">4</div>
+        </div>
+
+        <div class="bp-list">
+          <div class="bp-epic">
+            <div class="bp-row u"><span class="bp-chev"><svg class="i"><use href="#bp-down"/></svg></span><span class="ty"><svg class="i"><use href="#bp-epic"/></svg></span><span class="t">Offline sync &amp; upload queue</span><span class="pr p1">P1</span></div>
+            <div class="bp-prog"><div class="bp-bar"><i style="width:43%;background:#84a56c"></i><i style="width:14%;background:#e0a64a"></i><i style="width:14%;background:#d3695a"></i></div><span>3/7 done</span><span style="color:#d3695a">1 blocked</span></div>
+            <div class="bp-row done" style="--l:1"><span class="sd s-done"></span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="mono id">.1</span><span class="t">Persist upload queue across restarts</span><span class="pr p2">P2</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-prog"></span><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="mono id">.2</span><span class="t">Uploads stall at 99% on slow networks</span><span class="pr p1">P1</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="mono id">.3</span><span class="t">Storage usage meter in Settings</span><span class="pr p2">P2</span></div>
+            <div class="bp-row u" style="--l:1"><span class="sd s-blk"></span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="mono id">.4</span><span class="t">Background sync for queued uploads</span><span class="pr p1">P1</span></div>
+            <div class="bp-row done u" style="--l:2"><span class="sd s-done"></span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="mono id">.4.1</span><span class="t">Register background task identifier</span><span class="pr p2">P2</span></div>
+            <div class="bp-row" style="--l:2"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="mono id">.4.2</span><span class="t">Resume partial files with HTTP Range</span><span class="pr p2">P2</span></div>
+          </div>
+
+          <div class="bp-epic">
+            <div class="bp-row"><span class="bp-chev"><svg class="i"><use href="#bp-down"/></svg></span><span class="ty"><svg class="i"><use href="#bp-epic"/></svg></span><span class="t">Timeline scrubber redesign</span><span class="pr p2">P2</span></div>
+            <div class="bp-prog"><div class="bp-bar"><i style="width:20%;background:#84a56c"></i><i style="width:20%;background:#e0a64a"></i></div><span>1/5 done</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-prog"></span><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="mono id">.1</span><span class="t">Render timeline from cached thumbnails</span><span class="pr p2">P2</span></div>
+            <div class="bp-row u" style="--l:1"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="mono id">.2</span><span class="t">Scrubber jumps back 2s after seek</span><span class="lb">regression</span><span class="pr p0">P0</span></div>
+            <div class="bp-row" style="--l:1"><span class="sd s-def"></span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="mono id">.3</span><span class="t">Snap to chapter markers</span><span class="pr p3">P3</span></div>
+          </div>
+
+          <div class="bp-epic">
+            <div class="bp-row"><span class="bp-chev"><svg class="i"><use href="#bp-right"/></svg></span><span class="ty"><svg class="i"><use href="#bp-epic"/></svg></span><span class="t">Captions &amp; in-document search</span><span class="pr p3">P3</span></div>
+            <div class="bp-prog"><div class="bp-bar"></div><span>0/4 done</span></div>
+          </div>
+
+          <div class="bp-sect">Not in an epic · 2</div>
+          <div class="bp-row u"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="lb">crash</span><span class="pr p0">P0</span></div>
+          <div class="bp-row"><span class="sd s-open"></span><span class="ty"><svg class="i"><use href="#bp-chore"/></svg></span><span class="t">Raise minimum target to Node 22</span><span class="pr p4">P4</span></div>
+        </div>
+
+        <div class="bp-foot"><span><b>18</b> open</span><span><b>2</b> in progress</span><span style="color:#d3695a"><b style="color:#d3695a">1</b> blocked</span><span><b>6</b> closed this week</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== B: STATUS GROUPS ===================== -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Status groups</h3>
+      <p>Flat rows grouped by what you can act on, highest priority first. The parent epic shows as a small breadcrumb under each title.</p>
+
+      <div class="bp">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#bp-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#bp-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="bp-tools">
+          <div class="bp-search"><svg class="i"><use href="#bp-search"/></svg>Search 24 issues<kbd>/</kbd></div>
+          <div class="bp-btn"><svg class="i"><use href="#bp-sort"/></svg>Priority</div>
+          <div class="bp-new">4</div>
+        </div>
+
+        <div class="bp-list">
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#bp-down"/></svg></span><span class="sd s-prog"></span>In progress <span class="n">2</span></div>
+          <div class="bp-two">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Uploads stall at 99% on slow networks</span><span class="pr p1">P1</span></div>
+            <div class="l2"><span class="mono">demo-k3f2.2</span><span class="sep">·</span><span class="bp-crumb"><svg class="i"><use href="#bp-epic"/></svg>Offline sync</span><span class="sep">·</span>agent, 12m ago</div>
+          </div>
+          <div class="bp-two">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="t">Render timeline from cached thumbnails</span><span class="pr p2">P2</span></div>
+            <div class="l2"><span class="mono">demo-m7q1.1</span><span class="sep">·</span><span class="bp-crumb"><svg class="i"><use href="#bp-epic"/></svg>Timeline scrubber</span></div>
+          </div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#bp-down"/></svg></span><span class="sd s-blk"></span>Blocked <span class="n">1</span><span class="ux">1 changed</span></div>
+          <div class="bp-two u">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="t">Background sync for queued uploads</span><span class="pr p1">P1</span></div>
+            <div class="l2"><span class="mono">demo-k3f2.4</span><span class="sep">·</span><span style="color:#d3695a">waits on k3f2.2</span><span class="sep">·</span><span class="bp-crumb"><svg class="i"><use href="#bp-epic"/></svg>Offline sync</span></div>
+          </div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#bp-down"/></svg></span><span class="sd s-open"></span>Ready <span class="n">9</span><span class="ux">2 new</span></div>
+          <div class="bp-two u">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="pr p0">P0</span></div>
+            <div class="l2"><span class="mono">demo-t5n6</span><span class="sep">·</span><span style="color:#6c645a">no epic</span><span class="sep">·</span><span class="lb">crash</span></div>
+          </div>
+          <div class="bp-two u">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Scrubber jumps back 2s after seek</span><span class="pr p0">P0</span></div>
+            <div class="l2"><span class="mono">demo-m7q1.2</span><span class="sep">·</span><span class="bp-crumb"><svg class="i"><use href="#bp-epic"/></svg>Timeline scrubber</span><span class="sep">·</span><span class="lb">regression</span></div>
+          </div>
+          <div class="bp-two">
+            <div class="l1"><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="t">Storage usage meter in Settings</span><span class="pr p2">P2</span></div>
+            <div class="l2"><span class="mono">demo-k3f2.3</span><span class="sep">·</span><span class="bp-crumb"><svg class="i"><use href="#bp-epic"/></svg>Offline sync</span></div>
+          </div>
+          <div class="bp-more">Show 6 more ready</div>
+
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#bp-right"/></svg></span><span class="sd s-def"></span>Deferred <span class="n">2</span></div>
+          <div class="bp-grp"><span class="bp-chev"><svg class="i"><use href="#bp-right"/></svg></span><span class="sd s-done"></span>Closed, last 7 days <span class="n">6</span><span class="ux">1 new</span></div>
+          <div class="bp-grp" style="color:#6c645a"><span class="bp-chev"><svg class="i"><use href="#bp-right"/></svg></span><svg class="i" style="color:#6c645a"><use href="#bp-epic"/></svg>Epics <span class="n">3</span></div>
+        </div>
+
+        <div class="bp-foot"><span><b>18</b> open</span><span><b>2</b> in progress</span><span style="color:#d3695a"><b style="color:#d3695a">1</b> blocked</span><span><b>6</b> closed this week</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== C: SINCE YOU LAST LOOKED ===================== -->
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>"Since you last looked" feed</h3>
+      <p>What the agent created, changed, or closed while you were away sits on top. The full list stays below in compact one-line rows.</p>
+
+      <div class="bp bp-c">
+        <div class="bp-top">
+          <div class="bp-proj"><svg class="i"><use href="#bp-folder"/></svg>demo<svg class="i" style="width:12px;height:12px;color:#6c645a"><use href="#bp-down"/></svg></div>
+          <div class="bp-live"><b></b>Live · updated 3s ago</div>
+        </div>
+        <div class="bp-tools">
+          <div class="bp-search"><svg class="i"><use href="#bp-search"/></svg>Search 24 issues<kbd>/</kbd></div>
+          <div class="bp-btn"><svg class="i"><use href="#bp-filter"/></svg>Open</div>
+        </div>
+
+        <div class="bp-list">
+          <div class="bp-feed">
+            <div class="bp-feed-h"><strong>Since you last looked</strong> · 47 min ago · 4 updates<a>Mark seen</a></div>
+            <div class="bp-fi">
+              <div class="l1"><span class="tag new">NEW</span><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="pr p0">P0</span><span class="ago">2m</span></div>
+              <div class="l2"><span class="mono">demo-t5n6</span> · filed by agent from a crash log · <span class="lb">crash</span></div>
+            </div>
+            <div class="bp-fi">
+              <div class="l1"><span class="tag chg">CHANGED</span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="t">Background sync for queued uploads</span><span class="ago">9m</span></div>
+              <div class="l2"><span class="mono">demo-k3f2.4</span> · open <span class="arrow">→</span> <span style="color:#d3695a">blocked</span> by k3f2.2</div>
+            </div>
+            <div class="bp-fi">
+              <div class="l1"><span class="tag chg">CHANGED</span><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Scrubber jumps back 2s after seek</span><span class="ago">31m</span></div>
+              <div class="l2"><span class="mono">demo-m7q1.2</span> · priority P2 <span class="arrow">→</span> <span style="color:#f2a798">P0</span>, label regression added</div>
+            </div>
+            <div class="bp-fi">
+              <div class="l1"><span class="tag cls">CLOSED</span><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="t" style="color:#9a8f81">Register background task identifier</span><span class="ago">14m</span></div>
+              <div class="l2"><span class="mono">demo-k3f2.4.1</span> · "Added to the manifest, verified on device"</div>
+            </div>
+          </div>
+
+          <div class="bp-c-head">All open<span>by status</span></div>
+          <div class="bp-grp"><span class="sd s-prog"></span>In progress <span class="n">2</span></div>
+          <div class="bp-row"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Uploads stall at 99% on slow networks</span><span class="pr p1">P1</span></div>
+          <div class="bp-row"><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="t">Render timeline from cached thumbnails</span><span class="pr p2">P2</span></div>
+          <div class="bp-grp"><span class="sd s-blk"></span>Blocked <span class="n">1</span></div>
+          <div class="bp-row u"><span class="ty"><svg class="i"><use href="#bp-task"/></svg></span><span class="t">Background sync for queued uploads</span><span class="pr p1">P1</span></div>
+          <div class="bp-grp"><span class="sd s-open"></span>Ready <span class="n">9</span></div>
+          <div class="bp-row u"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Crash on network disconnect mid-upload</span><span class="pr p0">P0</span></div>
+          <div class="bp-row u"><span class="ty"><svg class="i"><use href="#bp-bug"/></svg></span><span class="t">Scrubber jumps back 2s after seek</span><span class="pr p0">P0</span></div>
+          <div class="bp-row"><span class="ty"><svg class="i"><use href="#bp-feat"/></svg></span><span class="t">Storage usage meter in Settings</span><span class="pr p2">P2</span></div>
+          <div class="bp-more" style="padding-left:35px">Show 6 more · Deferred 2 · Closed 6</div>
+        </div>
+
+        <div class="bp-foot"><span><b>18</b> open</span><span><b>2</b> in progress</span><span style="color:#d3695a"><b style="color:#d3695a">1</b> blocked</span><span><b>6</b> closed this week</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:1.5rem"><p class="subtitle" style="margin:0">Click the one closest to how you'd want to scan, or tell me what to mix.</p></div>

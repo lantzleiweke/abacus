@@ -1,0 +1,14 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "list",
+    "--all",
+    "--id",
+    "scr-m0h",
+    "--json"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 272
+}

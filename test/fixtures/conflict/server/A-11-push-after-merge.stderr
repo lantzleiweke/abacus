@@ -1,0 +1,7 @@
+Error: failed to push to origin/main: Error 1105 (HY000): To file://<scratch>/remotes/server-remote
+ ! [rejected]            main -> main (non-fast-forward)
+error: failed to push some refs to 'file://<scratch>/remotes/server-remote'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. Integrate the remote changes (e.g.
+hint: 'dolt pull ...') before pushing again.
+

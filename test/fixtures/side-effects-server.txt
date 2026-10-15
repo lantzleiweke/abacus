@@ -1,0 +1,3 @@
+bd --version | exit=0 | changed: none
+bd --readonly export | exit=0 | changed: none
+bd --readonly list --json --all --flat --limit 0 | exit=0 | changed: none

@@ -1,0 +1,62 @@
+[
+  {
+    "CommitHash": "0gf1rlramf6lf4rehgcpd4ka7io0ft4f",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T08:31:03.505Z",
+    "Issue": {
+      "id": "scr-8nw.1",
+      "title": "Multi edit",
+      "description": "Edited description\nwith a second line and **markdown**.",
+      "acceptance_criteria": "Edited acceptance criteria",
+      "notes": "Edited notes",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "feature",
+      "assignee": "Panel Tester",
+      "owner": "alice@example.invalid",
+      "created_at": "2026-10-14T08:19:51Z",
+      "created_by": "Bob Builder",
+      "updated_at": "2026-10-14T08:28:12Z"
+    }
+  },
+  {
+    "CommitHash": "6dkbe81jhknijmqjknk0e0jt2os3oes7",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T08:31:03.18Z",
+    "Issue": {
+      "id": "scr-8nw.1",
+      "title": "Multi edit",
+      "description": "Edited description\nwith a second line and **markdown**.",
+      "acceptance_criteria": "Edited acceptance criteria",
+      "notes": "Edited notes",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "feature",
+      "assignee": "Panel Tester",
+      "owner": "alice@example.invalid",
+      "created_at": "2026-10-14T08:19:51Z",
+      "created_by": "Bob Builder",
+      "updated_at": "2026-10-14T08:28:12Z"
+    }
+  },
+  {
+    "CommitHash": "oc3e5r013p0vcjf15vplkhd80g9v1df0",
+    "Committer": "beads",
+    "CommitDate": "2026-10-14T08:31:00.493Z",
+    "Issue": {
+      "id": "scr-8nw.1",
+      "title": "Multi edit",
+      "description": "Edited description\nwith a second line and **markdown**.",
+      "acceptance_criteria": "Edited acceptance criteria",
+      "notes": "Edited notes",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "feature",
+      "assignee": "Panel Tester",
+      "owner": "alice@example.invalid",
+      "created_at": "2026-10-14T08:19:51Z",
+      "created_by": "Bob Builder",
+      "updated_at": "2026-10-14T08:28:12Z"
+    }
+  }
+]

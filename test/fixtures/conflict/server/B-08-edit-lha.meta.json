@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Bob Builder",
+    "update",
+    "scr-lha",
+    "--priority",
+    "0",
+    "--json"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 214
+}

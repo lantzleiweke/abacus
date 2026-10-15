@@ -1,0 +1,82 @@
+[
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "id",
+    "Key": "PRI",
+    "Null": "NO",
+    "Type": "char(36)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "issue_id",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "'blocks'",
+    "Extra": "",
+    "Field": "type",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": "CURRENT_TIMESTAMP",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "created_at",
+    "Key": "",
+    "Null": "NO",
+    "Type": "datetime"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "created_by",
+    "Key": "",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": "(json_object())",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "metadata",
+    "Key": "",
+    "Null": "YES",
+    "Type": "json"
+  },
+  {
+    "Default": "''",
+    "Extra": "",
+    "Field": "thread_id",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "depends_on_issue_id",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "depends_on_wisp_id",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "depends_on_external",
+    "Key": "MUL",
+    "Null": "YES",
+    "Type": "varchar(255)"
+  }
+]

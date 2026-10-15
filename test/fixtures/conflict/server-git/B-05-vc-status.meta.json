@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "vc",
+    "status",
+    "--json"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 222
+}

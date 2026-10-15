@@ -1,0 +1,21 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "create",
+    "Panel-created child",
+    "-t",
+    "task",
+    "-p",
+    "2",
+    "--parent",
+    "scr-8nw.1",
+    "-d",
+    "Created from the panel",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 318
+}

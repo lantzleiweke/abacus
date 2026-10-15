@@ -1,0 +1,13 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "dep",
+    "list",
+    "scr-8nw.1",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 207
+}

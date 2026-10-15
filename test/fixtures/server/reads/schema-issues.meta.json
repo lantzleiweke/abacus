@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "DESCRIBE issues"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 210
+}

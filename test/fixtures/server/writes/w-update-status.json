@@ -1,0 +1,25 @@
+[
+  {
+    "id": "scr-8nw.1",
+    "title": "Port auth service",
+    "description": "Port auth to the new stack.",
+    "design": "Keep JWT format.",
+    "acceptance_criteria": "Login works; tokens compatible.",
+    "notes": "Needs secrets rotated.",
+    "status": "blocked",
+    "priority": 1,
+    "issue_type": "feature",
+    "assignee": "Bob Builder",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:51Z",
+    "created_by": "Bob Builder",
+    "updated_at": "2026-10-14T08:28:01Z",
+    "started_at": "2026-10-14T08:19:54Z",
+    "labels": [
+      "auth",
+      "backend",
+      "platform",
+      "q4"
+    ]
+  }
+]

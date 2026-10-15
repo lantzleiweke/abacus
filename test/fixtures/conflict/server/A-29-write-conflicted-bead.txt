@@ -1,0 +1,14 @@
+[
+  {
+    "id": "scr-m0h",
+    "title": "A2 edited title",
+    "description": "Pinned recurring work.",
+    "status": "pinned",
+    "priority": 1,
+    "issue_type": "chore",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:54Z",
+    "created_by": "Alice Tester",
+    "updated_at": "2026-10-14T08:31:04Z"
+  }
+]

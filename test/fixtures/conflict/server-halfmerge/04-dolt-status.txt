@@ -1,0 +1,12 @@
+[
+  {
+    "staged": 0,
+    "status": "conflict",
+    "table_name": "issues"
+  },
+  {
+    "staged": 0,
+    "status": "modified",
+    "table_name": "events"
+  }
+]

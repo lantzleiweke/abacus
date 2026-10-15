@@ -1,0 +1,1 @@
+Error: failed to commit pending changes before pull: refusing to auto-commit 3 dirty internal config key(s) before pull: issue_prefix, status.custom, types.custom; only user kv.* keys auto-commit before a pull (GH#2455) — commit or revert these explicitly with `bd dolt commit` first

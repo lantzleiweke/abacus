@@ -1,0 +1,20 @@
+[
+  {
+    "base_id": "scr-fum",
+    "base_priority": 0,
+    "base_title": "Documentation refresh",
+    "our_priority": 2,
+    "our_title": "Documentation refresh",
+    "their_priority": 1,
+    "their_title": "Documentation refresh"
+  },
+  {
+    "base_id": "scr-m0h",
+    "base_priority": 3,
+    "base_title": "B edited title",
+    "our_priority": 3,
+    "our_title": "B2 edited title",
+    "their_priority": 1,
+    "their_title": "A2 edited title"
+  }
+]

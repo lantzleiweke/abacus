@@ -1,0 +1,4278 @@
+/*
+ * Abacus panel. Colors come only from the host's --oc-* tokens (applyHostReady); the literals after each token are
+ * fallbacks for a frame that has not been themed yet. Density follows the approved mockups: 26 px rows, 12.5 to 13 px text.
+ */
+
+.bd {
+  --bd-bg: var(--oc-bg, #fffdf4);
+  --bd-fg: var(--oc-fg, #494741);
+  --bd-muted: var(--oc-muted, #6a6962);
+  --bd-dim: color-mix(in srgb, var(--bd-muted) 66%, var(--bd-bg));
+  --bd-field: var(--oc-elevated, #f5f3ea);
+  --bd-line: var(--oc-border, #e6e4db);
+  --bd-hover: var(--oc-hover, rgba(0, 0, 0, 0.04));
+  --bd-press: var(--oc-active, rgba(0, 0, 0, 0.08));
+  --bd-focus: var(--oc-focus, rgba(181, 79, 20, 0.35));
+  --bd-accent: var(--oc-primary, #b54f14);
+  --bd-accent-fg: var(--oc-primary-fg, #fffdf4);
+  --bd-accent-text: var(--oc-primary-text, var(--bd-accent));
+  --bd-ok: var(--oc-success, #5e760a);
+  --bd-warn: var(--oc-warning, #b54f14);
+  --bd-warn-text: var(--oc-warning-text, var(--bd-warn));
+  --bd-err: var(--oc-error, #af3029);
+  --bd-err-text: var(--oc-error-text, var(--bd-err));
+  --bd-on: color-mix(in srgb, var(--bd-fg) 11%, var(--bd-field));
+  --bd-sel: var(--oc-selection, rgba(118, 115, 111, 0.19));
+  /* Pressed-in shading, from the foreground so it suits both themes. */
+  --bd-inset: color-mix(in srgb, var(--bd-fg) 14%, transparent);
+  /* Started work: amber, between the warning and success tokens, so it never reads as the accent's "changed" dot. */
+  --bd-prog: color-mix(in srgb, var(--bd-warn) 55%, var(--bd-ok));
+  --bd-mono: var(--oc-mono, ui-monospace, 'SFMono-Regular', Menlo, monospace);
+  --bd-radius: calc(var(--oc-radius, 9px) - 3px);
+
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  color: var(--bd-fg);
+  font-family: var(--oc-font, system-ui, sans-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bd *,
+.bd *::before,
+.bd *::after {
+  box-sizing: border-box;
+}
+
+/* Zero-specificity reset, so component classes win without !important. */
+:where(.bd) button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+:where(.bd) button:disabled {
+  cursor: default;
+}
+
+.bd :focus-visible {
+  outline: 2px solid var(--bd-focus);
+  outline-offset: 1px;
+}
+
+.bd-i {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.bd-head {
+  flex-shrink: 0;
+}
+
+.bd-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-proj {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.bd-proj .bd-i {
+  color: var(--bd-accent-text);
+}
+
+.bd-proj-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--bd-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-local {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bd-pulse {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bd-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bd-ok) 18%, transparent);
+}
+
+/* One ring per successful refresh (the element is re-keyed on each one). */
+.bd-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--bd-ok);
+  opacity: 0;
+  animation: bd-ring 900ms cubic-bezier(0.2, 0.7, 0.3, 1) 1;
+}
+
+@keyframes bd-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+.bd-fresh[data-state='stale'] .bd-local {
+  color: var(--bd-warn-text);
+}
+
+.bd-fresh[data-state='stale'] .bd-pulse {
+  background: transparent;
+  border: 1.5px solid var(--bd-warn);
+  box-shadow: none;
+}
+
+.bd-fresh[data-state='stale'] .bd-pulse::after {
+  display: none;
+}
+
+.bd-team {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--bd-dim);
+}
+
+.bd-unpub {
+  color: var(--bd-warn-text);
+}
+
+.bd-stale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-warn) 30%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 9%, var(--bd-bg));
+  font-size: 12px;
+  animation: bd-drop 180ms ease-out;
+}
+
+.bd-stale > .bd-i {
+  color: var(--bd-warn-text);
+}
+
+.bd-stale-msg {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes bd-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* Loading: the header keeps its final shape, with the freshness text and tools held as quiet placeholders. */
+.bd-fresh[data-state='loading'] .bd-pulse {
+  background: color-mix(in srgb, var(--bd-muted) 35%, transparent);
+  box-shadow: none;
+}
+
+.bd-fresh[data-state='loading'] .bd-pulse::after {
+  display: none;
+}
+
+/* The loaded line's text, kept for its size and covered by the bar. */
+.bd-skel-text {
+  position: relative;
+  color: transparent;
+}
+
+.bd-skel-text::before {
+  content: '';
+  position: absolute;
+  inset: 50% 0 auto;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bd-muted) 16%, transparent);
+  animation: bd-breathe 1400ms ease-in-out infinite;
+}
+
+.bd-tools[data-loading] > * {
+  animation: bd-breathe 1400ms ease-in-out infinite;
+}
+
+.bd-tools[data-loading] .bd-seg button {
+  color: var(--bd-dim);
+}
+
+/* ---------------------------------------------------------------- tools */
+
+.bd-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-dim);
+  cursor: text;
+}
+
+.bd-search:focus-within {
+  border-color: color-mix(in srgb, var(--bd-accent) 55%, var(--bd-line));
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--bd-fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.bd-search input:focus-visible {
+  outline: none;
+}
+
+.bd-search input::placeholder {
+  color: var(--bd-dim);
+}
+
+.bd-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+/* The box sizes from the row, never from its hint, so the hint can be measured against it. */
+.bd-search {
+  container-type: inline-size;
+}
+
+/*
+ * Too narrow for the whole hint: leave it out rather than cut it mid-word. The magnifier still says what the box is.
+ * Widths are of the content box: the magnifier and gap (20 px), then "Search" or "Search activity" at 12.5 px.
+ */
+@container (max-width: 66px) {
+  .bd-search input::placeholder {
+    color: transparent;
+  }
+}
+
+@container (max-width: 112px) {
+  .bd-search[data-hint='long'] input::placeholder {
+    color: transparent;
+  }
+}
+
+.bd-seg {
+  display: flex;
+  flex-shrink: 0;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-seg button {
+  display: flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: transparent;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.bd-seg button:hover {
+  color: var(--bd-fg);
+}
+
+.bd-seg button[aria-pressed='true'] {
+  background: var(--bd-on);
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+.bd-iconbtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: transparent;
+  color: var(--bd-muted);
+}
+
+.bd-iconbtn:hover {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-iconbtn[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--bd-accent) 55%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 14%, var(--bd-field));
+  color: var(--bd-accent-text);
+  box-shadow: inset 0 1px 2px var(--bd-inset);
+}
+
+.bd-iconbtn[data-active]::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-unseen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-accent) 14%, transparent);
+  color: var(--bd-accent-text);
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-unseen::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-unseen:hover {
+  background: color-mix(in srgb, var(--bd-accent) 22%, transparent);
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.bd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bd-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bd-fg) 6%, var(--bd-field));
+}
+
+.bd-btn:active:not(:disabled) {
+  background: var(--bd-on);
+}
+
+.bd-btn-sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.bd-btn-primary {
+  border-color: transparent;
+  background: var(--bd-accent);
+  color: var(--bd-accent-fg);
+  font-weight: 600;
+}
+
+.bd-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bd-accent) 88%, var(--bd-fg));
+}
+
+.bd-btn:disabled {
+  opacity: 0.75;
+}
+
+.bd-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bd-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+.bd-link:hover {
+  color: var(--bd-fg);
+}
+
+.bd-spin {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bd-turn 700ms linear infinite;
+}
+
+@keyframes bd-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- body */
+
+.bd-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * Scrollbars for a page without OpenChamber's guest styles (the dev preview). OpenChamber appends its own scrollbar
+ * rules after the panel's, as `*` and `:hover`. These stay at zero specificity so the host's rules always win: a class
+ * selector here beat `*` at rest and lost to `:hover`, so moving the pointer into the panel swapped the thin native
+ * scrollbar for the host's 6 px one and the list reflowed.
+ */
+:where(.bd-body, .bd-dbody, .bd-theirs, .bdp-list, .bdp-preview) {
+  scrollbar-width: thin;
+}
+
+:where(.bd-body, .bd-dbody) {
+  scrollbar-color: color-mix(in srgb, var(--bd-muted) 35%, transparent) transparent;
+}
+
+/* The host's scrollbar takes width, so the list keeps its room for it: rows do not widen when it stops overflowing. */
+:where(.bd-body) {
+  scrollbar-gutter: stable;
+}
+
+/* ---------------------------------------------------------------- empty states */
+
+.bd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 320px;
+  margin: 0 auto;
+  padding: 52px 24px 32px;
+  text-align: center;
+  animation: bd-rise 260ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes bd-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.bd-thread {
+  margin-bottom: 16px;
+  overflow: visible;
+}
+
+.bd-thread-line {
+  stroke: var(--bd-line);
+  stroke-width: 1.5;
+}
+
+.bd-thread-bead {
+  fill: color-mix(in srgb, var(--bd-muted) 30%, var(--bd-bg));
+}
+
+.bd-thread-mid {
+  fill: var(--bd-bg);
+  stroke: var(--bd-muted);
+  stroke-width: 1.5;
+}
+
+.bd-thread[data-tone='missing'] .bd-thread-mid {
+  stroke-dasharray: 3 2.4;
+}
+
+.bd-thread[data-tone='warning'] .bd-thread-mid {
+  stroke: var(--bd-warn);
+  fill: color-mix(in srgb, var(--bd-warn) 22%, var(--bd-bg));
+}
+
+.bd-thread[data-tone='error'] .bd-thread-mid {
+  stroke: var(--bd-err);
+  fill: var(--bd-err);
+}
+
+.bd-thread[data-tone='ask'] .bd-thread-mid {
+  stroke: var(--bd-accent);
+  fill: color-mix(in srgb, var(--bd-accent) 22%, var(--bd-bg));
+}
+
+.bd-empty-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+
+.bd-empty-body {
+  margin: 6px 0 0;
+  color: var(--bd-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.bd-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  margin-top: 16px;
+}
+
+.bd-empty-note {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+}
+
+.bd-empty-error {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--bd-err-text);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- loading */
+
+.bd-skeleton {
+  padding: 8px 0;
+}
+
+.bd-skel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 12px 0 14px;
+}
+
+.bd-skel-row i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bd-muted) 16%, transparent);
+  animation: bd-breathe 1400ms ease-in-out var(--d, 0ms) infinite;
+}
+
+.bd-skel-row .bd-skel-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.bd-skel-row .bd-skel-id {
+  width: 34px;
+}
+
+.bd-skel-row .bd-skel-bar {
+  width: var(--w, 60%);
+}
+
+@keyframes bd-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ---------------------------------------------------------------- list */
+
+.bd-list {
+  container-type: inline-size;
+  margin: 0;
+  /* Room under the last row, so scrolling to the end shows it whole above the footer's fade. */
+  padding: 4px 0 32px;
+  list-style: none;
+  color: var(--bd-fg);
+  transition: color 200ms ease;
+}
+
+/* A section's listbox shows focus through its cursor row; without one, the box itself shows it. */
+.bd-list [role='listbox']:focus-visible {
+  outline: none;
+}
+
+.bd-list [role='listbox']:focus-visible:not([aria-activedescendant]) {
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+/*
+ * Stale: titles step toward the background, and secondary text keeps its usual mix from the stepped colors, so in both
+ * themes it stays quieter than the titles. Status color loses some saturation so nothing reads as fresh.
+ */
+.bd-list[data-stale] {
+  --bd-fg: color-mix(in srgb, var(--oc-fg, #494741) 72%, var(--bd-bg));
+  --bd-muted: color-mix(in srgb, var(--oc-muted, #6a6962) 82%, var(--bd-bg));
+  --bd-dim: color-mix(in srgb, var(--bd-muted) 66%, var(--bd-bg));
+}
+
+.bd-list[data-stale] :is(.bd-sd, .bd-bar, .bd-pr, .bd-ty),
+.bd-list[data-stale] .bd-row[data-unseen]::before {
+  filter: saturate(0.45);
+}
+
+/* ---------------------------------------------------------------- rows */
+
+.bd-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0 12px 0 calc(14px + var(--l, 0) * 16px);
+  cursor: default;
+  user-select: none;
+}
+
+.bd-row:hover {
+  background: var(--bd-hover);
+}
+
+.bd-row[data-unseen] {
+  background: color-mix(in srgb, var(--bd-accent) 7%, transparent);
+}
+
+.bd-row[data-unseen]:hover {
+  background: color-mix(in srgb, var(--bd-accent) 11%, transparent);
+}
+
+.bd-row[data-unseen]::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+/* Keyboard cursor: a hairline ring, so it reads over the unseen tint and the selection alike. */
+.bd-row[data-cursor] {
+  background: var(--bd-hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bd-accent) 45%, transparent);
+}
+
+.bd-row[data-selected] {
+  background: var(--bd-sel);
+}
+
+.bd-row[data-selected]::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--bd-accent);
+}
+
+.bd-id {
+  flex-shrink: 0;
+  color: var(--bd-dim);
+  font-family: var(--bd-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Done titles step back but stay readable: muted nudged toward the foreground measures about 6:1 on the light
+ * background (5:1 on an unseen row's tint), and more in dark.
+ */
+.bd-row[data-done] .bd-title {
+  color: color-mix(in srgb, var(--bd-muted) 80%, var(--bd-fg));
+}
+
+.bd-row[data-context] .bd-title {
+  color: var(--bd-dim);
+}
+
+.bd-ty {
+  display: flex;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--bd-accent-text) 62%, var(--bd-muted));
+}
+
+.bd-row[data-done] .bd-ty,
+.bd-row[data-context] .bd-ty {
+  color: var(--bd-dim);
+}
+
+.bd-lb {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 76px;
+  overflow: hidden;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-fg) 7%, transparent);
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-ep {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 96px;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-ep em {
+  overflow: hidden;
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-ep-id {
+  display: none;
+  font-family: var(--bd-mono);
+  font-size: 10.5px;
+}
+
+.bd-sub {
+  flex-shrink: 0;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-sub[data-all] {
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-muted));
+}
+
+/* P0 to P4: urgent and high get fills; the rest step down to outlines. */
+.bd-pr {
+  flex-shrink: 0;
+  width: 21px;
+  padding: 3px 0;
+  border-radius: 4px;
+  font: 600 10px/1 var(--bd-mono);
+  text-align: center;
+}
+
+.bd-pr[data-p='0'] {
+  background: color-mix(in srgb, var(--bd-err) 20%, transparent);
+  color: var(--bd-err-text);
+}
+
+.bd-pr[data-p='1'] {
+  background: color-mix(in srgb, var(--bd-prog) 22%, transparent);
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-pr[data-p='2'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bd-fg) 24%, transparent);
+  color: var(--bd-muted);
+}
+
+.bd-pr:is([data-p='3'], [data-p='4']) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bd-fg) 13%, transparent);
+  color: var(--bd-dim);
+}
+
+.bd-who {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bd-fg) 10%, transparent);
+  color: var(--bd-muted);
+  font: 600 8px/1 var(--bd-mono);
+  letter-spacing: -0.02em;
+}
+
+.bd-who[data-none] {
+  background: none;
+}
+
+.bd-age {
+  flex-shrink: 0;
+  width: 20px;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Row menu button: floats over the meta columns on hover, cursor, or selection. */
+.bd-rowmore {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--bd-line);
+  border-radius: calc(var(--bd-radius) - 1px);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 100ms ease;
+}
+
+.bd-row:is(:hover, [data-cursor]) .bd-rowmore {
+  opacity: 1;
+}
+
+.bd-rowmore:hover {
+  color: var(--bd-fg);
+}
+
+/* Narrow panes drop the second label first, then labels and avatars. */
+@container (max-width: 419px) {
+  .bd-lb + .bd-lb {
+    display: none;
+  }
+
+  /* Too narrow for about 10 characters of a long epic title: show the epic's short id instead. */
+  .bd-ep:not([data-fits]) .bd-ep-name {
+    display: none;
+  }
+
+  .bd-ep:not([data-fits]) .bd-ep-id {
+    display: inline;
+  }
+
+  /* The status view's epic tag says more than a label, so labels give way to keep titles readable. */
+  [data-view='status'] .bd-lb {
+    display: none;
+  }
+}
+
+@container (max-width: 339px) {
+  .bd-lb,
+  .bd-who {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- status icons */
+
+.bd-sd {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bd-muted);
+}
+
+.bd-sd[data-look='progress'] {
+  border-color: var(--bd-prog);
+  background: conic-gradient(var(--bd-prog) 0 50%, transparent 0);
+}
+
+.bd-sd[data-look='blocked'] {
+  width: 8px;
+  height: 8px;
+  margin: 0 0.5px;
+  border: 0;
+  background: var(--bd-err);
+  box-shadow: inset 0 0 0 2px var(--bd-bg), 0 0 0 1.5px var(--bd-err);
+}
+
+.bd-sd[data-look='deferred'] {
+  border-style: dashed;
+  border-color: var(--bd-dim);
+}
+
+.bd-sd[data-look='done'] {
+  border: 0;
+  background: var(--bd-ok);
+}
+
+/* A status Beads does not describe: neutral, dotted, named on hover. */
+.bd-sd[data-look='other'] {
+  border-style: dotted;
+  border-color: var(--bd-muted);
+}
+
+/*
+ * Markers beyond the five built-ins, in their category's color, so none borrows a built-in's icon: the project's
+ * statuses are diamonds (In review is not In progress), Beads' own extras are squares (Pinned is not Deferred, and not
+ * a diamond like QA wait).
+ */
+.bd-sd[data-marker] {
+  width: 8px;
+  height: 8px;
+  margin: 0 0.5px;
+}
+
+.bd-sd[data-marker='custom'] {
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.bd-sd[data-marker='custom'][data-look='progress'] {
+  background: linear-gradient(135deg, var(--bd-prog) 0 50%, transparent 0);
+}
+
+/* On ice: a light fill sets it apart from an unstarted project status's empty diamond. */
+.bd-sd[data-marker='custom'][data-look='deferred'] {
+  border-style: solid;
+  border-color: var(--bd-muted);
+  background: color-mix(in srgb, var(--bd-muted) 30%, transparent);
+}
+
+.bd-sd[data-marker='beads'] {
+  border-style: solid;
+  border-radius: 2px;
+}
+
+.bd-sd[data-marker='beads'][data-look='deferred'] {
+  border-color: var(--bd-muted);
+  background: color-mix(in srgb, var(--bd-muted) 55%, transparent);
+}
+
+.bd-sd[data-marker='beads'][data-look='progress'] {
+  background: linear-gradient(to right, var(--bd-prog) 0 50%, transparent 0);
+}
+
+/* ---------------------------------------------------------------- epic view */
+
+.bd-chev {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 12px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bd-dim);
+}
+
+button.bd-chev:hover {
+  color: var(--bd-fg);
+}
+
+.bd-chev .bd-i {
+  transition: transform 140ms ease;
+}
+
+[data-collapsed] > :first-child .bd-chev .bd-i,
+[data-collapsed] > .bd-chev .bd-i {
+  transform: rotate(-90deg);
+}
+
+.bd-epic {
+  position: relative;
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+/* The collapse control sits beside the epic's listbox, drawn over the row's left edge. */
+.bd-epic-chev {
+  position: absolute;
+  z-index: 1;
+  top: 6px;
+  left: 14px;
+  height: 26px;
+}
+
+/* The epic option holds its progress line too (a listbox holds options only), so its row wraps onto two lines. */
+.bd-row[data-variant='epic'] {
+  flex-wrap: wrap;
+  align-content: flex-start;
+  row-gap: 2px;
+  padding-top: 4px;
+  padding-left: 33px;
+}
+
+/* The menu button and the unseen dot stay on the epic's title line, not the middle of both lines. */
+.bd-row[data-variant='epic'] .bd-rowmore {
+  top: 13px;
+}
+
+.bd-row[data-variant='epic'][data-unseen]::before {
+  top: 13px;
+}
+
+[data-collapsed] > .bd-epic-chev .bd-i {
+  transform: rotate(-90deg);
+}
+
+.bd-epic .bd-row[data-variant='epic'] .bd-title {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.bd-epic .bd-row[data-variant='epic'] .bd-ty {
+  color: var(--bd-accent-text);
+}
+
+.bd-epic .bd-row[data-variant='epic'][data-done] .bd-ty {
+  color: var(--bd-dim);
+}
+
+.bd-prog {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 4px 21px;
+  color: var(--bd-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bd-epic[data-collapsed] .bd-prog {
+  padding-bottom: 2px;
+}
+
+.bd-bar {
+  display: flex;
+  flex: 1;
+  min-width: 40px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--bd-fg) 9%, transparent);
+}
+
+.bd-bar i {
+  display: block;
+  height: 100%;
+  transition: width 320ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.bd-bar i[data-look='done'] {
+  background: var(--bd-ok);
+}
+
+.bd-bar i[data-look='progress'] {
+  background: var(--bd-prog);
+}
+
+.bd-bar i[data-look='blocked'] {
+  background: var(--bd-err);
+}
+
+.bd-prog-blk {
+  color: var(--bd-err-text);
+}
+
+.bd-prog-new,
+.bd-ux {
+  color: var(--bd-accent-text);
+  font-weight: 500;
+}
+
+/* "Not in an epic": a quiet small-caps divider rather than a section card. */
+.bd-sect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px 4px 14px;
+  border: 0;
+  background: none;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.bd-sect:hover {
+  color: var(--bd-muted);
+}
+
+.bd-sect .bd-n,
+.bd-sect .bd-ux {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.bd-sect .bd-ux {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------- status view */
+
+.bd-grp + .bd-grp {
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-grp:last-child {
+  padding-bottom: 4px;
+}
+
+.bd-grp-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 8px 12px 4px;
+  border: 0;
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.bd-grp[data-collapsed] .bd-grp-h {
+  padding-bottom: 7px;
+}
+
+.bd-grp-h:hover {
+  color: var(--bd-fg);
+}
+
+.bd-grp-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-n {
+  color: var(--bd-dim);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-grp-h .bd-ux {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.bd-morerows {
+  display: block;
+  padding: 3px 12px 6px 53px;
+  border: 0;
+  background: none;
+  color: var(--bd-accent-text);
+  font-size: 11.5px;
+}
+
+.bd-morerows:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- row menu */
+
+.bd-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 176px;
+  padding: 4px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--oc-elevated, var(--bd-field));
+  color: var(--oc-elevated-fg, var(--bd-fg));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: bd-pop 120ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes bd-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+
+.bd-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.bd-menu-item .bd-i {
+  color: var(--bd-muted);
+}
+
+.bd-menu-item:is(:hover, :focus-visible) {
+  outline: none;
+  background: var(--bd-hover);
+}
+
+.bd-menu-item:is(:hover, :focus-visible) .bd-i {
+  color: var(--bd-fg);
+}
+
+.bd-menu-id {
+  margin: 4px -4px -4px;
+  padding: 5px 12px 6px;
+  border-top: 1px solid var(--bd-line);
+  color: var(--bd-dim);
+  font: 10.5px/1.3 var(--bd-mono);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- filters */
+
+.bd-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid var(--bd-line);
+  background: color-mix(in srgb, var(--bd-field) 55%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-fline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bd-flabel {
+  flex-shrink: 0;
+  width: 54px;
+  padding-top: 4px;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  max-width: 100%;
+  padding: 0 7px;
+  border: 1px solid var(--bd-line);
+  border-radius: 11px;
+  background: var(--bd-bg);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.bd-chip:hover {
+  color: var(--bd-fg);
+}
+
+.bd-chip[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--bd-accent) 50%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-accent) 12%, var(--bd-bg));
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+.bd-chip .bd-pr {
+  width: auto;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.bd-fsep {
+  width: 1px;
+  height: 14px;
+  margin: 0 2px;
+  background: var(--bd-line);
+}
+
+.bd-freset {
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.bd-foot {
+  /* Above the epic chevrons (z-index 1), so its fade covers everything that scrolls under it. */
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--bd-line);
+  background: var(--bd-bg);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A soft fade above the footer, so rows scroll under it rather than being cut off. */
+.bd-foot::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 28px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bd-bg) 0%, transparent), color-mix(in srgb, var(--bd-bg) 92%, transparent));
+  pointer-events: none;
+}
+
+.bd-foot b {
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+.bd-foot [data-tone='blocked'],
+.bd-foot [data-tone='blocked'] b {
+  color: var(--bd-err-text);
+}
+
+/* ---------------------------------------------------------------- detail */
+
+/* Read by screen readers only. */
+.bd-vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.bd-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+  animation: bd-enter 170ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Focus lands on the detail itself only so Escape and Tab start here; it draws no ring. */
+.bd .bd-detail:focus-visible {
+  outline: none;
+}
+
+@keyframes bd-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+
+.bd-dnav {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 39px;
+  padding: 6px 10px 6px 6px;
+  border-bottom: 1px solid var(--bd-line);
+  transition: box-shadow 160ms ease;
+}
+
+/* Content scrolled under the top bar: a soft shade says there is more above. */
+.bd-dnav[data-scrolled] {
+  box-shadow: 0 6px 10px -6px color-mix(in srgb, var(--bd-fg) 22%, transparent);
+}
+
+.bd-back {
+  border-color: transparent;
+}
+
+.bd-crumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--bd-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.bd-crumb-epic {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 5px;
+  margin-left: -3px;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-muted);
+}
+
+.bd-crumb-epic span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bd-crumb-epic .bd-i {
+  color: var(--bd-dim);
+}
+
+.bd-crumb-epic:hover {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-crumb-sep {
+  color: var(--bd-dim);
+}
+
+.bd-crumb-here {
+  flex-shrink: 0;
+  color: var(--bd-fg);
+  font-family: var(--bd-mono);
+  font-size: 11px;
+}
+
+.bd-dacts {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The status menu at the top right. */
+.bd-statbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 5px 0 7px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font-size: 11.5px;
+}
+
+.bd-statbtn > .bd-i {
+  color: var(--bd-dim);
+}
+
+.bd-statbtn:hover:not(:disabled),
+.bd-statbtn[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--bd-fg) 22%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-fg) 5%, var(--bd-field));
+}
+
+/* ---------------------------------------------------------------- editing */
+
+:is(.bd-statbtn, .bd-chipbtn, .bd-lbadd, .bd-addchip, .bd-addlink, .bd-edit, .bd-relx):disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.bd-popwrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.bd-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 168px;
+  max-width: min(260px, calc(100vw - 24px));
+  padding: 4px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--oc-elevated, var(--bd-field));
+  color: var(--oc-elevated-fg, var(--bd-fg));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: bd-pop 120ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.bd-pop[data-align='end'] {
+  right: 0;
+  left: auto;
+}
+
+.bd-pop .bd-menu-item[aria-checked='true'] {
+  background: var(--bd-on);
+  font-weight: 600;
+}
+
+.bd-pop .bd-menu-item .bd-pr {
+  width: 22px;
+}
+
+.bd-menu-sep {
+  margin-top: 2px;
+  border-top: 1px solid var(--bd-line);
+  border-radius: 0;
+  color: var(--bd-muted);
+}
+
+.bd-popform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 232px;
+  padding: 4px;
+}
+
+.bd-flab {
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-popacts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bd-input,
+.bd-select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--bd-line);
+  border-radius: calc(var(--bd-radius) - 1px);
+  background: var(--bd-bg);
+  color: var(--bd-fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.bd-select {
+  padding-right: 4px;
+}
+
+:is(.bd-input, .bd-select):focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--bd-accent) 55%, var(--bd-line));
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-input[aria-invalid='true'] {
+  border-color: color-mix(in srgb, var(--bd-err) 60%, var(--bd-line));
+}
+
+.bd-input::placeholder {
+  color: var(--bd-dim);
+}
+
+.bd-fieldmsg {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-fieldmsg[data-tone='quiet'] {
+  color: var(--bd-dim);
+}
+
+.bd-opts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-opt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: calc(var(--bd-radius) - 2px);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.bd-opt:hover,
+.bd-opt[aria-selected='true'] {
+  background: var(--bd-hover);
+}
+
+.bd-opt[aria-selected='true'] {
+  box-shadow: inset 2px 0 0 var(--bd-accent);
+}
+
+/* Fields in the header that open a picker look like what they show, with a quiet frame on hover. */
+.bd-chipbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: -2px -3px;
+  padding: 2px 3px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+}
+
+.bd-chipbtn:hover:not(:disabled),
+.bd-chipbtn[aria-expanded='true'] {
+  background: var(--bd-hover);
+  box-shadow: inset 0 0 0 1px var(--bd-line);
+}
+
+.bd-chipbtn.bd-assignee {
+  margin: -2px -4px;
+  padding: 2px 4px;
+  font-size: 11.5px;
+}
+
+.bd-pr[data-p='none-set'] {
+  color: var(--bd-dim);
+  outline: 1px dashed var(--bd-line);
+  outline-offset: -1px;
+}
+
+.bd-lbadd {
+  height: 18px;
+  padding: 0 6px;
+  border: 1px dashed color-mix(in srgb, var(--bd-muted) 45%, transparent);
+  border-radius: 9px;
+  background: none;
+  color: var(--bd-dim);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.bd-lbadd:hover:not(:disabled),
+.bd-lbadd[aria-expanded='true'] {
+  border-style: solid;
+  color: var(--bd-fg);
+}
+
+.bd-lbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 2px 4px;
+}
+
+.bd-lb-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+}
+
+.bd-lb-edit button {
+  display: inline-flex;
+  padding: 1px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--bd-dim);
+}
+
+.bd-lb-edit button:hover {
+  background: var(--bd-hover);
+  color: var(--bd-err-text);
+}
+
+/* A write that met a newer bead, may have saved, or was refused. */
+.bd-wnote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 10px 0 0 24px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 35%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 8%, var(--bd-bg));
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-wnote b {
+  color: var(--bd-warn-text);
+  font-weight: 600;
+}
+
+.bd-wnote[data-tone='error'] {
+  border-color: color-mix(in srgb, var(--bd-err) 30%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-err) 7%, var(--bd-bg));
+}
+
+.bd-wnote[data-tone='note'] {
+  border-color: var(--bd-line);
+  background: var(--bd-field);
+}
+
+.bd-wnote-acts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.bd-wmsg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-wmsg[data-tone='note'] {
+  color: var(--bd-muted);
+}
+
+.bd-paused {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 12px 0;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--bd-warn) 30%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-warn) 8%, var(--bd-bg));
+  color: var(--bd-warn-text);
+  font-size: 11.5px;
+}
+
+.bd-paused-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bd-warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bd-warn) 18%, transparent);
+}
+
+/* Relationship rows with a remove button that shows on hover or focus. */
+.bd-relrow {
+  position: relative;
+}
+
+.bd-relrow[data-x] .bd-rel {
+  padding-right: 34px;
+}
+
+.bd-relx {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-dim);
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.bd-relrow:is(:hover, :focus-within) .bd-relx {
+  opacity: 1;
+}
+
+.bd-relx:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-err-text);
+}
+
+.bd-addlink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 12px 0 30px;
+  border: 0;
+  background: none;
+  color: var(--bd-dim);
+  font-size: 12px;
+  text-align: left;
+}
+
+.bd-addlink:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-linkadd {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 12px 4px 30px;
+  padding: 6px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  animation: bd-drop 160ms ease-out;
+}
+
+.bd-linkrow {
+  display: flex;
+  gap: 5px;
+}
+
+.bd-linkrow .bd-select {
+  flex: 0 0 auto;
+  max-width: 112px;
+}
+
+.bd-linkrow .bd-input {
+  flex: 1;
+}
+
+.bd-iconbtn-sm {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+}
+
+.bd-opt-bead .bd-title {
+  font-size: 12.5px;
+}
+
+/* Section Edit buttons: quiet until the section is hovered or focused, always there for touch and keyboard. */
+.bd-sh {
+  display: flex;
+  align-items: center;
+}
+
+.bd-sh .bd-sh-tog {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-sh .bd-sh-tog:disabled {
+  cursor: default;
+}
+
+.bd-edit {
+  flex-shrink: 0;
+  height: 20px;
+  margin-right: 8px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-dim);
+  font-size: 11px;
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.bd-sec:is(:hover, :focus-within) .bd-edit,
+.bd-dtitle:is(:hover, :focus-within) .bd-edit,
+.bd-edit:focus-visible {
+  opacity: 1;
+}
+
+.bd-edit:hover:not(:disabled) {
+  border-color: var(--bd-line);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+}
+
+@media (hover: none) {
+  .bd-edit {
+    opacity: 1;
+  }
+}
+
+.bd-edit-title {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: 22px;
+  margin: -1px -4px 0 auto;
+  padding: 0 4px;
+}
+
+.bd-dtitle[data-editing] {
+  align-items: flex-start;
+}
+
+.bd-dtitle[data-editing] .bd-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-titlein {
+  width: 100%;
+  height: 30px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bd-sec[data-editing] .bd-sh .bd-sh-tog {
+  color: var(--bd-accent-text);
+}
+
+.bd-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bd-sec-body .bd-editor {
+  margin-left: -16px;
+}
+
+.bd-editor .bd-wnote {
+  margin: 0;
+}
+
+.bd-ta {
+  width: 100%;
+  min-height: 84px;
+  max-height: 60vh;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--bd-accent) 40%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: var(--bd-bg);
+  color: var(--bd-fg);
+  font: 12px/1.55 var(--bd-mono);
+  resize: vertical;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bd-accent) 9%, transparent);
+  box-sizing: border-box;
+}
+
+.bd-ta:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-editor[data-busy] :is(.bd-ta, .bd-titlein) {
+  opacity: 0.7;
+}
+
+.bd-edacts,
+.bd-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bd-edhint {
+  margin-right: auto;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+}
+
+.bd-confirm {
+  padding: 5px 6px 5px 9px;
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  font-size: 11.5px;
+}
+
+.bd-confirm span {
+  margin-right: auto;
+}
+
+.bd-btn[data-tone='danger'] {
+  color: var(--bd-err-text);
+}
+
+.bd-wnote-edit {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.bd-wnote-edit .bd-wnote-acts {
+  justify-content: flex-end;
+}
+
+.bd-theirs {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 6px 8px 16px;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: var(--bd-bg);
+  /* Long text fades out above the buttons instead of being cut under them; scrolling shows the rest. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+
+.bd-draft-lab {
+  margin: 2px 0 -2px;
+}
+
+.bd-wmsg[data-tone='ok'] {
+  color: var(--bd-ok-text, var(--bd-ok));
+}
+
+.bd-theirs-lab {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--bd-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Add a comment, as in the mockup: one quiet line that opens up as you write. */
+.bd-cmp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  margin: 2px 0 6px 28px;
+}
+
+.bd-cmp-ta {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-fg);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.bd-cmp-ta::placeholder {
+  color: var(--bd-dim);
+}
+
+.bd-cmp-ta:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--bd-accent) 55%, var(--bd-line));
+  background: var(--bd-bg);
+  box-shadow: 0 0 0 2px var(--bd-focus);
+}
+
+.bd-cmp-ta:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.bd-cmp .bd-wmsg {
+  grid-column: 1 / -1;
+}
+
+.bd-cmp-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+
+.bd-cmp kbd {
+  font-family: var(--bd-mono);
+}
+
+.bd-cmp:not([data-open]) .bd-cmp-acts .bd-btn {
+  display: none;
+}
+
+.bd-cmp[data-open] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bd-cmp[data-open] .bd-cmp-acts {
+  justify-content: flex-end;
+}
+
+/* New bead: a sheet that drops from the top bar over whatever is showing. */
+.bd {
+  position: relative;
+}
+
+.bd-newbtn {
+  flex-shrink: 0;
+}
+
+.bd-dacts .bd-newbtn {
+  width: 24px;
+  height: 24px;
+  border-color: transparent;
+}
+
+.bd-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+.bd-scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bd-bg) 55%, rgba(0, 0, 0, 0.35));
+  animation: bd-fade 140ms ease-out;
+}
+
+@keyframes bd-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.bd-create {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: calc(100% - 24px);
+  margin: 8px 8px 0;
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+  border: 1px solid var(--bd-line);
+  border-radius: calc(var(--bd-radius) + 2px);
+  background: var(--bd-bg);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.14);
+  animation: bd-sheet 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes bd-sheet {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.bd-create .bd-paused {
+  margin: 0;
+}
+
+.bd-create-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-right: -6px;
+  font-size: 13px;
+}
+
+.bd-cf {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bd-cf > span {
+  color: var(--bd-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bd-cf-row {
+  display: flex;
+  gap: 8px;
+}
+
+.bd-cf .bd-select {
+  width: 100%;
+}
+
+.bd-cf-ta {
+  min-height: 72px;
+  font-family: inherit;
+  font-size: 12.5px;
+  box-shadow: none;
+  border-color: var(--bd-line);
+}
+
+/* Missing context, one tap away: "Add  Description  Design  Link". */
+.bd-addrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px 9px 30px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-addrow-lab {
+  margin-right: 2px;
+  color: var(--bd-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-addchip {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--bd-muted) 45%, transparent);
+  border-radius: 10px;
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-addchip::before {
+  content: '+ ';
+  color: var(--bd-dim);
+}
+
+.bd-addchip:hover:not(:disabled) {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--bd-accent) 50%, var(--bd-line));
+  color: var(--bd-fg);
+}
+
+/* A thin sweep under the top bar while the full bead is read; the list's copy is already on screen. */
+.bd-loadbar {
+  position: relative;
+  z-index: 3;
+  height: 3px;
+  margin-top: -3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bd-accent) 14%, transparent);
+}
+
+.bd-loadbar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  border-radius: 2px;
+  background: linear-gradient(to right, transparent, var(--bd-accent) 40%, var(--bd-accent) 60%, transparent);
+  animation: bd-sweep 1100ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* While the full bead is read, the parts that may still change breathe a little. */
+.bd-detail[aria-busy='true'] .bd-cms {
+  animation: bd-breathe 1400ms ease-in-out infinite;
+}
+
+@keyframes bd-sweep {
+  to {
+    left: 100%;
+  }
+}
+
+.bd-dbody {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 18px;
+  overflow-x: clip;
+  overflow-y: auto;
+}
+
+.bd-derr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 10px 12px 0;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--bd-err) 30%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-err) 8%, var(--bd-bg));
+  font-size: 12px;
+}
+
+.bd-derr > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-derr[data-tone='note'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 30%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 8%, var(--bd-bg));
+}
+
+.bd-dskel {
+  padding: 16px 14px;
+}
+
+.bd-dskel i {
+  display: block;
+  width: var(--w, 70%);
+  height: 9px;
+  margin-bottom: 11px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bd-muted) 16%, transparent);
+  animation: bd-breathe 1400ms ease-in-out infinite;
+}
+
+.bd-dskel i:first-child {
+  height: 14px;
+  margin-bottom: 16px;
+}
+
+/* header */
+
+.bd-dhead {
+  padding: 12px 14px 10px;
+}
+
+.bd-dtitle {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.bd-dtitle .bd-ty {
+  margin-top: 2px;
+  color: var(--bd-accent-text);
+}
+
+.bd-did {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 24px);
+  margin: 6px 0 0 24px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font: 11px/1.5 var(--bd-mono);
+}
+
+.bd-did span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-did .bd-i {
+  color: var(--bd-dim);
+}
+
+.bd-did:hover,
+.bd-did:hover .bd-i {
+  color: var(--bd-fg);
+}
+
+.bd-dtype {
+  margin-left: 8px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+}
+
+.bd-dmeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0 24px;
+}
+
+/* Every label shows here; rows in the list are the place for "two at most". */
+.bd-dmeta .bd-lb {
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+.bd-dhint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0 24px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-dhint[data-tone='blocked'] {
+  color: var(--bd-err-text);
+}
+
+.bd-hint-id {
+  padding: 0 3px;
+  border: 0;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit;
+  font: 11px/1.4 var(--bd-mono);
+}
+
+.bd-hint-id:hover {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.bd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bd-fg) 7%, transparent);
+  color: var(--bd-fg);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bd-pill[data-look='progress'] {
+  background: color-mix(in srgb, var(--bd-prog) 16%, transparent);
+  color: color-mix(in srgb, var(--bd-prog) 72%, var(--bd-fg));
+}
+
+.bd-pill[data-look='blocked'] {
+  background: color-mix(in srgb, var(--bd-err) 14%, transparent);
+  color: var(--bd-err-text);
+}
+
+.bd-pill[data-look='deferred'] {
+  background: color-mix(in srgb, var(--bd-muted) 12%, transparent);
+  color: var(--bd-muted);
+}
+
+.bd-pill[data-look='done'] {
+  background: color-mix(in srgb, var(--bd-ok) 15%, transparent);
+  color: color-mix(in srgb, var(--bd-ok) 70%, var(--bd-fg));
+}
+
+/* A status Beads does not describe: no color claims, just its name. */
+.bd-pill[data-look='other'] {
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bd-muted) 45%, transparent);
+  color: var(--bd-muted);
+}
+
+.bd-pill .bd-sd[data-look='blocked'] {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bd-err) 14%, var(--bd-bg)), 0 0 0 1.5px var(--bd-err);
+}
+
+.bd-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-assignee[data-none] {
+  color: var(--bd-dim);
+}
+
+.bd-assignee[data-none] i {
+  width: 14px;
+  height: 14px;
+  border: 1px dashed color-mix(in srgb, var(--bd-muted) 60%, transparent);
+  border-radius: 50%;
+}
+
+.bd-av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bd-fg) 9%, transparent);
+  color: var(--bd-muted);
+  font: 600 9px/1 var(--bd-mono);
+  letter-spacing: -0.02em;
+}
+
+.bd-av[data-size='sm'] {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
+
+.bd-av[data-me] {
+  background: color-mix(in srgb, var(--bd-accent) 20%, transparent);
+  color: var(--bd-accent-text);
+}
+
+.bd-av[data-none] {
+  background: none;
+  border: 1px dashed color-mix(in srgb, var(--bd-muted) 60%, transparent);
+  color: var(--bd-dim);
+}
+
+/* "Changed since you last looked" */
+
+.bd-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 12px 10px;
+  padding: 6px 4px 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--bd-accent) 24%, transparent);
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-accent) 9%, var(--bd-bg));
+  color: color-mix(in srgb, var(--bd-accent-text) 55%, var(--bd-fg));
+  font-size: 11.5px;
+  line-height: 1.45;
+  animation: bd-drop 200ms ease-out;
+}
+
+.bd-banner::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-banner-txt {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bd-banner-to {
+  font-weight: 600;
+}
+
+.bd-banner-to[data-look='blocked'] {
+  color: var(--bd-err-text);
+}
+
+.bd-banner-to[data-look='progress'] {
+  color: color-mix(in srgb, var(--bd-prog) 75%, var(--bd-fg));
+}
+
+.bd-banner-to[data-look='done'] {
+  color: color-mix(in srgb, var(--bd-ok) 75%, var(--bd-fg));
+}
+
+.bd-banner-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--bd-radius) - 2px);
+  background: none;
+  color: var(--bd-dim);
+}
+
+.bd-banner-x:hover {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+/* sections */
+
+.bd-sec {
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-sh {
+  margin: 0;
+  font: inherit;
+}
+
+.bd-sh .bd-sh-tog {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px 6px;
+  border: 0;
+  background: none;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.bd-sh .bd-sh-tog:hover {
+  color: var(--bd-fg);
+}
+
+.bd-sh .bd-chev {
+  height: 14px;
+}
+
+.bd-sec:not([data-open]) .bd-sh .bd-chev .bd-i {
+  transform: rotate(-90deg);
+}
+
+.bd-sec:not([data-open]) .bd-sh .bd-sh-tog {
+  padding-bottom: 8px;
+}
+
+.bd-sh-t {
+  flex-shrink: 0;
+}
+
+.bd-sh .bd-n {
+  flex-shrink: 0;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.bd-peek {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-sec-body {
+  padding: 0 14px 10px 30px;
+}
+
+.bd-sec-body[hidden] {
+  display: none;
+}
+
+[data-section='relationships'] .bd-sec-body {
+  padding: 0 0 6px;
+}
+
+[data-section='activity'] .bd-sec-body {
+  padding: 0 14px 4px;
+}
+
+/* markdown */
+
+.bd-md {
+  color: color-mix(in srgb, var(--bd-fg) 90%, var(--bd-muted));
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.bd-md > :first-child {
+  margin-top: 0;
+}
+
+.bd-md > :last-child {
+  margin-bottom: 0;
+}
+
+.bd-md :is(p, ul, ol, blockquote, pre, table) {
+  margin: 0 0 7px;
+}
+
+.bd-md :is(ul, ol) {
+  padding-left: 18px;
+}
+
+.bd-md li {
+  margin: 2px 0;
+}
+
+.bd-md li:has(> [data-check]) {
+  list-style: none;
+  margin-left: -16px;
+}
+
+.bd-md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 10px 0 4px;
+  color: var(--bd-fg);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.bd-md a:is([href^='http:' i], [href^='https:' i], [href^='mailto:' i]) {
+  color: var(--bd-accent-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.bd-md code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bd-fg) 7%, transparent);
+  font: 11.5px/1.4 var(--bd-mono);
+}
+
+.bd-md pre {
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-md pre code {
+  padding: 0;
+  background: none;
+  font-size: 11px;
+}
+
+.bd-md blockquote {
+  padding-left: 9px;
+  border-left: 2px solid var(--bd-line);
+  color: var(--bd-muted);
+}
+
+.bd-md hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bd-md table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.bd-md :is(th, td) {
+  padding: 2px 6px;
+  border: 1px solid var(--bd-line);
+}
+
+/* Task boxes, in descriptions and acceptance criteria alike. */
+.bd-md [data-check],
+.bd-ac-box {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-right: 2px;
+  border: 1.3px solid color-mix(in srgb, var(--bd-muted) 70%, transparent);
+  border-radius: 2.5px;
+  vertical-align: -1px;
+}
+
+.bd-md [data-check='done'],
+.bd-ac li[data-done] .bd-ac-box {
+  border-color: var(--bd-ok);
+  background: var(--bd-ok);
+  box-shadow: inset 0 0 0 1.5px var(--bd-bg);
+}
+
+.bd-ac {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bd-ac li {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 4px;
+  color: color-mix(in srgb, var(--bd-fg) 90%, var(--bd-muted));
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.bd-ac-box {
+  margin-top: 3.5px;
+}
+
+.bd-ac li[data-done] .bd-md {
+  color: var(--bd-muted);
+}
+
+/* relationships */
+
+.bd-rgroup + .bd-rgroup {
+  margin-top: 2px;
+}
+
+.bd-rlab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 2px 30px;
+  color: var(--bd-dim);
+  font-size: 11px;
+}
+
+.bd-rlab b {
+  color: var(--bd-muted);
+  font-weight: 600;
+}
+
+.bd-rlab[data-tone='blocked'] b {
+  color: var(--bd-err-text);
+}
+
+.bd-rlab .bd-bar {
+  flex: 0 1 70px;
+}
+
+.bd-rel {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 12px 0 30px;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+button.bd-rel:hover {
+  background: var(--bd-hover);
+}
+
+button.bd-rel:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+.bd-rel .bd-ty {
+  color: var(--bd-accent-text);
+}
+
+.bd-rel[data-done] .bd-title {
+  color: color-mix(in srgb, var(--bd-muted) 80%, var(--bd-fg));
+}
+
+.bd-rel[data-missing]:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+.bd-rel[data-missing] .bd-title {
+  color: var(--bd-dim);
+  font-style: italic;
+}
+
+/* more */
+
+.bd-more {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-more-row {
+  display: contents;
+}
+
+.bd-more dt {
+  color: var(--bd-dim);
+}
+
+.bd-more dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--bd-fg);
+  overflow-wrap: anywhere;
+}
+
+.bd-more-row[data-group] dt {
+  color: var(--bd-muted);
+}
+
+.bd-more-row[data-sub] dt {
+  padding-left: 12px;
+  font-family: var(--bd-mono);
+  font-size: 11px;
+}
+
+.bd-more code {
+  font: 11px/1.45 var(--bd-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* comments */
+
+.bd-cm {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0 9px;
+}
+
+.bd-cm-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.bd-cm-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  color: var(--bd-dim);
+  font-size: 11.5px;
+}
+
+.bd-cm-who b {
+  color: var(--bd-fg);
+  font-weight: 600;
+}
+
+.bd-cm-txt {
+  margin-top: 2px;
+}
+
+.bd-none {
+  margin: 0 0 8px;
+  color: var(--bd-dim);
+  font-size: 12px;
+}
+
+.bd-stamp {
+  margin: 2px 0 0;
+  padding: 7px 0 2px;
+  border-top: 1px dashed color-mix(in srgb, var(--bd-line) 80%, transparent);
+  color: var(--bd-dim);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.bd-stamp b {
+  color: var(--bd-muted);
+  font-weight: 500;
+}
+
+.bd-stamp-line {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- activity */
+
+.bd-act {
+  --bd-act-bar: 30px;
+  padding-top: 0;
+}
+
+/* Count and Mark all seen stay in reach while the feed scrolls. */
+.bd-act-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--bd-act-bar);
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-line) 70%, transparent);
+  background: var(--bd-bg);
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-act-unseen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--bd-accent-text);
+  font-weight: 600;
+}
+
+.bd-act-unseen::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bd-accent);
+}
+
+.bd-act-seen {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+/* Not sticky: a pinned label would sit over the first line of the entry scrolling under it, leaving a row with no headline. */
+.bd-day {
+  padding: 9px 12px 3px 14px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* Two lines: what changed and when, then which bead and who. The left column scans as a story, the right as a log. */
+.bd-act-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'mark what when'
+    '.    bead who';
+  align-items: center;
+  column-gap: 7px;
+  row-gap: 1px;
+  min-height: 0;
+  padding: 5px 12px 6px 14px;
+}
+
+.bd-act-row:not([data-gone]) {
+  cursor: pointer;
+}
+
+.bd-act-row[data-unseen]::before {
+  top: 13px;
+}
+
+.bd-act-mark {
+  grid-area: mark;
+  display: flex;
+  justify-content: center;
+}
+
+.bd-act-ic {
+  display: flex;
+  color: var(--bd-muted);
+}
+
+.bd-act-ic[data-kind='created'] {
+  color: var(--bd-ok);
+}
+
+.bd-act-ic[data-kind='deleted'] {
+  color: var(--bd-err-text);
+}
+
+.bd-act-ic[data-kind='link'] {
+  color: color-mix(in srgb, var(--bd-accent-text) 62%, var(--bd-muted));
+}
+
+.bd-act-what {
+  grid-area: what;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-act-when {
+  grid-area: when;
+  color: var(--bd-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bd-act-bead {
+  grid-area: bead;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bd-act-bead .bd-title {
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+/* Struck through but still readable: muted rather than dim, so the dark theme keeps enough contrast. */
+.bd-act-row[data-gone] .bd-title {
+  color: var(--bd-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+/* A stale list fades its muted text toward the background; these two stay at the theme's own muted colour. */
+.bd-list[data-stale] .bd-act-row[data-gone] .bd-title,
+.bd-list[data-stale] .bd-act-notitle {
+  color: var(--oc-muted, #6a6962);
+}
+
+.bd-act-notitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-muted);
+  font-size: 12px;
+  font-style: italic;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-act-gone {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bd-err) 11%, transparent);
+  color: var(--bd-err-text);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+.bd-act-who {
+  grid-area: who;
+  max-width: 132px;
+  overflow: hidden;
+  color: var(--bd-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  justify-self: end;
+}
+
+.bd-fnote {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd *,
+  .bd *::before,
+  .bd *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Leaving with a draft: asked once, under the top bar. */
+.bd-leave {
+  position: relative;
+  z-index: 3;
+  margin: 0;
+  padding: 7px 10px 7px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-warn) 30%, var(--bd-line));
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bd-warn) 9%, var(--bd-bg));
+  animation: bd-drop 160ms ease-out;
+}
+
+/* ---------------------------------------------------------------- send to agent */
+
+/* A button's running spinner: an open arc that turns. */
+.bd-spin {
+  transform-origin: 8px 8px;
+  animation: bd-turn 750ms linear infinite;
+}
+
+/* "Attach to" under a bead: where the chat stands, then three ways to hand the bead over, as one segmented control. */
+.bd-attach {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--bd-line);
+  background: var(--bd-bg);
+}
+
+.bd-attach::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 24px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bd-bg) 0%, transparent), color-mix(in srgb, var(--bd-bg) 92%, transparent));
+  pointer-events: none;
+}
+
+.bd-attach-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bd-attach-lab {
+  flex-shrink: 0;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bd-attach-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-fg);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-attach-note[data-tone='muted'] {
+  color: var(--bd-muted);
+}
+
+/* The open chat: a small lit dot, like a status light. */
+.bd-attach-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bd-ok);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bd-ok) 22%, transparent);
+}
+
+.bd-attach-acts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-attach-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--bd-fg);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bd-attach-btn + .bd-attach-btn {
+  border-left: 1px solid var(--bd-line);
+}
+
+.bd-attach-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bd-attach-btn .bd-i {
+  flex-shrink: 0;
+  color: var(--bd-muted);
+}
+
+/* The likely choice carries the accent: the open chat, or a new session when there is none. */
+.bd-attach-acts:not([data-nochat]) [data-attach='attach'],
+.bd-attach-acts[data-nochat] [data-attach='session'] {
+  color: var(--bd-accent-text);
+  font-weight: 600;
+}
+
+.bd-attach-acts:not([data-nochat]) [data-attach='attach'] .bd-i,
+.bd-attach-acts[data-nochat] [data-attach='session'] .bd-i {
+  color: currentColor;
+}
+
+.bd-attach-btn:hover:not(:disabled) {
+  background: var(--bd-hover);
+}
+
+.bd-attach-btn:active:not(:disabled) {
+  background: var(--bd-press);
+}
+
+.bd-attach-btn:focus-visible {
+  z-index: 1;
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bd-focus);
+}
+
+.bd-attach-btn:disabled:not([data-running]) {
+  color: var(--bd-dim);
+}
+
+.bd-attach-btn:disabled:not([data-running]) .bd-i {
+  color: var(--bd-dim);
+}
+
+/* The running choice stays lit, with a sweep under it while OpenChamber works. */
+.bd-attach-btn[data-running] {
+  background: color-mix(in srgb, var(--bd-accent) 9%, transparent);
+  color: var(--bd-accent-text);
+  font-weight: 600;
+}
+
+.bd-attach-btn[data-running] .bd-i {
+  color: currentColor;
+}
+
+.bd-attach-btn[data-running]::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--bd-accent) 40%, var(--bd-accent) 60%, transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: bd-attach-sweep 1100ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes bd-attach-sweep {
+  from {
+    background-position: -100% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* Row menu: an action with nowhere to go says why, on the right. */
+.bd-menu-item:disabled {
+  color: var(--bd-dim);
+}
+
+.bd-menu-item:disabled .bd-i {
+  color: var(--bd-dim);
+}
+
+.bd-menu-item:has(.bd-menu-off) {
+  flex-wrap: wrap;
+  row-gap: 0;
+  height: auto;
+  min-height: 28px;
+  padding-block: 4px;
+}
+
+/* Why it is off, under its label, so the menu keeps its width. */
+.bd-menu-off {
+  flex-basis: 100%;
+  padding-left: 22px;
+  color: var(--bd-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- worktree confirm */
+
+.bd-wt {
+  gap: 10px;
+}
+
+.bd-wt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.bd-wt-ic {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-accent) 12%, transparent);
+  color: var(--bd-accent-text);
+}
+
+.bd-wt-headtext {
+  min-width: 0;
+}
+
+.bd-wt-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.bd-wt-bead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 2px 0 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+.bd-wt-beadtitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-wt-mono {
+  font-family: var(--bd-mono);
+  font-size: 12px;
+}
+
+.bd-wt-err {
+  margin: -5px 0 0;
+  color: var(--bd-err-text);
+  font-size: 11.5px;
+}
+
+.bd-wt-note {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.bd-wt-tip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--bd-accent) 28%, var(--bd-line));
+  border-radius: var(--bd-radius);
+  background: color-mix(in srgb, var(--bd-accent) 7%, var(--bd-bg));
+}
+
+.bd-wt-tip p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-wt-tip code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bd-fg) 8%, transparent);
+  font: 11.5px var(--bd-mono);
+  white-space: nowrap;
+}
+
+.bd-wt[aria-busy='true'] .bd-wt-note {
+  color: var(--bd-fg);
+}
+
+/* ---------------------------------------------------------------- + menu picker (attach dialog) */
+
+.bd-dialog {
+  background: var(--bd-bg);
+}
+
+.bdp {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  container: bdp / inline-size;
+}
+
+.bdp-search {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--bd-line);
+  color: var(--bd-muted);
+}
+
+.bdp-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--bd-fg);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+/* The search box always holds focus here; the row itself is the field, so no ring. */
+.bd .bdp-search input:focus-visible {
+  outline: none;
+}
+
+.bdp-search input::placeholder {
+  color: var(--bd-dim);
+}
+
+.bdp-error {
+  margin: 0;
+  padding: 7px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bd-err) 30%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-err) 8%, var(--bd-bg));
+  color: var(--bd-err-text);
+  font-size: 12px;
+}
+
+.bdp-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  min-height: 0;
+}
+
+.bdp-list {
+  min-height: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.bdp-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 12px;
+  cursor: default;
+  user-select: none;
+}
+
+.bdp-row[data-cursor] {
+  background: var(--bd-sel);
+}
+
+.bdp-row[data-cursor]::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--bd-accent);
+}
+
+.bdp-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bdp-row[data-done] .bdp-row-title {
+  color: color-mix(in srgb, var(--bd-muted) 80%, var(--bd-fg));
+}
+
+.bdp-empty,
+.bdp-none {
+  margin: 0;
+  padding: 14px;
+  color: var(--bd-muted);
+  font-size: 12px;
+}
+
+.bdp-preview {
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--bd-line);
+  background: var(--oc-muted-surface, color-mix(in srgb, var(--bd-fg) 3%, var(--bd-bg)));
+}
+
+.bdp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 18px;
+}
+
+.bdp-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bdp-fullid {
+  margin-left: auto;
+  color: var(--bd-dim);
+  font: 11px var(--bd-mono);
+}
+
+.bdp-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-wrap: pretty;
+}
+
+.bdp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bdp-who {
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bdp-text {
+  font-size: 12.5px;
+}
+
+.bdp-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bdp-sec-title {
+  margin: 0;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bdp-card .bdp-none {
+  padding: 0;
+}
+
+.bdp-foot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--bd-line);
+}
+
+.bdp-keys {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--bd-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bdp-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--bd-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font: 10.5px var(--bd-mono);
+}
+
+.bdp-keys kbd + kbd {
+  margin-left: -1px;
+}
+
+.bdp-chip-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A narrow dialog keeps the list and drops the preview. */
+@container bdp (max-width: 519px) {
+  .bdp-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bdp-preview {
+    display: none;
+  }
+
+  .bdp-keys {
+    display: none;
+  }
+
+  .bdp-foot {
+    justify-content: flex-end;
+  }
+}
+
+/* ---------------------------------------------------------------- team line: Sync and Publish */
+
+/* Read by screen readers, not shown. */
+.bd-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.bd-teambar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 3px 8px 3px 12px;
+  border-bottom: 1px solid var(--bd-line);
+  background: color-mix(in srgb, var(--bd-fg) 2.5%, var(--bd-bg));
+}
+
+.bd-teambar .bd-team {
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--bd-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bd-team-text {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.bd-team-text > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bd-teambar .bd-unpub {
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.bd-team-acts {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.bd-tbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--bd-radius);
+  background: none;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bd-tbtn .bd-i {
+  flex-shrink: 0;
+}
+
+.bd-tbtn-icon {
+  justify-content: center;
+  width: 24px;
+  padding: 0;
+}
+
+.bd-tbtn:hover:not(:disabled) {
+  background: var(--bd-hover);
+  color: var(--bd-fg);
+}
+
+.bd-tbtn:active:not(:disabled) {
+  background: var(--bd-press);
+}
+
+.bd-tbtn[data-tone='publish'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 32%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 8%, var(--bd-bg));
+  color: var(--bd-warn-text);
+  font-weight: 600;
+}
+
+.bd-tbtn[data-tone='publish']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bd-warn) 15%, var(--bd-bg));
+  color: var(--bd-warn-text);
+}
+
+.bd-tbtn:disabled:not([data-running]) {
+  opacity: 0.5;
+}
+
+/* The job running stays lit; the whole line carries a slow sweep until the snapshot says it ended. */
+.bd-tbtn[data-running] {
+  color: var(--bd-accent-text);
+  font-weight: 600;
+}
+
+.bd-tbtn[data-running][data-tone='publish'] {
+  color: var(--bd-warn-text);
+}
+
+.bd-teambar[data-running]::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1.5px;
+  background: linear-gradient(to right, transparent, var(--bd-accent) 40%, var(--bd-accent) 60%, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: bd-attach-sweep 1400ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* ---------------------------------------------------------------- publish preview */
+
+.bd-pub {
+  gap: 10px;
+}
+
+.bd-pub-lead {
+  margin: 2px 0 0;
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bd-pub-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+}
+
+.bd-pub-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+}
+
+.bd-pub-item + .bd-pub-item {
+  border-top: 1px solid color-mix(in srgb, var(--bd-line) 80%, transparent);
+}
+
+.bd-pub-bead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.bd-pub-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-pub-plus {
+  flex-shrink: 0;
+  color: var(--bd-muted);
+  font-size: 11px;
+}
+
+.bd-pub-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 5px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-pub-meta .bd-sep {
+  color: var(--bd-dim);
+}
+
+.bd-pub-sum {
+  color: var(--bd-fg);
+}
+
+.bd-pub-rest {
+  margin: -4px 0 0;
+  color: var(--bd-fg);
+  font-size: 12px;
+}
+
+.bd-pub-note {
+  margin: -2px 0 0;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-pub-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-field);
+  color: var(--bd-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-pub-state[data-tone='note'] {
+  border-color: color-mix(in srgb, var(--bd-warn) 32%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-warn) 8%, var(--bd-bg));
+  color: var(--bd-warn-text);
+}
+
+.bd-pub-state[data-tone='error'] {
+  border-color: color-mix(in srgb, var(--bd-err) 30%, var(--bd-line));
+  background: color-mix(in srgb, var(--bd-err) 6%, var(--bd-bg));
+  color: var(--bd-err-text);
+}
+
+/* ---------------------------------------------------------------- sync problem card */
+
+.bd-synccard {
+  /* Calm by default (a backed-out conflict: nothing is lost), warning when editing is paused, error when a job failed. */
+  --sc-tone: var(--oc-info, #205ea6);
+  --sc-text: var(--oc-info-text, var(--sc-tone));
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 7px;
+  margin: 8px 8px 0;
+  padding: 9px 10px 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--sc-tone) 30%, var(--bd-line));
+  border-radius: calc(var(--bd-radius) + 2px);
+  background: color-mix(in srgb, var(--sc-tone) 6%, var(--bd-bg));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sc-tone) 70%, transparent);
+  animation: bd-drop 180ms ease-out;
+}
+
+.bd-synccard[data-tone='warn'] {
+  --sc-tone: var(--bd-warn);
+  --sc-text: var(--bd-warn-text);
+}
+
+.bd-synccard[data-tone='error'] {
+  --sc-tone: var(--bd-err);
+  --sc-text: var(--bd-err-text);
+}
+
+.bd-sc-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+}
+
+.bd-sc-ic {
+  display: flex;
+  color: var(--sc-text);
+}
+
+.bd-sc-name {
+  color: var(--sc-text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.bd-sc-close {
+  margin: -2px -4px -2px auto;
+}
+
+.bd-sc-msg {
+  margin: -3px 0 0 20px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bd-sc-none {
+  margin: 0 0 0 20px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+}
+
+.bd-sc-beads {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+
+/* Only the first few beads show until "Show N more", so every card is whole. Once all show, they scroll inside the card so its actions stay in view. */
+.bd-sc-beads[data-all] {
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bd-sc-bead {
+  flex-shrink: 0;
+  padding: 6px 8px 7px;
+  border: 1px solid var(--bd-line);
+  border-radius: var(--bd-radius);
+  background: var(--bd-bg);
+}
+
+.bd-sc-beadhead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.bd-sc-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bd-sc-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 5px 0 0;
+}
+
+.bd-sc-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1px 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.bd-sc-field dt {
+  grid-column: 1 / -1;
+  color: var(--bd-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bd-sc-field dd {
+  display: contents;
+}
+
+.bd-sc-side {
+  color: var(--bd-muted);
+}
+
+.bd-sc-val {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--bd-mono);
+  font-size: 11px;
+}
+
+.bd-sc-field[data-open] .bd-sc-val {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-sc-more,
+.bd-sc-morebeads {
+  justify-self: start;
+  font-size: 11.5px;
+}
+
+.bd-sc-more {
+  grid-column: 2;
+}
+
+.bd-sc-morebeads,
+.bd-sc-toggle {
+  align-self: flex-start;
+  margin-left: 20px;
+}
+
+.bd-sc-toggle {
+  margin-top: -4px;
+  font-size: 11.5px;
+}
+
+.bd-sc-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 0 20px;
+}
+
+.bd-sc-hint {
+  flex-basis: 100%;
+  color: var(--bd-muted);
+  font-size: 11px;
+}

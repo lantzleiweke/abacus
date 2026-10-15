@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT COUNT(*) AS incoming FROM dolt_log('main..remotes/origin/main')"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 198
+}

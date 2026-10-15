@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--csv",
+    "SELECT id, issue_id, event_type, actor, created_at FROM events ORDER BY id DESC LIMIT 5"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 189
+}

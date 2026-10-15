@@ -1,0 +1,16 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "--actor",
+    "Panel Tester (panel)",
+    "update",
+    "scr-8nw.1",
+    "--priority",
+    "1",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 1,
+  "ms": 178
+}

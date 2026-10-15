@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "dolt",
+    "remote",
+    "list",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 199
+}

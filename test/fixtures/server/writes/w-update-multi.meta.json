@@ -1,0 +1,19 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "update",
+    "scr-8nw.1",
+    "--title",
+    "Multi edit",
+    "--priority",
+    "2",
+    "--status",
+    "in_progress",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 218
+}

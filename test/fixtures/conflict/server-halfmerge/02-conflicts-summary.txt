@@ -1,0 +1,6 @@
+[
+  {
+    "num_conflicts": 2,
+    "table": "issues"
+  }
+]

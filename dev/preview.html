@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Abacus preview</title>
+    <style>
+      /* Harness chrome only; the panel inside #frame is themed by the fake host's tokens. */
+      :root {
+        --chrome-bg: #e9e7e1;
+        --chrome-fg: #2b2a27;
+        --chrome-muted: #77746c;
+        --chrome-line: #d3d0c7;
+        --chrome-btn: #f6f5f1;
+      }
+      body[data-theme='dark'] {
+        --chrome-bg: #0d0c0c;
+        --chrome-fg: #d6d3ca;
+        --chrome-muted: #85827a;
+        --chrome-line: #2a2826;
+        --chrome-btn: #1a1918;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        gap: 28px;
+        padding: 24px;
+        background: var(--chrome-bg);
+        color: var(--chrome-fg);
+        font: 12px/1.4 -apple-system, system-ui, sans-serif;
+        box-sizing: border-box;
+      }
+      #frame {
+        position: relative;
+        flex-shrink: 0;
+        width: 380px;
+        height: 640px;
+        min-width: 300px;
+        max-width: 720px;
+        overflow: hidden;
+        resize: horizontal;
+        background: var(--oc-bg);
+        border: 1px solid var(--chrome-line);
+        border-radius: 10px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+      }
+      #frame #root,
+      #frame .bd {
+        height: 100%;
+      }
+      #side {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 300px;
+      }
+      #controls {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .group-title {
+        flex-basis: 100%;
+        color: var(--chrome-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 10.5px;
+      }
+      #controls button,
+      .toast button {
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid var(--chrome-line);
+        border-radius: 6px;
+        background: var(--chrome-btn);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      #controls button[aria-pressed='true'] {
+        border-color: #da702c;
+        box-shadow: inset 0 0 0 1px #da702c;
+      }
+      #badge {
+        color: var(--chrome-muted);
+      }
+      #toasts {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .toast {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--chrome-line);
+        border-radius: 8px;
+        background: var(--chrome-btn);
+      }
+      .toast.error {
+        border-color: #d76459;
+      }
+      .toast.success {
+        border-color: #a0af54;
+      }
+      #log {
+        margin: 0;
+        color: var(--chrome-muted);
+        font: 11px ui-monospace, Menlo, monospace;
+        white-space: pre-wrap;
+      }
+      body.bare {
+        padding: 0;
+        background: transparent;
+      }
+      body.bare #side {
+        display: none;
+      }
+      body.show-toasts #toasts {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        z-index: 100;
+        width: calc(min(100vw, 380px) - 20px);
+        color: var(--chrome-fg);
+        font: 12px/1.4 -apple-system, system-ui, sans-serif;
+      }
+      body.show-toasts .toast {
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+      }
+      body.bare #frame {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        resize: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="frame"><div id="root"></div></div>
+    <div id="side">
+      <div id="controls"></div>
+      <div id="badge">badge: none</div>
+      <div id="toasts"></div>
+      <pre id="log"></pre>
+    </div>
+    <script src="./preview.js"></script>
+  </body>
+</html>

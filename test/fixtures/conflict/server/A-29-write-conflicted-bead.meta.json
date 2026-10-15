@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Alice Tester",
+    "update",
+    "scr-m0h",
+    "--priority",
+    "1",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 169
+}

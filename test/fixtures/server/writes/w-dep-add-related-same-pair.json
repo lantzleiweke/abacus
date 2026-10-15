@@ -1,0 +1,4 @@
+{
+  "error": "dependency scr-8nw.1 -\u003e scr-m0h already exists with type \"blocks\" (requested \"related\"); remove it first with 'bd dep remove' then re-add",
+  "schema_version": 1
+}

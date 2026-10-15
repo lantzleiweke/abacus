@@ -1,0 +1,12 @@
+{
+  "created_at": "2026-10-14T08:28:07.364051Z",
+  "created_by": "Panel Tester (panel)",
+  "id": "scr-t27",
+  "issue_type": "bug",
+  "owner": "alice@example.invalid",
+  "priority": 1,
+  "schema_version": 1,
+  "status": "open",
+  "title": "Panel-created top level",
+  "updated_at": "2026-10-14T08:28:07.364051Z"
+}

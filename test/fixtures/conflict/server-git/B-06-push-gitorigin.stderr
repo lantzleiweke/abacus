@@ -1,0 +1,7 @@
+Error: failed to push to gitorigin/main: Error 1105 (HY000): To git+file://<scratch>/remotes/git-remote.git
+ ! [rejected]            main -> main (non-fast-forward)
+error: failed to push some refs to 'git+file://<scratch>/remotes/git-remote.git'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. Integrate the remote changes (e.g.
+hint: 'dolt pull ...') before pushing again.
+

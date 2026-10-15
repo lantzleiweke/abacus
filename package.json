@@ -1,0 +1,82 @@
+{
+  "name": "openchamber-abacus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:panel && npm run build:attach && npm run build:service",
+    "build:panel": "esbuild src/panel/main.tsx --bundle --format=iife --platform=browser --target=es2022 --jsx=automatic --jsx-import-source=preact --loader:.css=text --outfile=panel/main.js",
+    "build:attach": "esbuild src/panel/attach.tsx --bundle --format=iife --platform=browser --target=es2022 --jsx=automatic --jsx-import-source=preact --loader:.css=text --outfile=panel/attach.js",
+    "build:service": "esbuild src/service/main.ts --bundle --format=cjs --platform=node --target=node20 --outfile=service/main.js",
+    "preview:build": "esbuild dev/preview.ts --bundle --format=iife --platform=browser --target=es2022 --jsx=automatic --jsx-import-source=preact --loader:.css=text --loader:.jsonl=text --outfile=dev/preview.js",
+    "preview": "npm run preview:build && node dev/serve.mjs",
+    "test": "vitest run test/unit",
+    "test:integration": "BD_INTEGRATION=1 vitest run test/integration",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build && npm test"
+  },
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.3.2"
+    },
+    "contributes": {
+      "panel": {
+        "id": "beads",
+        "name": "Abacus",
+        "icon": "icon.svg",
+        "entry": "panel/index.html"
+      },
+      "attach": {
+        "mode": "dialog",
+        "entry": "panel/attach.html"
+      },
+      "commands": [
+        {
+          "name": "bd",
+          "description": "Attach a bead by id, e.g. /bd k3f2"
+        }
+      ],
+      "capabilities": [
+        "sessions",
+        "prompt"
+      ],
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": [
+            "bd",
+            "dolt",
+            "git"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "2.3.2",
+    "dompurify": "3.4.17",
+    "marked": "18.1.1",
+    "preact": "10.29.8"
+  },
+  "devDependencies": {
+    "@testing-library/preact": "3.2.4",
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "jsdom": "29.1.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.4"
+  },
+  "description": "Abacus: your beads issues in the OpenChamber right rail. Browse, edit, and hand beads to your agent.",
+  "license": "MIT",
+  "author": "Lantz Leiweke",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lantzleiweke/abacus.git"
+  },
+  "homepage": "https://github.com/lantzleiweke/abacus#readme",
+  "bugs": {
+    "url": "https://github.com/lantzleiweke/abacus/issues"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Panel Tester (panel)",
+    "update",
+    "nope-zzz",
+    "--status",
+    "open",
+    "--json"
+  ],
+  "cwd_label": "server-a",
+  "exit": 1,
+  "ms": 170
+}

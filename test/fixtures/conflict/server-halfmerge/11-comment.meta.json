@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--actor",
+    "Bob Builder",
+    "comments",
+    "add",
+    "scr-fum",
+    "comment during half merge",
+    "--json"
+  ],
+  "cwd_label": "server-b",
+  "exit": 1,
+  "ms": 163
+}

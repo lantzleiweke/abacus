@@ -1,0 +1,36 @@
+[
+  {
+    "id": "scr-8nw.1",
+    "title": "Multi edit",
+    "description": "Edited description\nwith a second line and **markdown**.",
+    "acceptance_criteria": "Edited acceptance criteria",
+    "notes": "Edited notes",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "feature",
+    "assignee": "Panel Tester",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:51Z",
+    "created_by": "Bob Builder",
+    "updated_at": "2026-10-14T08:28:12Z",
+    "started_at": "2026-10-14T08:19:54Z",
+    "labels": [
+      "alpha",
+      "beta"
+    ],
+    "dependencies": [
+      {
+        "issue_id": "scr-8nw.1",
+        "depends_on_id": "scr-8nw",
+        "type": "parent-child",
+        "created_at": "2026-10-14T01:19:50Z",
+        "created_by": "Bob Builder",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 1,
+    "comment_count": 4,
+    "parent": "scr-8nw"
+  }
+]

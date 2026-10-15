@@ -1,0 +1,36 @@
+[
+  {
+    "id": "scr-m0h",
+    "title": "Weekly dependency bump",
+    "description": "Pinned recurring work.",
+    "status": "pinned",
+    "priority": 3,
+    "issue_type": "chore",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:54Z",
+    "created_by": "Alice Tester",
+    "updated_at": "2026-10-14T08:19:55Z",
+    "dependency_type": "blocks"
+  },
+  {
+    "id": "scr-8nw",
+    "title": "Platform migration",
+    "description": "Move the legacy platform to the new stack.\n\nIncludes **markdown**:\n- item one\n- item two",
+    "design": "Strangler pattern, service by service.",
+    "acceptance_criteria": "All services run on the new stack; legacy decommissioned.",
+    "notes": "Kickoff done 2026-10-01.",
+    "status": "open",
+    "priority": 0,
+    "issue_type": "epic",
+    "assignee": "Alice Tester",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:50Z",
+    "created_by": "Alice Tester",
+    "updated_at": "2026-10-14T08:19:50Z",
+    "labels": [
+      "platform",
+      "q4"
+    ],
+    "dependency_type": "parent-child"
+  }
+]

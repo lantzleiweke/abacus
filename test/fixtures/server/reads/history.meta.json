@@ -1,0 +1,14 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "history",
+    "scr-8nw.1",
+    "--json",
+    "--limit",
+    "3"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 188
+}

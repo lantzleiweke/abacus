@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT * FROM dolt_merge_status"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 432
+}

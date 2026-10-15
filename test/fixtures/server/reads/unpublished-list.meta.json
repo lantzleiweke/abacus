@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT commit_hash, committer, date, message FROM dolt_log('remotes/origin/main..main') ORDER BY date DESC"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 223
+}

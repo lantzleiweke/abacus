@@ -1,0 +1,502 @@
+[
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:31:03Z",
+    "event_type": "updated",
+    "id": "01a13989-534f-7288-bce3-267994d4b2ae",
+    "issue_id": "scr-m0h",
+    "new_value": "{\"priority\":1}",
+    "old_value": "{\"id\":\"scr-m0h\",\"title\":\"A2 edited title\",\"description\":\"Pinned recurring work.\",\"status\":\"pinned\",\"priority\":3,\"issue_type\":\"chore\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:54Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:31:00Z\"}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:31:03Z",
+    "event_type": "updated",
+    "id": "01a13989-520a-7023-b8e1-65a8ae4dc91c",
+    "issue_id": "scr-fum",
+    "new_value": "{\"priority\":1}",
+    "old_value": "{\"id\":\"scr-fum\",\"title\":\"Documentation refresh\",\"description\":\"Docs for new stack.\",\"status\":\"open\",\"priority\":0,\"issue_type\":\"epic\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:52Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:30:34Z\"}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:31:00Z",
+    "event_type": "updated",
+    "id": "01a13989-478a-7c5f-b85a-2da9d2ace31d",
+    "issue_id": "scr-m0h",
+    "new_value": "{\"title\":\"A2 edited title\"}",
+    "old_value": "{\"id\":\"scr-m0h\",\"title\":\"B edited title\",\"description\":\"Pinned recurring work.\",\"status\":\"pinned\",\"priority\":3,\"issue_type\":\"chore\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:54Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:30:33Z\"}"
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:30:34Z",
+    "event_type": "updated",
+    "id": "01a13988-e142-7762-a710-8f5c8b6c9cc4",
+    "issue_id": "scr-lha",
+    "new_value": "{\"priority\":0}",
+    "old_value": "{\"id\":\"scr-lha\",\"title\":\"Milestone: beta launch\",\"description\":\"Beta launch gate.\",\"status\":\"open\",\"priority\":1,\"issue_type\":\"milestone\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:54Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:54Z\"}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:30:33Z",
+    "event_type": "updated",
+    "id": "01a13988-dfc9-7cc9-bd43-712f96d04f60",
+    "issue_id": "scr-fum",
+    "new_value": "{\"priority\":0}",
+    "old_value": "{\"id\":\"scr-fum\",\"title\":\"Documentation refresh\",\"description\":\"Docs for new stack.\",\"status\":\"open\",\"priority\":4,\"issue_type\":\"epic\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:52Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:52Z\"}"
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:30:32Z",
+    "event_type": "updated",
+    "id": "01a13988-db85-708c-a0cf-b2075f6bb9e5",
+    "issue_id": "scr-m0h",
+    "new_value": "{\"title\":\"B edited title\"}",
+    "old_value": "{\"id\":\"scr-m0h\",\"title\":\"Weekly dependency bump\",\"description\":\"Pinned recurring work.\",\"status\":\"pinned\",\"priority\":3,\"issue_type\":\"chore\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:54Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:55Z\"}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Reopened from panel",
+    "created_at": "2026-10-14T01:28:11Z",
+    "event_type": "commented",
+    "id": "01a13986-b435-7b27-96a5-f210c4ba0b4d",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:11Z",
+    "event_type": "reopened",
+    "id": "01a13986-b415-7c77-92da-bec47acc0b1a",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"defer_until\":null,\"status\":\"open\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Multi edit\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"acceptance_criteria\":\"Edited acceptance criteria\",\"notes\":\"Edited notes\",\"status\":\"closed\",\"priority\":2,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:11Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"closed_at\":\"2026-10-14T08:28:11Z\",\"close_reason\":\"Closed from panel\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:11Z",
+    "event_type": "closed",
+    "id": "01a13986-b282-70a4-b5e8-097975c79e77",
+    "issue_id": "scr-8nw.1",
+    "new_value": "Closed from panel",
+    "old_value": ""
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:07Z",
+    "event_type": "created",
+    "id": "01a13986-a349-7e09-a1a1-5fae1c2f76ae",
+    "issue_id": "scr-t27",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Added label: beta",
+    "created_at": "2026-10-14T01:28:06Z",
+    "event_type": "label_added",
+    "id": "01a13986-a180-7b62-8e5d-55a7f55dd545",
+    "issue_id": "scr-8nw.1.3",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Added label: alpha",
+    "created_at": "2026-10-14T01:28:06Z",
+    "event_type": "label_added",
+    "id": "01a13986-a180-71d0-a541-a22721a60624",
+    "issue_id": "scr-8nw.1.3",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:06Z",
+    "event_type": "created",
+    "id": "01a13986-a17f-76dd-abdc-c1a40f28975d",
+    "issue_id": "scr-8nw.1.3",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:06Z",
+    "event_type": "updated",
+    "id": "01a13986-9e62-75f3-8706-36e0cac6d694",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"design\":\"\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Multi edit\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"design\":\"Edited design\",\"acceptance_criteria\":\"Edited acceptance criteria\",\"notes\":\"Edited notes\",\"status\":\"in_progress\",\"priority\":2,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:06Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:05Z",
+    "event_type": "status_changed",
+    "id": "01a13986-9cdc-73b5-854f-582d53c0a673",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"priority\":2,\"status\":\"in_progress\",\"title\":\"Multi edit\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Edited title from panel\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"design\":\"Edited design\",\"acceptance_criteria\":\"Edited acceptance criteria\",\"notes\":\"Edited notes\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:05Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:05Z",
+    "event_type": "updated",
+    "id": "01a13986-9b59-7ca6-bf55-085f5767fb6b",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"notes\":\"Edited notes\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Edited title from panel\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"design\":\"Edited design\",\"acceptance_criteria\":\"Edited acceptance criteria\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:05Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:04Z",
+    "event_type": "updated",
+    "id": "01a13986-99f2-743d-beae-123633d8de7e",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"design\":\"Edited design\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Edited title from panel\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Edited acceptance criteria\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:05Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:04Z",
+    "event_type": "updated",
+    "id": "01a13986-987f-7c1d-b95d-44c5d6d9933b",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"acceptance_criteria\":\"Edited acceptance criteria\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Edited title from panel\",\"description\":\"Edited description\\nwith a second line and **markdown**.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:04Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:04Z",
+    "event_type": "updated",
+    "id": "01a13986-96fe-739d-96a2-1d25fc38cc7c",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"description\":\"Edited description\\nwith a second line and **markdown**.\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Edited title from panel\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:04Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "updated",
+    "id": "01a13986-95b9-7b23-af55-0d9aa70f6392",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"title\":\"Edited title from panel\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Port auth service\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Panel Tester\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:04Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "updated",
+    "id": "01a13986-9465-7e3c-8893-c7571bc61a79",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"assignee\":\"Panel Tester\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Port auth service\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":0,\"issue_type\":\"feature\",\"assignee\":\"Bob Builder\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:02Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"alpha\",\"beta\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Added label: beta",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_added",
+    "id": "01a13986-92de-7084-87d5-c770a6e1c60c",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Added label: alpha",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_added",
+    "id": "01a13986-92c9-72c6-97e1-c8a31c731296",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: via-label-cmd",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_removed",
+    "id": "01a13986-92b2-7eff-be56-8661789a0f34",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: q4",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_removed",
+    "id": "01a13986-929d-7ab6-97bd-41be8c90267a",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: platform",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_removed",
+    "id": "01a13986-9288-7af8-8dc8-46a738cf0b6d",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: backend",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_removed",
+    "id": "01a13986-9272-7c8e-9497-03b8d783bd1f",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: auth",
+    "created_at": "2026-10-14T01:28:03Z",
+    "event_type": "label_removed",
+    "id": "01a13986-925b-7269-a991-4ea3992ad192",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Removed label: panel-label",
+    "created_at": "2026-10-14T01:28:02Z",
+    "event_type": "label_removed",
+    "id": "01a13986-8f64-7d2b-a05b-740d3d964129",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": "Added label: panel-label",
+    "created_at": "2026-10-14T01:28:01Z",
+    "event_type": "label_added",
+    "id": "01a13986-8e1e-728c-adf6-6cf7cab69281",
+    "issue_id": "scr-8nw.1",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:01Z",
+    "event_type": "updated",
+    "id": "01a13986-8cc8-7441-ba51-e226dc513228",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"priority\":0}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Port auth service\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"blocked\",\"priority\":1,\"issue_type\":\"feature\",\"assignee\":\"Bob Builder\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:28:01Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"auth\",\"backend\",\"platform\",\"q4\"]}"
+  },
+  {
+    "actor": "Panel Tester (panel)",
+    "comment": null,
+    "created_at": "2026-10-14T01:28:01Z",
+    "event_type": "status_changed",
+    "id": "01a13986-8b2f-73b5-90a2-ad5e458895a6",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"status\":\"blocked\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Port auth service\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"in_progress\",\"priority\":1,\"issue_type\":\"feature\",\"assignee\":\"Bob Builder\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:19:54Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"auth\",\"backend\",\"platform\",\"q4\"]}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:20:04Z",
+    "event_type": "updated",
+    "id": "01a1397f-46e2-7271-bd10-615fb6eb8b73",
+    "issue_id": "scr-3i5",
+    "new_value": "{\"assignee\":\"Bob Builder\"}",
+    "old_value": "{\"id\":\"scr-3i5\",\"title\":\"As an admin I can reset MFA\",\"description\":\"User story.\",\"status\":\"qa_wait\",\"priority\":2,\"issue_type\":\"story\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:53Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:55Z\"}"
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:20:04Z",
+    "event_type": "updated",
+    "id": "01a1397f-4619-7bfa-8608-3745f3d40834",
+    "issue_id": "scr-8nw.1.1",
+    "new_value": "{\"priority\":1}",
+    "old_value": "{\"id\":\"scr-8nw.1.1\",\"title\":\"Write token compatibility tests\",\"description\":\"Cross-version token tests.\",\"status\":\"in_progress\",\"priority\":2,\"issue_type\":\"task\",\"assignee\":\"Claude Code\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Claude Code\",\"updated_at\":\"2026-10-14T08:19:54Z\",\"started_at\":\"2026-10-14T08:19:54Z\",\"labels\":[\"auth\",\"backend\",\"platform\",\"q4\",\"tests\"]}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:55Z",
+    "event_type": "closed",
+    "id": "01a1397f-22ac-7849-9a81-4d8478a70ac5",
+    "issue_id": "scr-8yo",
+    "new_value": "Decision recorded",
+    "old_value": ""
+  },
+  {
+    "actor": "Claude Code",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:55Z",
+    "event_type": "closed",
+    "id": "01a1397f-21d9-715b-b170-2e36a226c85e",
+    "issue_id": "scr-8nw.1.2",
+    "new_value": "Fixed in commit abc123",
+    "old_value": ""
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:55Z",
+    "event_type": "status_changed",
+    "id": "01a1397f-20dc-7e34-ada4-3ec2d7006305",
+    "issue_id": "scr-m0h",
+    "new_value": "{\"status\":\"pinned\"}",
+    "old_value": "{\"id\":\"scr-m0h\",\"title\":\"Weekly dependency bump\",\"description\":\"Pinned recurring work.\",\"status\":\"open\",\"priority\":3,\"issue_type\":\"chore\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:54Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:54Z\"}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:55Z",
+    "event_type": "status_changed",
+    "id": "01a1397f-2010-71e0-bf66-a141fafd235e",
+    "issue_id": "scr-3i5",
+    "new_value": "{\"status\":\"qa_wait\"}",
+    "old_value": "{\"id\":\"scr-3i5\",\"title\":\"As an admin I can reset MFA\",\"description\":\"User story.\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"story\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:53Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:53Z\"}"
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:54Z",
+    "event_type": "status_changed",
+    "id": "01a1397f-1f50-7f13-9698-486c2bbe300c",
+    "issue_id": "scr-779",
+    "new_value": "{\"status\":\"in_review\"}",
+    "old_value": "{\"id\":\"scr-779\",\"title\":\"Spike: evaluate Passkeys\",\"description\":\"Timeboxed 2 days.\",\"status\":\"open\",\"priority\":3,\"issue_type\":\"spike\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:53Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:19:53Z\",\"labels\":[\"research\"]}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:54Z",
+    "event_type": "status_changed",
+    "id": "01a1397f-1e87-79ac-b2b7-387c9620545a",
+    "issue_id": "scr-8nw.2",
+    "new_value": "{\"status\":\"blocked\"}",
+    "old_value": "{\"id\":\"scr-8nw.2\",\"title\":\"Cut over DNS\",\"description\":\"Final DNS cutover; waits for auth port.\",\"status\":\"open\",\"priority\":1,\"issue_type\":\"task\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:52Z\",\"created_by\":\"Alice Tester\",\"updated_at\":\"2026-10-14T08:19:52Z\",\"labels\":[\"ops\",\"platform\",\"q4\"]}"
+  },
+  {
+    "actor": "Claude Code",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:54Z",
+    "event_type": "claimed",
+    "id": "01a1397f-1dc4-7213-a742-30882a5a1973",
+    "issue_id": "scr-8nw.1.1",
+    "new_value": "{\"assignee\":\"Claude Code\",\"status\":\"in_progress\"}",
+    "old_value": "{\"id\":\"scr-8nw.1.1\",\"title\":\"Write token compatibility tests\",\"description\":\"Cross-version token tests.\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Claude Code\",\"updated_at\":\"2026-10-14T08:19:51Z\",\"labels\":[\"auth\",\"backend\",\"platform\",\"q4\",\"tests\"]}"
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:54Z",
+    "event_type": "status_changed",
+    "id": "01a1397f-1cfe-7eec-958b-a44df584cfe0",
+    "issue_id": "scr-8nw.1",
+    "new_value": "{\"status\":\"in_progress\"}",
+    "old_value": "{\"id\":\"scr-8nw.1\",\"title\":\"Port auth service\",\"description\":\"Port auth to the new stack.\",\"design\":\"Keep JWT format.\",\"acceptance_criteria\":\"Login works; tokens compatible.\",\"notes\":\"Needs secrets rotated.\",\"status\":\"open\",\"priority\":1,\"issue_type\":\"feature\",\"assignee\":\"Bob Builder\",\"owner\":\"alice@example.invalid\",\"created_at\":\"2026-10-14T08:19:51Z\",\"created_by\":\"Bob Builder\",\"updated_at\":\"2026-10-14T08:19:51Z\",\"labels\":[\"auth\",\"backend\",\"platform\",\"q4\"]}"
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:54Z",
+    "event_type": "created",
+    "id": "01a1397f-1c29-7f0b-832c-e1c224b0ae2d",
+    "issue_id": "scr-m0h",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Claude Code",
+    "comment": "Added label: ops",
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "label_added",
+    "id": "01a1397f-1b2f-7101-ad92-ec0cc8c68a07",
+    "issue_id": "scr-5s0",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Claude Code",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "created",
+    "id": "01a1397f-1b2e-7470-b739-83453ac16cdb",
+    "issue_id": "scr-5s0",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "created",
+    "id": "01a1397f-1a36-775e-8619-5994a9a6b9bb",
+    "issue_id": "scr-lha",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "created",
+    "id": "01a1397f-193c-7b27-b25a-3cb0a6ca2bdb",
+    "issue_id": "scr-3i5",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": "Added label: research",
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "label_added",
+    "id": "01a1397f-1853-79a4-bc84-dde7f5a38f79",
+    "issue_id": "scr-779",
+    "new_value": null,
+    "old_value": null
+  },
+  {
+    "actor": "Bob Builder",
+    "comment": null,
+    "created_at": "2026-10-14T01:19:53Z",
+    "event_type": "created",
+    "id": "01a1397f-1852-7af0-b436-6b4d5c3627d3",
+    "issue_id": "scr-779",
+    "new_value": "",
+    "old_value": ""
+  },
+  {
+    "actor": "Alice Tester",
+    "comment": "Added label: adr",
+    "created_at": "2026-10-14T01:19:52Z",
+    "event_type": "label_added",
+    "id": "01a1397f-176f-74de-9da1-120a42ecc6b5",
+    "issue_id": "scr-8yo",
+    "new_value": null,
+    "old_value": null
+  }
+]

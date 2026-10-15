@@ -1,0 +1,10 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "export"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 224
+}

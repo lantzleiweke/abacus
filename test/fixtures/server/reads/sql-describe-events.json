@@ -1,0 +1,66 @@
+[
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "id",
+    "Key": "PRI",
+    "Null": "NO",
+    "Type": "char(36)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "issue_id",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "event_type",
+    "Key": "",
+    "Null": "NO",
+    "Type": "varchar(32)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "actor",
+    "Key": "",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "old_value",
+    "Key": "",
+    "Null": "YES",
+    "Type": "longtext"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "new_value",
+    "Key": "",
+    "Null": "YES",
+    "Type": "longtext"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "comment",
+    "Key": "",
+    "Null": "YES",
+    "Type": "text"
+  },
+  {
+    "Default": "CURRENT_TIMESTAMP",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "created_at",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "datetime"
+  }
+]

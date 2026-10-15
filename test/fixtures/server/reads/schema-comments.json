@@ -1,0 +1,42 @@
+[
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "id",
+    "Key": "PRI",
+    "Null": "NO",
+    "Type": "char(36)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "issue_id",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "author",
+    "Key": "",
+    "Null": "NO",
+    "Type": "varchar(255)"
+  },
+  {
+    "Default": null,
+    "Extra": "",
+    "Field": "text",
+    "Key": "",
+    "Null": "NO",
+    "Type": "longtext"
+  },
+  {
+    "Default": "CURRENT_TIMESTAMP",
+    "Extra": "DEFAULT_GENERATED",
+    "Field": "created_at",
+    "Key": "MUL",
+    "Null": "NO",
+    "Type": "datetime"
+  }
+]

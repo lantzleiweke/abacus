@@ -1,0 +1,12 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "sql",
+    "--json",
+    "SELECT name, hash, latest_commit_date, latest_commit_message FROM dolt_remote_branches"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 231
+}

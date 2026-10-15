@@ -1,0 +1,10 @@
+{
+  "cmd": [
+    "bd",
+    "dolt",
+    "pull"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 297
+}

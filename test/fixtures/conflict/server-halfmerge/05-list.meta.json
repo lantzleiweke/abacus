@@ -1,0 +1,15 @@
+{
+  "cmd": [
+    "bd",
+    "--readonly",
+    "list",
+    "--json",
+    "--all",
+    "--flat",
+    "--limit",
+    "0"
+  ],
+  "cwd_label": "server-b",
+  "exit": 0,
+  "ms": 211
+}

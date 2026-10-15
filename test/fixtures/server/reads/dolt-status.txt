@@ -1,0 +1,2 @@
+Dolt server: not running
+  Expected port: 38307

@@ -1,0 +1,9 @@
+{
+  "cmd": [
+    "bd",
+    "--version"
+  ],
+  "cwd_label": "server-a",
+  "exit": 0,
+  "ms": 167
+}

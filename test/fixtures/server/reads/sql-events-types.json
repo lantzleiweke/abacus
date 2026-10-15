@@ -1,0 +1,38 @@
+[
+  {
+    "event_type": "label_added",
+    "n": 31
+  },
+  {
+    "event_type": "created",
+    "n": 16
+  },
+  {
+    "event_type": "updated",
+    "n": 16
+  },
+  {
+    "event_type": "status_changed",
+    "n": 7
+  },
+  {
+    "event_type": "label_removed",
+    "n": 6
+  },
+  {
+    "event_type": "closed",
+    "n": 3
+  },
+  {
+    "event_type": "claimed",
+    "n": 1
+  },
+  {
+    "event_type": "reopened",
+    "n": 1
+  },
+  {
+    "event_type": "commented",
+    "n": 1
+  }
+]

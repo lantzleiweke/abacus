@@ -1,0 +1,14 @@
+[
+  {
+    "id": "scr-fum",
+    "title": "Documentation refresh",
+    "description": "Docs for new stack.",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "epic",
+    "owner": "alice@example.invalid",
+    "created_at": "2026-10-14T08:19:52Z",
+    "created_by": "Alice Tester",
+    "updated_at": "2026-10-14T08:31:03Z"
+  }
+]
