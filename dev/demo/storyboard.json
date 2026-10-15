@@ -1,0 +1,72 @@
+{
+  "_comment": "Coordinates are CSS px in the original 1440x900 screenshots (the same space as the capture meta-*.json). render.py removes crop_top_css from every still first, so the OpenChamber header (folder name, session title) never appears. Times are seconds.",
+  "dpr": 2,
+  "crop_top_css": 35,
+  "stills": {
+    "epic": "00-epic.png",
+    "activity": "01-after-badge.png",
+    "detail": "02-detail.png",
+    "chip": "03-chip.png",
+    "typed": "04-typed.png"
+  },
+  "output": {
+    "width": 1920,
+    "height": 1200,
+    "fps": 30,
+    "window": { "x": 60, "y": 59, "width": 1800, "radius": 20 },
+    "gif_width": 1200,
+    "gif_fps": 15
+  },
+  "cursor": { "rest": [620, 520] },
+  "camera": [
+    { "t": 0.0, "zoom": 1.0, "at": [720, 450] },
+    { "t": 1.2, "zoom": 1.0, "at": [720, 450] },
+    { "t": 2.0, "zoom": 2.2, "at": [1373, 134] },
+    { "t": 5.9, "zoom": 2.2, "at": [1373, 134] },
+    { "t": 6.8, "zoom": 2.2, "at": [1140, 900] },
+    { "t": 9.9, "zoom": 2.2, "at": [1140, 900] },
+    { "t": 10.9, "zoom": 2.5, "at": [330, 900] },
+    { "t": 14.3, "zoom": 2.5, "at": [330, 900] },
+    { "t": 15.4, "zoom": 1.0, "at": [720, 450] }
+  ],
+  "cursor_path": [
+    { "t": 0.0, "at": [620, 520] },
+    { "t": 1.2, "at": [620, 520] },
+    { "t": 2.0, "at": [1373, 134] },
+    { "t": 3.9, "at": [1373, 134] },
+    { "t": 4.6, "at": [1180, 232] },
+    { "t": 5.9, "at": [1180, 232] },
+    { "t": 6.8, "at": [1330, 792] },
+    { "t": 8.2, "at": [1330, 792] },
+    { "t": 8.8, "at": [970, 868] },
+    { "t": 9.9, "at": [970, 868] },
+    { "t": 10.9, "at": [520, 826] },
+    { "t": 14.3, "at": [520, 826] },
+    { "t": 15.4, "at": [620, 520] }
+  ],
+  "clicks": [
+    { "t": 2.05, "at": [1373, 134], "label": "unseen badge" },
+    { "t": 4.65, "at": [1180, 232], "label": "agent comment row" },
+    { "t": 8.85, "at": [970, 868], "label": "Current chat" },
+    { "t": 10.95, "at": [520, 826], "label": "composer" }
+  ],
+  "scenes": [
+    { "t": 0.0, "still": "epic", "fade": 0 },
+    { "t": 2.15, "still": "activity", "fade": 0.25 },
+    { "t": 4.75, "still": "detail", "fade": 0.25 },
+    { "t": 8.95, "still": "chip", "fade": 0.25 },
+    { "t": 11.2, "still": "composer", "fade": 0 },
+    { "t": 16.9, "still": "epic", "fade": 0.45 }
+  ],
+  "typing": {
+    "caret_from": 10.95,
+    "start": 11.2,
+    "end": 12.9,
+    "text": [78, 812, 262.5, 18],
+    "caret": [341, 814, 2.5, 14],
+    "caret_color": "rgb(233,232,228)",
+    "erase": [74, 808, 310, 26],
+    "erase_color": "rgb(39,38,35)"
+  },
+  "end": 17.35
+}

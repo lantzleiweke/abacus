@@ -30,7 +30,7 @@ src/service/   the Node service that runs bd, dolt and git
 src/shared/    types and the one function both sides share
 panel/         built bundles plus index.html and attach.html (committed)
 service/       built bundle plus package.json (committed)
-dev/           preview page, fake host, fake service, screenshot tool
+dev/           preview page, fake host, fake service, screenshot and demo tools
 test/          unit, integration, fixtures
 docs/          these docs, plus contracts and screenshots
 ```
@@ -88,6 +88,16 @@ node dev/capture.mjs <out-dir> <shot,...> [width] [height]
 ```
 
 A shot is a scenario id, or `<file name>=<scenario>&<more preview params>`, for example `team-conflict=team&sync=conflict`. It writes `<name>-light.png` and `<name>-dark.png` with headless Chrome, 380 by 640 at 2x by default. The tool always reads `http://127.0.0.1:5199`, so leave `PORT` alone while capturing. Set `CHROME` to the browser path if it is not at the macOS default.
+
+### README demo
+
+`docs/demo.gif` and `docs/demo.mp4` are rendered from five stills of Abacus in OpenChamber (1440 by 900 at 2x, dark theme): `00-epic.png`, `01-after-badge.png`, `02-detail.png`, `03-chip.png` and `04-typed.png`. The stills are not committed. To re-render, you need `ffmpeg` and ImageMagick 7 (`magick`):
+
+```sh
+python3 dev/demo/render.py <stills-dir>
+```
+
+It writes both files to `docs/`. Pass `--out` for another folder, `--work` to keep the frames, or `--only-frames 0,60,240` to render single frames for a quick check. Timings, click targets, zoom levels and output sizes are in `dev/demo/storyboard.json`, in CSS pixels of the original stills. The script removes the top `crop_top_css` pixels of every still first, so the OpenChamber header with the folder name never shows. If you capture new stills, check that the header is still inside that strip.
 
 ## Fixtures
 

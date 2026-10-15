@@ -4,7 +4,9 @@ Abacus is an OpenChamber extension that shows a project's [Beads](https://github
 
 In this documentation, "Beads" is the tool and "beads" are the issues it tracks.
 
-![Abacus in the OpenChamber right rail: the Epic view of a sample project, with the agent's unseen edits highlighted](docs/screenshots/hero.png)
+![Demo of Abacus in OpenChamber: the unseen badge opens Activity with the agent's edits, the agent's comment opens the bug, Current chat puts the bead on the chat, and a prompt is typed next to it](docs/demo.gif)
+
+[Watch it as video](docs/demo.mp4)
 
 ## What it does
 
