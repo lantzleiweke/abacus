@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Render the README demo (docs/demo.gif, docs/demo.mp4) from five stills.
+"""Render the README demo (docs/demo.gif, docs/demo.mp4) from the stills named in the storyboard.
 
 Usage: python3 dev/demo/render.py STILLS_DIR [--out docs] [--work DIR] [--jobs N] [--only-frames 0,90,...]
 
 Needs ffmpeg and ImageMagick 7 (magick) on the PATH. The timeline, click
-targets and output sizes live in dev/demo/storyboard.json.
+targets and output sizes live in dev/demo/storyboard.json. The optional
+"typing" block types text into a "composer" scene built from a "typed" still.
 """
 import argparse
 import json
@@ -103,11 +104,17 @@ class Demo:
             src = os.path.join(self.stills_dir, name)
             run(["magick", src, "-crop", f"+0+{self.crop}", "+repage",
                  os.path.join(self.work, f"{key}.mpc")])
-        out = subprocess.run(["magick", os.path.join(self.work, "epic.mpc"), "-format", "%w %h", "info:"],
+        first = next(iter(self.sb["stills"]))
+        out = subprocess.run(["magick", os.path.join(self.work, f"{first}.mpc"), "-format", "%w %h", "info:"],
                              check=True, capture_output=True, text=True).stdout.split()
         self.src_w, self.src_h = int(out[0]), int(out[1])
         self.wh = round(self.ww * self.src_h / self.src_w)
 
+        if "typing" in self.sb:
+            self.prepare_typing()
+        self.prepare_frame()
+
+    def prepare_typing(self):
         ty = self.sb["typing"]
         ex, ey = self.img(ty["erase"][0], ty["erase"][1])
         ew, eh = ty["erase"][2] * self.d, ty["erase"][3] * self.d
@@ -122,6 +129,7 @@ class Demo:
              "+repage", os.path.join(self.work, "text.mpc")])
         self.stops = self.glyph_stops()
 
+    def prepare_frame(self):
         W, H, x, y, w, h, r = self.W, self.H, self.wx, self.wy, self.ww, self.wh, self.radius
         run(["magick", "-size", f"{W}x{H}", "-define", "gradient:angle=135", "gradient:#2b2e37-#0f1014",
              "(", "-size", f"{W}x{H}", "xc:none", "-fill", "rgba(214,190,96,0.10)",
@@ -188,9 +196,9 @@ class Demo:
 
     def still_args(self, key, t):
         w = self.work
-        ty = self.sb["typing"]
-        if key not in ("chip", "composer"):
+        if "typing" not in self.sb or key not in ("chip", "composer"):
             return [os.path.join(w, f"{key}.mpc")]
+        ty = self.sb["typing"]
         if key == "chip":
             args = [os.path.join(w, "chip.mpc")]
             cx, cy = self.img(ty["text"][0] - 1.5, ty["caret"][1])

@@ -4,7 +4,7 @@ Abacus is an OpenChamber extension that shows a project's [Beads](https://github
 
 In this documentation, "Beads" is the tool and "beads" are the issues it tracks.
 
-![Demo of Abacus in OpenChamber: the unseen badge opens Activity with the agent's edits, the agent's comment opens the bug, Current chat puts the bead on the chat, and a prompt is typed next to it](docs/demo.gif)
+![Demo of Abacus in OpenChamber: Needs me lists a review, a question from the agent and what changed; Resolve clears the review in one click; a bead changed by Claude Code opens; in its History, Restore on an older priority change is refused because the priority changed again since, and nothing is changed](docs/demo.gif)
 
 [Watch it as video](docs/demo.mp4)
 
@@ -25,30 +25,30 @@ In this documentation, "Beads" is the tool and "beads" are the issues it tracks.
 
 ## Screenshots
 
-![Abacus Activity view in OpenChamber: six unseen edits by the agent above older changes by Ann Lee](docs/screenshots/hero-activity.png)
+![Abacus Needs me view in OpenChamber: a review Claude Code asked for with a Resolve button, a question from the agent with Respond and Dismiss, and a bead the agent created since you last looked](docs/screenshots/hero-needs-me.png)
 
-Activity shows who changed what; the agent's edits are marked unseen.
+Needs me puts what waits on you first: reviews to resolve, questions from your agent, and what changed since you looked.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/screenshots/epic-light.png" alt="Epic view with unseen beads highlighted and the team sync line"></td>
-    <td width="33%"><img src="docs/screenshots/worktree-sheet-light.png" alt="New session in a worktree sheet with the branch name and the /bd tip"></td>
-    <td width="33%"><img src="docs/screenshots/detail-light.png" alt="A bead's detail with description, acceptance criteria and the Attach to footer"></td>
+    <td width="33%"><img src="docs/screenshots/waiting-on-review-light.png" alt="A bug's detail with a Waiting on block: a review Claude Code asked for, with Resolve and Add a reason"></td>
+    <td width="33%"><img src="docs/screenshots/history-restore-light.png" alt="A bead's History with Restore buttons, and a refused restore that says the priority was changed again since, shows the current value and says nothing was changed"></td>
+    <td width="33%"><img src="docs/screenshots/memories-light.png" alt="Memories page listing five notes every agent session starts with, each with Edit and Forget"></td>
   </tr>
   <tr>
-    <td>Epic view: unseen beads highlighted, team sync line on top.</td>
-    <td>Start a session on a bead in its own worktree.</td>
+    <td>A bead that waits on a review says so, and you resolve it from there.</td>
+    <td>History shows each change. Restore checks the bead first and changes nothing if it moved on.</td>
+    <td>Memories: what every agent session in the project starts with.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/live-updates-consent-light.png" alt="Project menu asking Turn on live updates?, explaining the log of changes and the change to .beads/config.yaml, with Cancel and Turn on"></td>
+    <td><img src="docs/screenshots/detail-light.png" alt="A bead's detail with description, acceptance criteria and the Attach to footer"></td>
+    <td><img src="docs/screenshots/worktree-sheet-light.png" alt="New session in a worktree sheet with the branch name and the /bd tip"></td>
+  </tr>
+  <tr>
+    <td>Live updates ask first, and say what they change.</td>
     <td>Bead detail, with Attach to for the chat or a new session.</td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/status-close-light.png" alt="Status menu asking why the bead is closed"></td>
-    <td><img src="docs/screenshots/publish-sheet-light.png" alt="Publish sheet listing three changes before they go to the team"></td>
-    <td><img src="docs/screenshots/sync-conflict-light.png" alt="Sync conflict card showing local and team values with Hand to agent"></td>
-  </tr>
-  <tr>
-    <td>Closing a bead asks for an optional reason.</td>
-    <td>Publish lists every change before it goes out.</td>
-    <td>A sync conflict shows both sides. Hand it to your agent.</td>
+    <td>Start a session on a bead in its own worktree.</td>
   </tr>
 </table>
 

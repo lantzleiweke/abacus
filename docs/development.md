@@ -91,7 +91,7 @@ A shot is a scenario id, or `<file name>=<scenario>&<more preview params>`, for 
 
 ### README demo
 
-`docs/demo.gif` and `docs/demo.mp4` are rendered from five stills of Abacus in OpenChamber (1440 by 900 at 2x, dark theme): `00-epic.png`, `01-after-badge.png`, `02-detail.png`, `03-chip.png` and `04-typed.png`. The stills are not committed. To re-render, you need `ffmpeg` and ImageMagick 7 (`magick`):
+`docs/demo.gif` and `docs/demo.mp4` are rendered from five stills of Abacus in OpenChamber (1440 by 900 at 2x, dark theme): `s00-needs.png`, `s01-resolved.png`, `s02-detail.png`, `s03-history.png` and `s04-refused.png` (the names are in `dev/demo/storyboard.json`). Take them with the left sidebar collapsed; `crop_top_css` removes OpenChamber's header. The stills are not committed. To re-render, you need `ffmpeg` and ImageMagick 7 (`magick`):
 
 ```sh
 python3 dev/demo/render.py <stills-dir>
