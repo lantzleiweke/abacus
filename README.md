@@ -33,7 +33,7 @@ Needs me puts what waits on you first: reviews to resolve, questions from your a
   <tr>
     <td width="33%"><img src="docs/screenshots/waiting-on-review-light.png" alt="A bug's detail with a Waiting on block: a review Claude Code asked for, with Resolve and Add a reason"></td>
     <td width="33%"><img src="docs/screenshots/history-restore-light.png" alt="A bead's History with Restore buttons, and a refused restore that says the priority was changed again since, shows the current value and says nothing was changed"></td>
-    <td width="33%"><img src="docs/screenshots/memories-light.png" alt="Memories page listing five notes every agent session starts with, each with Edit and Forget"></td>
+    <td width="33%"><img src="docs/screenshots/memories-light.png" alt="Memories page listing three notes every agent session starts with, each with Edit and Forget"></td>
   </tr>
   <tr>
     <td>A bead that waits on a review says so, and you resolve it from there.</td>
@@ -65,13 +65,25 @@ The panel looks for `bd`, `dolt` and `git` on the PATH and in `/opt/homebrew/bin
 
 ## Install
 
-1. `npm install && npm run build`
-2. In OpenChamber: Settings, Extensions, Add. Paste this folder's absolute path.
-3. Approve the capabilities and open the Abacus panel from the rail.
+You need [OpenChamber](https://github.com/openchamber/openchamber) 2.3.2 or later and [Beads](https://github.com/steveyegge/beads) on your PATH (`brew install beads`; Beads 1.3.1 is recommended, 1.2.2 works without live updates).
 
-The built files are committed, so a checkout without `npm run build` also installs. See [development](docs/development.md) for why.
+1. In OpenChamber, open **Settings**, then **Extensions**.
+2. Paste `https://github.com/lantzleiweke/abacus` into **Folder, ZIP, or URL** and press **Add**.
+3. OpenChamber asks to allow Abacus: it can put a bead on a chat's message box (nothing is sent until you send it), reads your projects and sessions, and runs a local service limited to `bd`, `dolt` and `git`. Press **Allow and enable**, then open the Abacus panel from the rail.
 
-OpenChamber in enterprise mode only allows extensions that run a service from repositories an admin has listed, or from local folders. Abacus runs a service, so install it from a local folder or ask an admin to list its repository.
+Nothing is built on your machine: the built files are in the repository.
+
+**Updates.** When you open the Extensions screen, OpenChamber checks for a newer version (at most once an hour); **Check for updates** checks now. A newer version shows an **Update** button; your settings and approvals are kept.
+
+**A specific version.** Add the tag to the URL, for example `https://github.com/lantzleiweke/abacus#v0.2.0`.
+
+**Enterprise mode.** OpenChamber only installs extensions that run a service from repositories an admin allows. An admin adds this to `policy.json`:
+
+```json
+{ "enterpriseMode": true, "allowedExtensions": ["https://github.com/lantzleiweke/abacus"] }
+```
+
+**From a folder.** To run your own copy, clone the repository, then add the folder's absolute path in the same field. See [development](docs/development.md) to build it. Only one copy can be installed at a time. Removing one keeps the beads you have seen, but resets the panel's preferences, Stuck days and Keep list.
 
 ## First run
 

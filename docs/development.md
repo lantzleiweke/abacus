@@ -123,7 +123,7 @@ When you change how the service reads or writes, run the integration tests as we
 
 ## The install and reload loop
 
-1. In OpenChamber: Settings, Extensions, Add, then paste the absolute path of this folder.
+1. In OpenChamber: Settings, Extensions, Add, then paste the absolute path of this folder. If Abacus is already installed from GitHub, remove that copy first: only one copy with the panel id `beads` can be installed. Removing it keeps the beads you have seen (the service keeps them in `~/.local/share/openchamber-beads`), but OpenChamber deletes the panel's storage, so view preferences, Stuck days and the Keep list start over.
 2. Change code, then `npm run build`.
 3. **Panel change:** reload the OpenChamber window.
 4. **Service change:** disable the extension, then enable it. A reload does not restart the service.
@@ -141,3 +141,11 @@ A few host facts that shape the code (see [sdk-contract.md](sdk-contract.md)):
 2. If you changed `src/`, commit the rebuilt bundles with it.
 3. If you changed behavior the docs describe, change the docs. UI strings in the user guide are quoted from the source, so search the guide for a string you changed.
 4. Do not edit a project's `.beads/` files by hand while testing. Use a scratch project.
+
+## Releasing
+
+People who installed Abacus from the GitHub URL get an **Update** button only when `version` in `package.json` goes up. OpenChamber compares versions, not commits, and never builds anything.
+
+1. Bump `version` in `package.json` (and `package-lock.json`) and add the release to `CHANGELOG.md`.
+2. `npm run build`, then `npm run check`, and commit the rebuilt bundles in the same release.
+3. Publish to the public repository and tag the release there (`v<version>`), so `https://github.com/lantzleiweke/abacus#v<version>` installs that version.
