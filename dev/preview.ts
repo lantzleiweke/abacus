@@ -295,7 +295,7 @@ group(
   group('Chat box', [field as unknown as HTMLButtonElement]);
 }
 
-// `do=` drives the panel after the list appears, for screenshots of interactive states. Steps are separated by |:
+// `do=` drives the panel once the list, the update screen or an empty state appears, for screenshots of interactive states. Steps are separated by |:
 // `view:status` (needs, epic, status, activity), `filters`, `q:<text>`, `keys:<keys>` (j, k, e for Enter), `menu:<bead id>`, `scroll:bottom`,
 // `open:<bead id>` (clicks its row), `click:<css selector>`, `back`, `dscroll:<px|bottom>` (scrolls the detail),
 // `type:<css selector>=><text>` (types into a field; `\n` is a line break), `press:<Shift+Enter>` (a key to the focused
@@ -314,7 +314,7 @@ async function waitFor(selector: string): Promise<HTMLElement | null> {
 }
 
 async function drive() {
-  await waitFor(dialog ? '.bdp, .bd-empty' : '.bd-list, .bd-upd');
+  await waitFor(dialog ? '.bdp, .bd-empty' : '.bd-list, .bd-upd, .bd-empty');
   // The picker focuses its search box just after it paints; keys sent before that would be lost.
   if (dialog) await pause(200);
   for (const step of steps) {

@@ -136,6 +136,12 @@ export const IconEdit = (p: P) => (
   </Icon>
 );
 
+export const IconCheck = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 8.5l3 3 6-7" />
+  </Icon>
+);
+
 export const IconPlus = (p: P) => (
   <Icon {...p}>
     <path d="M8 3.5v9M3.5 8h9" />

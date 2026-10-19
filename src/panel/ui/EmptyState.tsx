@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { WorkspaceState } from '../../shared/types';
 import { ASK_ITEM, useAgent, useAgentState, type AgentRequest } from '../agent';
 import { firstLoadError, useStore, useStoreApi, type PanelError } from '../store';
-import { IconChat, IconCopy } from './icons';
+import { IconChat, IconCheck, IconCopy } from './icons';
 
 /** The middle bead of the illustration: how the state reads at a glance. */
 export type Tone = 'neutral' | 'missing' | 'warning' | 'error' | 'ask';
@@ -133,7 +133,7 @@ export function workspaceCopy(workspace: WorkspaceState, canAsk = true): { title
 }
 
 /** Retry that shows it is working for a moment, since a retry that finds nothing new changes nothing on screen. */
-function RetryButton({ primary = false }: { primary?: boolean }) {
+function RetryButton({ primary = false, onRetry }: { primary?: boolean; onRetry?: () => void }) {
   const store = useStoreApi();
   const [checking, setChecking] = useState(false);
   useEffect(() => {
@@ -149,6 +149,7 @@ function RetryButton({ primary = false }: { primary?: boolean }) {
       disabled={checking}
       onClick={() => {
         setChecking(true);
+        onRetry?.();
         store.retry();
       }}
     >
@@ -174,7 +175,12 @@ function useOneAtATime(): [boolean, (work: () => Promise<void>) => void] {
   return [busy, run];
 }
 
-/** Beads is missing or too old: ask the agent to fix it, copy the command, open the guide, or retry. */
+/**
+ * Beads is missing or too old: ask the agent to fix it, copy the command, open the guide, or retry. The panel cannot
+ * read the chat's message box, so once the request is on a chat the Ask button stays done for that chat instead of
+ * adding it a second time; "Add it again" is there for a request the person removed. Another chat, Retry, or leaving
+ * the screen (unmounting) makes it an Ask button again.
+ */
 function InstallActions({ help }: { help: InstallHelp }) {
   const store = useStoreApi();
   const agent = useAgent();
@@ -182,14 +188,43 @@ function InstallActions({ help }: { help: InstallHelp }) {
   const asking = busy?.id === ASK_ITEM;
   const [copying, copy] = useOneAtATime();
   const [opening, open] = useOneAtATime();
+  // The chat the request was put on.
+  const [addedTo, setAddedTo] = useState<string | null>(null);
+  const sessionId = session?.id ?? null;
+  useEffect(() => {
+    if (addedTo !== null && addedTo !== sessionId) setAddedTo(null);
+  }, [sessionId, addedTo]);
+  const done = addedTo !== null && addedTo === sessionId;
+  const ask = () => {
+    if (!agent) return;
+    void agent.ask(help.request).then((id) => {
+      if (id !== null) setAddedTo(id);
+    });
+  };
   return (
     <>
       {agent && (
         <>
-          <button type="button" class="bd-btn bd-btn-primary bd-empty-ask" disabled={busy !== null} aria-busy={asking} onClick={() => void agent.ask(help.request)}>
-            {asking ? <span class="bd-spin" aria-hidden="true" /> : <IconChat size={13} />}
-            {help.ask}
-          </button>
+          {/* Polite: the done state is read out when it appears, with focus left where it was. */}
+          <span class="bd-empty-asked" aria-live="polite">
+            {done ? (
+              <button type="button" class="bd-btn bd-empty-ask bd-empty-done" aria-disabled="true">
+                <IconCheck size={13} />
+                Added to the chat
+              </button>
+            ) : (
+              // aria-disabled, not disabled: a disabled button drops focus, and it stays here through the done state.
+              <button type="button" class="bd-btn bd-btn-primary bd-empty-ask" aria-disabled={busy !== null} aria-busy={asking} onClick={() => busy === null && ask()}>
+                {asking ? <span class="bd-spin" aria-hidden="true" /> : <IconChat size={13} />}
+                {help.ask}
+              </button>
+            )}
+            {done && (
+              <button type="button" class="bd-link" aria-disabled={busy !== null} aria-busy={asking} onClick={() => busy === null && ask()}>
+                Add it again
+              </button>
+            )}
+          </span>
           <p class="bd-empty-hint">{session ? 'Nothing is sent until you send it.' : 'Opens a new chat. Nothing is sent until you send it.'}</p>
         </>
       )}
@@ -197,7 +232,7 @@ function InstallActions({ help }: { help: InstallHelp }) {
         <IconCopy size={13} />
         {help.copy}
       </button>
-      <RetryButton primary={!agent} />
+      <RetryButton primary={!agent} onRetry={() => setAddedTo(null)} />
       <p class="bd-empty-more">
         <button type="button" class="bd-link" aria-disabled={opening} aria-busy={opening} onClick={() => open(() => store.openUrl(INSTALL_GUIDE))}>
           Install guide
@@ -230,7 +265,8 @@ export function WorkspaceEmpty({ workspace }: { workspace: WorkspaceState }) {
   if (help) {
     return (
       <EmptyState tone={tone} title={title} body={body}>
-        <InstallActions help={help} />
+        {/* Keyed by screen: a missing screen that turns into too old starts as an Ask button, never as done. */}
+        <InstallActions key={workspace.kind} help={help} />
       </EmptyState>
     );
   }

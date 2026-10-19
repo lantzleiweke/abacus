@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 (unreleased)
+
+### Fixed
+
+- Asking the agent twice no longer puts the request on the chat twice.
+
 ## 0.2.1 (unreleased)
 
 ### Changed

@@ -54,9 +54,10 @@ export type Agent = {
   startSyncSession(): Promise<void>;
   /**
    * Puts the request's text on the open chat's message box; with no chat open, starts one (opened, nothing sent) and
-   * puts it there. Nothing is sent: the person reads it and sends it.
+   * puts it there. Nothing is sent: the person reads it and sends it. Answers the id of the chat the request went on,
+   * or null when it went nowhere (a press while another runs, no chat started, the message box refused it).
    */
-  ask(request: AgentRequest): Promise<void>;
+  ask(request: AgentRequest): Promise<string | null>;
 };
 
 /** What OpenChamber 2.3.2 rejects `startSession` with after showing its own failure toast. */
@@ -202,9 +203,10 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
     startSyncSession() {
       return start(SYNC_ITEM, syncSource, 'session');
     },
-    ask({ text, topic }) {
+    async ask({ text, topic }) {
       const open = state.session !== null;
-      return run({ id: ASK_ITEM, kind: open ? 'attach' : 'session' }, async () => {
+      let added: string | null = null;
+      await run({ id: ASK_ITEM, kind: open ? 'attach' : 'session' }, async () => {
         if (!open) {
           // Like the sync problem with no chat open: a new chat, opened. No text, which the host would send as its first message.
           let result: StartSessionResult;
@@ -221,8 +223,11 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
           // The chat is open now, whenever the host gets round to saying so: another press goes to it, not to a third chat.
           if (!state.session) set({ session: { id: result.sessionId, title: topic.title, busy: false } });
         }
+        // The message box written to is the open chat's, which may have changed during a slow start.
+        const target = state.session?.id ?? null;
         try {
           await host.compose({ text });
+          added = target;
           toast('success', open ? 'The request is on the chat. Nothing is sent until you send it.' : 'The request is on a new chat. Nothing is sent until you send it.');
         } catch (thrown) {
           const error = asRequestError(thrown);
@@ -230,6 +235,7 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
           toast('error', `Couldn't put the request on the chat. ${error.message}`, text);
         }
       });
+      return added;
     },
     askWorktree(id) {
       if (state.busy) return;

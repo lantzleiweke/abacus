@@ -648,6 +648,30 @@
   vertical-align: -2px;
 }
 
+/* The Ask button and, once the request is on the chat, "Add it again" beside it. */
+.bd-empty-asked {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  max-width: 100%;
+}
+
+/* Done for this chat: quiet, but at full strength, so it reads as finished rather than off. */
+.bd-btn.bd-empty-done[aria-disabled='true'] {
+  opacity: 1;
+  cursor: default;
+}
+
+.bd-btn.bd-empty-done:is(:hover, :active) {
+  background: var(--bd-field);
+}
+
+.bd-empty-done > .bd-i {
+  color: var(--bd-ok);
+}
+
 .bd-empty-hint {
   flex-basis: 100%;
   margin: -2px 0 6px;

@@ -21,6 +21,7 @@ const UPDATE_FOR_PROJECT_REQUEST =
 function host(workspace: WorkspaceState, session: SessionSnapshot | null) {
   const calls: Call[] = [];
   const toasts: ToastRequest[] = [];
+  const sessionListeners = new Set<(s: SessionSnapshot | null) => void>();
   const h = {
     serviceRequest: vi.fn(async ({ path, body }: { path: string; body?: string }) => {
       calls.push({ route: path.replace('/api/', '') as Call['route'], body: JSON.parse(body ?? '{}') });
@@ -42,11 +43,18 @@ function host(workspace: WorkspaceState, session: SessionSnapshot | null) {
       return () => {};
     },
     onSession(listener: (s: SessionSnapshot | null) => void) {
+      sessionListeners.add(listener);
       listener(session);
-      return () => {};
+      return () => sessionListeners.delete(listener);
     },
   };
-  return { host: h, calls, toasts };
+  /** The host says another chat is open (or none). */
+  const emitSession = (next: SessionSnapshot | null) =>
+    act(async () => {
+      sessionListeners.forEach((l) => l(next));
+      await flush();
+    });
+  return { host: h, calls, toasts, emitSession };
 }
 
 const disposers: Array<() => void> = [];
@@ -102,7 +110,8 @@ describe('Beads is not installed', () => {
       await flush();
     });
     expect(h.compose).toHaveBeenCalledTimes(1);
-    expect(ask.getAttribute('aria-busy')).toBe('false');
+    expect(ask.getAttribute('aria-busy')).not.toBe('true');
+    expect(ask.textContent).toBe('Added to the chat');
   });
 
   it('with no chat open, opens a new chat without sending anything, then puts the request on it', async () => {
@@ -117,14 +126,24 @@ describe('Beads is not installed', () => {
     expect(toasts.at(-1)).toEqual({ kind: 'success', message: 'The request is on a new chat. Nothing is sent until you send it.' });
   });
 
-  it('a second press after the new chat started goes to that chat, even before the host says it is open', async () => {
+  it('after the new chat started, it is done for that chat, and Add it again goes to it, even before the host says it is open', async () => {
     const { host: h, toasts } = await panel({ kind: 'no-bd' }, null);
     await click(button('Ask the agent to install Beads'));
     expect(screen.getByText('Nothing is sent until you send it.')).toBeTruthy();
-    await click(button('Ask the agent to install Beads'));
+    await click(button('Added to the chat'));
+    expect(h.compose).toHaveBeenCalledTimes(1);
+    await click(button('Add it again'));
     expect(h.startSession).toHaveBeenCalledTimes(1);
     expect(h.compose).toHaveBeenCalledTimes(2);
     expect(toasts.at(-1)).toEqual({ kind: 'success', message: 'The request is on the chat. Nothing is sent until you send it.' });
+  });
+
+  it('stays done when the host then says the new chat is open', async () => {
+    const { host: h, emitSession } = await panel({ kind: 'no-bd' }, null);
+    await click(button('Ask the agent to install Beads'));
+    await emitSession({ id: 'ses_new', title: 'Install Beads', busy: false });
+    expect(button('Added to the chat')).toBeTruthy();
+    expect(h.startSession).toHaveBeenCalledTimes(1);
   });
 
   it('presses while the new chat is starting start it once', async () => {
@@ -172,6 +191,105 @@ describe('Beads is not installed', () => {
     await click(button('Ask the agent to install Beads'));
     expect(toasts.at(-1)).toMatchObject({ kind: 'error', copy: { text: INSTALL_REQUEST } });
     expect(toasts.at(-1)?.message).toMatch(/^Couldn't put the request on the chat\./);
+  });
+
+  describe('once the request is on the chat', () => {
+    it('a second press does not put it on again: the button says it is done, with focus kept on it', async () => {
+      const { host: h } = await panel({ kind: 'no-bd' });
+      const ask = button('Ask the agent to install Beads');
+      ask.focus();
+      await click(ask);
+      const done = button('Added to the chat');
+      expect(done).toBe(ask);
+      expect(document.activeElement).toBe(done);
+      expect(done.hasAttribute('disabled')).toBe(false);
+      expect(done.closest('[aria-live="polite"]')).toBeTruthy();
+      await click(done);
+      await click(done);
+      expect(h.compose).toHaveBeenCalledTimes(1);
+    });
+
+    it('Add it again puts it on once more, once per press', async () => {
+      const { host: h } = await panel({ kind: 'no-bd' });
+      await click(button('Ask the agent to install Beads'));
+      await click(button('Add it again'));
+      expect(h.compose).toHaveBeenCalledTimes(2);
+      expect(h.compose).toHaveBeenLastCalledWith({ text: INSTALL_REQUEST });
+      expect(button('Added to the chat')).toBeTruthy();
+      expect(h.startSession).not.toHaveBeenCalled();
+    });
+
+    it('another chat makes it an Ask button again, also when the first one comes back', async () => {
+      const { host: h, emitSession } = await panel({ kind: 'no-bd' });
+      await click(button('Ask the agent to install Beads'));
+      await emitSession({ id: 'ses_2', title: 'Another', busy: false });
+      expect(screen.queryByRole('button', { name: 'Add it again' })).toBeNull();
+      await click(button('Ask the agent to install Beads'));
+      expect(h.compose).toHaveBeenCalledTimes(2);
+      await emitSession(SESSION);
+      expect(button('Ask the agent to install Beads')).toBeTruthy();
+    });
+
+    it('Retry makes it an Ask button again', async () => {
+      const { host: h } = await panel({ kind: 'no-bd' });
+      await click(button('Ask the agent to install Beads'));
+      await click(button('Retry'));
+      await click(button('Ask the agent to install Beads'));
+      expect(h.compose).toHaveBeenCalledTimes(2);
+    });
+
+    it('a missing screen that turns into too old opens with the update Ask button, not as done', async () => {
+      const { host: h } = await panel({ kind: 'no-bd' });
+      // Retry's answer is held while Ask runs, then says Beads is now there but too old.
+      const gate = deferred<void>();
+      h.serviceRequest.mockImplementationOnce(async () => {
+        await gate.promise;
+        return json(snapshot({ workspace: { kind: 'bd-too-old', bdVersion: '1.1.4' } }));
+      });
+      await click(button('Retry'));
+      await click(button('Ask the agent to install Beads'));
+      expect(button('Added to the chat')).toBeTruthy();
+      await act(async () => {
+        gate.resolve();
+        await flush();
+      });
+      expect(button('Ask the agent to update Beads')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Added to the chat' })).toBeNull();
+    });
+
+    it('is done for the chat open when the request is put on it, even if that changed while the new chat started', async () => {
+      const { host: h, emitSession } = await panel({ kind: 'no-bd' }, null);
+      const gate = deferred<StartSessionResult>();
+      h.startSession.mockImplementationOnce(() => gate.promise);
+      await click(button('Ask the agent to install Beads'));
+      await emitSession({ id: 'ses_other', title: 'Another', busy: false });
+      await act(async () => {
+        gate.resolve({ sessionId: 'ses_new', sent: 'skipped', linked: true });
+        await flush();
+      });
+      expect(h.compose).toHaveBeenCalledTimes(1);
+      expect(button('Added to the chat')).toBeTruthy();
+    });
+
+    it('stays an Ask button when the message box refused the request', async () => {
+      const { host: h } = await panel({ kind: 'no-bd' });
+      h.compose.mockRejectedValueOnce(new HostRequestError('HOST_REJECTED', 'no composer'));
+      await click(button('Ask the agent to install Beads'));
+      await click(button('Ask the agent to install Beads'));
+      expect(h.compose).toHaveBeenCalledTimes(2);
+      expect(button('Added to the chat')).toBeTruthy();
+    });
+
+    it('shows plain words, and every name is its visible text', async () => {
+      await panel({ kind: 'no-bd' });
+      await click(button('Ask the agent to install Beads'));
+      const section = document.querySelector('.bd-empty')!;
+      expect(section.textContent).not.toMatch(/\bbd\b|brew|—/);
+      for (const el of Array.from(section.querySelectorAll('button'))) {
+        expect(el.getAttribute('type')).toBe('button');
+        expect(el.hasAttribute('aria-label')).toBe(false);
+      }
+    });
   });
 
   it('copies the install command, once per press', async () => {
@@ -239,6 +357,10 @@ describe('Beads is too old', () => {
     await click(button('Ask the agent to update Beads'));
     expect(h.compose).toHaveBeenCalledWith({ text: UPDATE_REQUEST });
     expect(h.prompt).not.toHaveBeenCalled();
+    await click(button('Added to the chat'));
+    expect(h.compose).toHaveBeenCalledTimes(1);
+    await click(button('Add it again'));
+    expect(h.compose).toHaveBeenCalledTimes(2);
   });
 
   it('asks for the version the project was last opened with when that is newer', async () => {

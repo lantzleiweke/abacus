@@ -3542,6 +3542,7 @@ ${field}`;
   ] });
   var IconChat = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 4.2c0-.9.7-1.7 1.7-1.7h7.6c.9 0 1.7.8 1.7 1.7v5c0 .9-.8 1.7-1.7 1.7H7l-3 2.6v-2.6h0c-.9 0-1.5-.8-1.5-1.7z" }) });
   var IconSpinner = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { class: "bd-spin", d: "M8 2.5a5.5 5.5 0 1 1-5.5 5.5" }) });
+  var IconCheck = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M3.5 8.5l3 3 6-7" }) });
   var TYPE_PATHS = {
     bug: /* @__PURE__ */ u3("path", { d: "M5.6 5.4a2.4 2.4 0 0 1 4.8 0M4.6 8.8a3.4 3.4 0 0 1 6.8 0v.8a3.4 3.4 0 0 1-6.8 0zM8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3" }),
     feature: /* @__PURE__ */ u3("path", { d: "M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z" }),
@@ -3659,7 +3660,7 @@ ${field}`;
         return { tone: "neutral", title: "Beads can't open this project right now.", body: "Retry in a moment. If this keeps happening, update the Beads extension." };
     }
   }
-  function RetryButton({ primary: primary2 = false }) {
+  function RetryButton({ primary: primary2 = false, onRetry }) {
     const store = useStoreApi();
     const [checking, setChecking] = d2(false);
     h2(() => {
@@ -3676,6 +3677,7 @@ ${field}`;
         disabled: checking,
         onClick: () => {
           setChecking(true);
+          onRetry?.();
           store.retry();
         },
         children: [
@@ -3706,11 +3708,32 @@ ${field}`;
     const asking = busy?.id === ASK_ITEM;
     const [copying, copy] = useOneAtATime();
     const [opening, open] = useOneAtATime();
+    const [addedTo, setAddedTo] = d2(null);
+    const sessionId = session?.id ?? null;
+    h2(() => {
+      if (addedTo !== null && addedTo !== sessionId) setAddedTo(null);
+    }, [sessionId, addedTo]);
+    const done = addedTo !== null && addedTo === sessionId;
+    const ask = () => {
+      if (!agent) return;
+      void agent.ask(help.request).then((id) => {
+        if (id !== null) setAddedTo(id);
+      });
+    };
     return /* @__PURE__ */ u3(S, { children: [
       agent && /* @__PURE__ */ u3(S, { children: [
-        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary bd-empty-ask", disabled: busy !== null, "aria-busy": asking, onClick: () => void agent.ask(help.request), children: [
-          asking ? /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }) : /* @__PURE__ */ u3(IconChat, { size: 13 }),
-          help.ask
+        /* @__PURE__ */ u3("span", { class: "bd-empty-asked", "aria-live": "polite", children: [
+          done ? /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-empty-ask bd-empty-done", "aria-disabled": "true", children: [
+            /* @__PURE__ */ u3(IconCheck, { size: 13 }),
+            "Added to the chat"
+          ] }) : (
+            // aria-disabled, not disabled: a disabled button drops focus, and it stays here through the done state.
+            /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary bd-empty-ask", "aria-disabled": busy !== null, "aria-busy": asking, onClick: () => busy === null && ask(), children: [
+              asking ? /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }) : /* @__PURE__ */ u3(IconChat, { size: 13 }),
+              help.ask
+            ] })
+          ),
+          done && /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", "aria-disabled": busy !== null, "aria-busy": asking, onClick: () => busy === null && ask(), children: "Add it again" })
         ] }),
         /* @__PURE__ */ u3("p", { class: "bd-empty-hint", children: session ? "Nothing is sent until you send it." : "Opens a new chat. Nothing is sent until you send it." })
       ] }),
@@ -3718,7 +3741,7 @@ ${field}`;
         /* @__PURE__ */ u3(IconCopy, { size: 13 }),
         help.copy
       ] }),
-      /* @__PURE__ */ u3(RetryButton, { primary: !agent }),
+      /* @__PURE__ */ u3(RetryButton, { primary: !agent, onRetry: () => setAddedTo(null) }),
       /* @__PURE__ */ u3("p", { class: "bd-empty-more", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", "aria-disabled": opening, "aria-busy": opening, onClick: () => open(() => store.openUrl(INSTALL_GUIDE)), children: [
         "Install guide",
         /* @__PURE__ */ u3("span", { "aria-hidden": "true", children: " \u2197" })
@@ -3737,7 +3760,7 @@ ${field}`;
     const { title, body, tone: tone2, detail } = workspaceCopy(workspace, canAsk);
     const help = installHelp(workspace);
     if (help) {
-      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: /* @__PURE__ */ u3(InstallActions, { help }) });
+      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: /* @__PURE__ */ u3(InstallActions, { help }, workspace.kind) });
     }
     if (workspace.kind !== "needs-first-contact") {
       return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
@@ -7891,6 +7914,30 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   display: inline-block;
   margin-right: 6px;
   vertical-align: -2px;
+}
+
+/* The Ask button and, once the request is on the chat, "Add it again" beside it. */
+.bd-empty-asked {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  max-width: 100%;
+}
+
+/* Done for this chat: quiet, but at full strength, so it reads as finished rather than off. */
+.bd-btn.bd-empty-done[aria-disabled='true'] {
+  opacity: 1;
+  cursor: default;
+}
+
+.bd-btn.bd-empty-done:is(:hover, :active) {
+  background: var(--bd-field);
+}
+
+.bd-empty-done > .bd-i {
+  color: var(--bd-ok);
 }
 
 .bd-empty-hint {
