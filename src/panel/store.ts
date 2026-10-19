@@ -196,12 +196,15 @@ export type Store = {
   dismissChange(): void;
   /** Marks every change seen ("Mark all seen"); says so in a toast when the service refuses, and the highlights stay. */
   markAllSeen(): Promise<void>;
-  /** Opens an http(s) or mailto link outside the panel. */
-  openUrl(url: string): void;
+  /** Opens an http(s) or mailto link outside the panel. Settles once the host answered (or the link was offered instead). */
+  openUrl(url: string): Promise<void>;
   /** Shows `message` in a toast whose Copy action copies `detail`. */
   copyDetails(error: PanelError): void;
-  /** Copies text (a bead id or a `/bd` command) to the clipboard, or offers it in a toast with Copy when the clipboard refuses. */
-  copyText(text: string): void;
+  /**
+   * Copies text (a bead id or a `/bd` command) to the clipboard, or offers it in a toast with Copy when the clipboard
+   * refuses. Settles once the host answered; never rejects.
+   */
+  copyText(text: string): Promise<void>;
   /**
    * Changes a bead if it is still as it was at `expectedUpdatedAt`. What Beads answers shows at once (the list catches
    * up on its own poll, which this starts).
@@ -1008,17 +1011,14 @@ export function createStore({ client, host, visibility = defaultVisibility(), no
     openUrl(url) {
       const offerCopy = () => host.toast({ kind: 'info', message: `The panel can't open this link: ${url}`.slice(0, TOAST_MAX), copy: { text: url } }).catch(() => {});
       // Relative and file links have nowhere to go from the panel: offer the text instead of doing nothing.
-      if (!/^(https?:|mailto:)/i.test(url)) {
-        void offerCopy();
-        return;
-      }
-      host.openUrl(url).catch(offerCopy);
+      if (!/^(https?:|mailto:)/i.test(url)) return offerCopy();
+      return host.openUrl(url).catch(offerCopy);
     },
     copyDetails(error) {
       host.toast({ kind: 'error', message: error.message.slice(0, TOAST_MAX), copy: { text: (error.detail ?? error.message).slice(0, COPY_MAX) } }).catch(() => {});
     },
     copyText(text) {
-      host
+      return host
         .writeClipboard(text)
         .then(
           () => host.toast({ kind: 'success', message: `Copied ${text}` }),

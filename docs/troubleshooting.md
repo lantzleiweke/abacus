@@ -2,15 +2,32 @@
 
 Find the message the panel shows, then read the cause and the fix. Messages are quoted as they appear. Most screens have **Retry**. A **Copy details** button, where there is one, copies the technical text to paste to your agent or into a bug report.
 
-1. [The project cannot be shown](#the-project-cannot-be-shown)
-2. [The list is out of date](#the-list-is-out-of-date)
-3. [Edits are refused or uncertain](#edits-are-refused-or-uncertain)
-4. [Sync and Publish](#sync-and-publish)
-5. [Attaching and starting sessions](#attaching-and-starting-sessions)
-6. [Reviews, History and Restore](#reviews-history-and-restore)
-7. [Memories](#memories)
-8. [Live updates](#live-updates)
-9. [Odd behavior that is not an error](#odd-behavior-that-is-not-an-error)
+1. [Installing](#installing)
+2. [The project cannot be shown](#the-project-cannot-be-shown)
+3. [The list is out of date](#the-list-is-out-of-date)
+4. [Edits are refused or uncertain](#edits-are-refused-or-uncertain)
+5. [Sync and Publish](#sync-and-publish)
+6. [Attaching and starting sessions](#attaching-and-starting-sessions)
+7. [Reviews, History and Restore](#reviews-history-and-restore)
+8. [Memories](#memories)
+9. [Live updates](#live-updates)
+10. [Odd behavior that is not an error](#odd-behavior-that-is-not-an-error)
+
+## Installing
+
+**What the permission prompt means.** Abacus can put a bead on a chat's message box (nothing is sent until you send it), reads your projects and sessions, and runs a local service limited to `bd`, `dolt` and `git`.
+
+**Updates.** When you open Settings, Extensions, OpenChamber checks for a newer version (at most once an hour); **Check for updates** checks now. A newer version shows an **Update** button, and your settings and approvals are kept. Nothing is built on your machine: the released files are in the repository.
+
+**A specific version.** Add the tag to the URL, for example `https://github.com/lantzleiweke/abacus#v0.2.0`.
+
+**Enterprise mode.** OpenChamber installs extensions that run a service only from repositories an admin allows. The admin adds this to `policy.json`:
+
+```json
+{ "enterpriseMode": true, "allowedExtensions": ["https://github.com/lantzleiweke/abacus"] }
+```
+
+**Only one copy at a time.** To run your own copy from a folder, remove the installed one first (see [development](development.md)). Removing it keeps the beads you have seen, but resets the panel's preferences, Stuck days and Keep list.
 
 ## The project cannot be shown
 
@@ -18,8 +35,8 @@ These replace the list. The panel checks them when it opens and when you press R
 
 | Message | Cause | Fix |
 |---|---|---|
-| "Beads isn't installed on this computer." | The panel could not find `bd`. It looks on the PATH and in `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/go/bin`. | Install Beads, then **Retry**. If it is installed somewhere else, put it on the PATH or in one of those folders. |
-| "This version of Beads is too old." | The installed `bd` is older than 1.2.2, or older than the version that last opened this project. | Update Beads, then **Retry**. The panel says which version it found and, for a project, which one last opened it. |
+| "Beads isn't installed on this computer." | The panel could not find `bd`. It looks on the PATH and in `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/go/bin`. | Press **Ask the agent to install Beads**: it puts a request on the chat's message box (or on a new chat, if none is open), and nothing is sent until you send it. Or install it yourself: **Copy install command** copies `brew install beads` for macOS, and **Install guide** opens the steps for other systems. Then **Retry**. If it is installed somewhere else, put it on the PATH or in one of those folders. |
+| "This version of Beads is too old." | The installed `bd` is older than 1.2.2, or older than the version that last opened this project. | Press **Ask the agent to update Beads**, which puts a request naming the version needed on the chat's message box, unsent. Or update it yourself: **Copy update command** copies `brew upgrade beads`, and **Install guide** covers other systems. Then **Retry**. The panel says which version it found and, for a project, which one last opened it. |
 | "This project doesn't use Beads." | There is no `.beads` folder above this one, its `metadata.json` cannot be read, or it is a fresh clone with no local database (embedded mode). | Ask your agent to set Beads up here, or to fetch the data for a clone, then **Retry**. |
 | "This project uses an older Beads format." | The project keeps its data in the old SQLite format (a `.beads/beads.db` file, with or without a `metadata.json`). | Ask your agent to upgrade the project's Beads data, then **Retry**. The panel never touches an old-format project, because a `bd` call could migrate it. |
 | "Open this project with Beads X?" | A newer Beads than the one that last opened the project is installed. Opening the project with it may update its files. | Choose **Open project** if you are happy for that to happen. The choice is saved for this project and this Beads version. If not, leave it. |

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+### Changed
+
+- The Beads-missing and Beads-too-old screens offer to ask the agent, copy the command, or open the install guide.
+
 ## 0.2.0 (unreleased)
 
 Review and audit what your agent did, and give it better context. Needs Beads 1.2.2 or 1.3.1. Live updates need 1.3.

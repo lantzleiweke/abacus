@@ -602,6 +602,8 @@ For causes and fixes see [troubleshooting](troubleshooting.md#the-project-cannot
 
 These replace the list. Each has a fix in [troubleshooting](troubleshooting.md).
 
+When Beads is missing or too old, **Ask the agent to install Beads** (or **Ask the agent to update Beads**) puts a short request on the chat's message box. Nothing is sent until you send it; with no chat open, it opens a new one. To do it yourself, **Copy install command** (or **Copy update command**) and **Install guide** are right below. Press **Retry** once Beads is in place. The attach dialog shows the same screen without the Ask button; ask from the Abacus panel instead.
+
 | Message | Screen |
 |---|---|
 | "Beads isn't installed on this computer." | [no-bd](screenshots/no-bd-light.png) |

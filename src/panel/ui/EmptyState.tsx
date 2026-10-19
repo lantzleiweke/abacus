@@ -1,7 +1,9 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { WorkspaceState } from '../../shared/types';
+import { ASK_ITEM, useAgent, useAgentState, type AgentRequest } from '../agent';
 import { firstLoadError, useStore, useStoreApi, type PanelError } from '../store';
+import { IconChat, IconCopy } from './icons';
 
 /** The middle bead of the illustration: how the state reads at a glance. */
 export type Tone = 'neutral' | 'missing' | 'warning' | 'error' | 'ask';
@@ -32,20 +34,73 @@ export function EmptyState({ tone, title, body, children }: { tone: Tone; title:
 const MIN_BD = '1.2.2';
 
 /**
- * Title, explanation and tone for a project the panel cannot show. Plain words: no command names. "Beads" is the
- * product, "beads" are the issues. `detail` is technical text for "Copy details" only.
+ * The way forward when Beads is missing or too old. With the agent at hand (the panel) the Ask button leads; where it is
+ * not (the attach dialog), the person does it, and learns the panel can ask for them.
  */
-export function workspaceCopy(workspace: WorkspaceState): { title: string; body: string; tone: Tone; detail?: string } {
+const fixIt = (verb: 'install' | 'update', canAsk: boolean) =>
+  canAsk
+    ? `Ask the agent to ${verb} it, or ${verb} it yourself, then press Retry.`
+    : `${verb === 'install' ? 'Install' : 'Update'} it, then press Retry. The Abacus panel can ask the agent to ${verb} it for you.`;
+
+/** Where Beads' own install steps live, for every system. */
+export const INSTALL_GUIDE = 'https://github.com/gastownhall/beads#-installation';
+
+/**
+ * How the Beads-missing and Beads-too-old screens help: the label of the button that asks the agent, the request it
+ * puts on the chat, and the command to copy. Command names live only in `request` and `command`, never on screen.
+ */
+export type InstallHelp = { ask: string; copy: string; command: string; request: AgentRequest };
+
+export function installHelp(workspace: WorkspaceState): InstallHelp | null {
+  const confirm = 'Then run `bd --version` to confirm it works.';
+  if (workspace.kind === 'no-bd') {
+    return {
+      ask: 'Ask the agent to install Beads',
+      copy: 'Copy install command',
+      command: 'brew install beads',
+      request: {
+        text: `Please install Beads (the \`bd\` command) on this computer. On macOS use \`brew install beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+        topic: { id: 'install-beads', title: 'Install Beads', url: INSTALL_GUIDE },
+      },
+    };
+  }
+  if (workspace.kind === 'bd-too-old') {
+    // A project a newer Beads opened needs that version; otherwise the panel's own floor applies.
+    const needed = workspace.lastOpenedWith ?? MIN_BD;
+    const who = workspace.lastOpenedWith ? 'This project needs' : 'The Beads panel needs';
+    return {
+      ask: 'Ask the agent to update Beads',
+      copy: 'Copy update command',
+      command: 'brew upgrade beads',
+      request: {
+        text: `Please update Beads (the \`bd\` command) on this computer. ${who} version ${needed} or newer, and this computer has ${workspace.bdVersion}. On macOS use \`brew upgrade beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+        topic: { id: 'update-beads', title: 'Update Beads', url: INSTALL_GUIDE },
+      },
+    };
+  }
+  return null;
+}
+
+/**
+ * Title, explanation and tone for a project the panel cannot show. Plain words: no command names. "Beads" is the
+ * product, "beads" are the issues. `detail` is technical text for "Copy details" only. `canAsk`: the agent can be asked
+ * from here (false in the attach dialog).
+ */
+export function workspaceCopy(workspace: WorkspaceState, canAsk = true): { title: string; body: string; tone: Tone; detail?: string } {
   switch (workspace.kind) {
     case 'no-bd':
-      return { tone: 'missing', title: "Beads isn't installed on this computer.", body: 'Install Beads, then retry. The panel finds it on its own.' };
+      return {
+        tone: 'missing',
+        title: "Beads isn't installed on this computer.",
+        body: `Abacus needs Beads to read this project's issues. ${fixIt('install', canAsk)}`,
+      };
     case 'bd-too-old':
       return {
         tone: 'warning',
         title: 'This version of Beads is too old.',
         body: workspace.lastOpenedWith
-          ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.`
-          : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`,
+          ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. ${fixIt('update', canAsk)}`
+          : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. ${fixIt('update', canAsk)}`,
       };
     case 'no-workspace':
       return { tone: 'neutral', title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
@@ -103,6 +158,56 @@ function RetryButton({ primary = false }: { primary?: boolean }) {
   );
 }
 
+/** Runs one press at a time: a press while the last one is still running does nothing. */
+function useOneAtATime(): [boolean, (work: () => Promise<void>) => void] {
+  const running = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const run = (work: () => Promise<void>) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    void work().finally(() => {
+      running.current = false;
+      setBusy(false);
+    });
+  };
+  return [busy, run];
+}
+
+/** Beads is missing or too old: ask the agent to fix it, copy the command, open the guide, or retry. */
+function InstallActions({ help }: { help: InstallHelp }) {
+  const store = useStoreApi();
+  const agent = useAgent();
+  const { session, busy } = useAgentState();
+  const asking = busy?.id === ASK_ITEM;
+  const [copying, copy] = useOneAtATime();
+  const [opening, open] = useOneAtATime();
+  return (
+    <>
+      {agent && (
+        <>
+          <button type="button" class="bd-btn bd-btn-primary bd-empty-ask" disabled={busy !== null} aria-busy={asking} onClick={() => void agent.ask(help.request)}>
+            {asking ? <span class="bd-spin" aria-hidden="true" /> : <IconChat size={13} />}
+            {help.ask}
+          </button>
+          <p class="bd-empty-hint">{session ? 'Nothing is sent until you send it.' : 'Opens a new chat. Nothing is sent until you send it.'}</p>
+        </>
+      )}
+      <button type="button" class="bd-btn" aria-disabled={copying} aria-busy={copying} onClick={() => copy(() => store.copyText(help.command))}>
+        <IconCopy size={13} />
+        {help.copy}
+      </button>
+      <RetryButton primary={!agent} />
+      <p class="bd-empty-more">
+        <button type="button" class="bd-link" aria-disabled={opening} aria-busy={opening} onClick={() => open(() => store.openUrl(INSTALL_GUIDE))}>
+          Install guide
+          <span aria-hidden="true"> ↗</span>
+        </button>
+      </p>
+    </>
+  );
+}
+
 /** "Copy details" for raw text; hidden when there is none, unless `always` (the message itself is then copied). */
 function CopyDetails({ error, always = false }: { error: PanelError; always?: boolean }) {
   const store = useStoreApi();
@@ -118,7 +223,17 @@ function CopyDetails({ error, always = false }: { error: PanelError; always?: bo
 export function WorkspaceEmpty({ workspace }: { workspace: WorkspaceState }) {
   const state = useStore();
   const store = useStoreApi();
-  const { title, body, tone, detail } = workspaceCopy(workspace);
+  // The attach dialog has no agent to ask: the copy then says what the person can do there.
+  const canAsk = useAgent() !== null;
+  const { title, body, tone, detail } = workspaceCopy(workspace, canAsk);
+  const help = installHelp(workspace);
+  if (help) {
+    return (
+      <EmptyState tone={tone} title={title} body={body}>
+        <InstallActions help={help} />
+      </EmptyState>
+    );
+  }
   if (workspace.kind !== 'needs-first-contact') {
     return (
       <EmptyState tone={tone} title={title} body={body}>

@@ -113,7 +113,7 @@ export function App() {
 /** The host surface the panel uses. */
 export type PanelHost = Pick<
   HostClient,
-  'serviceRequest' | 'storage' | 'toast' | 'onDirectory' | 'setBadge' | 'writeClipboard' | 'openUrl' | 'attach' | 'startSession' | 'onSession'
+  'serviceRequest' | 'storage' | 'toast' | 'onDirectory' | 'setBadge' | 'writeClipboard' | 'openUrl' | 'attach' | 'compose' | 'startSession' | 'onSession'
 >;
 
 let styled = false;

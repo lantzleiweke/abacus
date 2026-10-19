@@ -1,6 +1,6 @@
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo/lockup-dark.svg"><img src="docs/logo/lockup-light.svg" alt="Abacus" height="60"></picture>
 
-Abacus is an OpenChamber extension that shows a project's [Beads](https://github.com/steveyegge/beads) issues in the right-rail panel, next to your agent. You can browse, search, edit and create beads, see what your agent changed, and hand a bead to a chat or a new session. You do not need the `bd` command line to do any of it.
+Abacus is an OpenChamber extension that shows a project's [Beads](https://github.com/gastownhall/beads) issues in the right-rail panel, next to your agent. You can browse, search, edit and create beads, see what your agent changed, and hand a bead to a chat or a new session. You do not need the `bd` command line to do any of it.
 
 In this documentation, "Beads" is the tool and "beads" are the issues it tracks.
 
@@ -65,25 +65,13 @@ The panel looks for `bd`, `dolt` and `git` on the PATH and in `/opt/homebrew/bin
 
 ## Install
 
-You need [OpenChamber](https://github.com/openchamber/openchamber) 2.3.2 or later and [Beads](https://github.com/steveyegge/beads) on your PATH (`brew install beads`; Beads 1.3.1 is recommended, 1.2.2 works without live updates).
+Needs [OpenChamber](https://github.com/openchamber/openchamber) 2.3.2 or later and [Beads](https://github.com/gastownhall/beads) (`brew install beads`).
 
 1. In OpenChamber, open **Settings**, then **Extensions**.
-2. Paste `https://github.com/lantzleiweke/abacus` into **Folder, ZIP, or URL** and press **Add**.
-3. OpenChamber asks to allow Abacus: it can put a bead on a chat's message box (nothing is sent until you send it), reads your projects and sessions, and runs a local service limited to `bd`, `dolt` and `git`. Press **Allow and enable**, then open the Abacus panel from the rail.
+2. Paste `https://github.com/lantzleiweke/abacus` and press **Add**.
+3. Press **Allow and enable**, then open Abacus from the rail.
 
-Nothing is built on your machine: the built files are in the repository.
-
-**Updates.** When you open the Extensions screen, OpenChamber checks for a newer version (at most once an hour); **Check for updates** checks now. A newer version shows an **Update** button; your settings and approvals are kept.
-
-**A specific version.** Add the tag to the URL, for example `https://github.com/lantzleiweke/abacus#v0.2.0`.
-
-**Enterprise mode.** OpenChamber only installs extensions that run a service from repositories an admin allows. An admin adds this to `policy.json`:
-
-```json
-{ "enterpriseMode": true, "allowedExtensions": ["https://github.com/lantzleiweke/abacus"] }
-```
-
-**From a folder.** To run your own copy, clone the repository, then add the folder's absolute path in the same field. See [development](docs/development.md) to build it. Only one copy can be installed at a time. Removing one keeps the beads you have seen, but resets the panel's preferences, Stuck days and Keep list.
+New versions show up on the same screen as an **Update** button. Installing for a team in enterprise mode, pinning a version, or running your own copy: see [troubleshooting](docs/troubleshooting.md#installing) and [development](docs/development.md).
 
 ## First run
 

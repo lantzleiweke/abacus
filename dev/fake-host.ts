@@ -168,6 +168,9 @@ export function createFakeHost(service: FakeService, events: FakeHostEvents, ini
     },
     attach: attachLike('attach'),
     sessionLink: attachLike('sessionLink'),
+    async compose(req: { text: string; mode?: 'append' | 'replace' }) {
+      log(`compose(${req.mode ?? 'append'}, ${req.text.length} chars): ${req.text}`);
+    },
     async startSession(req: StartSessionRequest): Promise<StartSessionResult> {
       const wt = req.worktree && req.worktree !== true && req.worktree.kind === 'new' ? req.worktree : null;
       log(`startSession(${req.id}${wt ? `, worktree ${wt.name}${wt.baseBranch ? ` from ${wt.baseBranch}` : ''}` : ''}, text: ${req.text === undefined ? 'none' : 'yes'})`);

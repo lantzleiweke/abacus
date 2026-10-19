@@ -5,7 +5,7 @@ import type { ContextResponse } from '../shared/api';
 import { asRequestError, COPY_MAX, TOAST_MAX, type BeadsClient } from './client';
 import { folderName } from './format';
 import { shortId } from './list';
-import { attachPayload, worktreeName } from './resolve';
+import { attachPayload, PROVIDER_ID, worktreeName } from './resolve';
 import type { Store } from './store';
 
 /** What is running: adding a bead (or the sync problem, id `SYNC_ITEM`) to the chat, or starting a session (in a new worktree or not). */
@@ -13,6 +13,15 @@ export type AgentBusy = { id: string; kind: 'attach' | 'session' | 'worktree' };
 
 /** The busy id while the sync problem's details are being handed to the agent. */
 export const SYNC_ITEM = ':sync';
+
+/** The busy id while a request is being put on a chat's message box (`ask`). */
+export const ASK_ITEM = ':ask';
+
+/**
+ * A request for the agent, put on the chat's message box as plain text the person reads and sends. `topic` is what a
+ * new chat started for it is linked to (with no chat open): an id, a title and a page about it.
+ */
+export type AgentRequest = { text: string; topic: { id: string; title: string; url: string } };
 
 /** The "New session in a worktree" confirmation, for bead `id`. */
 export type WorktreeSheet = { id: string; title: string; name: string };
@@ -24,7 +33,7 @@ export type AgentState = {
   sheet: WorktreeSheet | null;
 };
 
-export type AgentHost = Pick<HostClient, 'attach' | 'startSession' | 'toast'>;
+export type AgentHost = Pick<HostClient, 'attach' | 'compose' | 'startSession' | 'toast'>;
 
 export type Agent = {
   get(): AgentState;
@@ -43,6 +52,11 @@ export type Agent = {
   attachSync(): Promise<void>;
   /** Starts a new session with the sync problem's details on its composer. */
   startSyncSession(): Promise<void>;
+  /**
+   * Puts the request's text on the open chat's message box; with no chat open, starts one (opened, nothing sent) and
+   * puts it there. Nothing is sent: the person reads it and sends it.
+   */
+  ask(request: AgentRequest): Promise<void>;
 };
 
 /** What OpenChamber 2.3.2 rejects `startSession` with after showing its own failure toast. */
@@ -112,6 +126,20 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
     }
   }
 
+  /** Says why `startSession` refused, unless OpenChamber already did. */
+  function startRefused(thrown: unknown, worktree: boolean) {
+    const error = asRequestError(thrown);
+    // OpenChamber shows its own "couldn't start" toast before refusing like this; a second one would only repeat it.
+    if (error.code === 'HOST_REJECTED' && error.detail === HOST_SAID_SO) return;
+    if (error.code === 'HOST_TIMEOUT') {
+      const after = worktree ? 'A worktree may already exist: check the sidebar before trying again.' : 'It may still appear in the sidebar.';
+      toast('error', `The session didn't start in time. ${after}`, error.detail);
+      return;
+    }
+    const lead = `The session couldn't be started. ${error.message}`;
+    toast('error', worktree ? `${lead} A worktree may already exist: check the sidebar before trying again.` : lead, error.detail);
+  }
+
   async function start(id: string, source: ChipSource, kind: 'session' | 'worktree', worktree?: StartSessionRequest['worktree']) {
     await run({ id, kind }, async () => {
       const payload = await chip(source);
@@ -122,16 +150,7 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
       try {
         result = await host.startSession({ ...linked, ...(worktree ? { worktree } : {}), navigation: 'open' });
       } catch (thrown) {
-        const error = asRequestError(thrown);
-        // OpenChamber shows its own "couldn't start" toast before refusing like this; a second one would only repeat it.
-        if (error.code === 'HOST_REJECTED' && error.detail === HOST_SAID_SO) return;
-        if (error.code === 'HOST_TIMEOUT') {
-          const after = worktree ? 'A worktree may already exist: check the sidebar before trying again.' : 'It may still appear in the sidebar.';
-          toast('error', `The session didn't start in time. ${after}`, error.detail);
-          return;
-        }
-        const lead = `The session couldn't be started. ${error.message}`;
-        toast('error', worktree ? `${lead} A worktree may already exist: check the sidebar before trying again.` : lead, error.detail);
+        startRefused(thrown, worktree !== undefined);
         return;
       }
       if (result.sessionId === null) {
@@ -182,6 +201,35 @@ export function createAgent({ client, host, store }: { client: Pick<BeadsClient,
     },
     startSyncSession() {
       return start(SYNC_ITEM, syncSource, 'session');
+    },
+    ask({ text, topic }) {
+      const open = state.session !== null;
+      return run({ id: ASK_ITEM, kind: open ? 'attach' : 'session' }, async () => {
+        if (!open) {
+          // Like the sync problem with no chat open: a new chat, opened. No text, which the host would send as its first message.
+          let result: StartSessionResult;
+          try {
+            result = await host.startSession({ providerId: PROVIDER_ID, id: topic.id, title: topic.title, url: topic.url, navigation: 'open' });
+          } catch (thrown) {
+            startRefused(thrown, false);
+            return;
+          }
+          if (result.sessionId === null) {
+            toast('error', failedStart(result, false), result.worktree.directory);
+            return;
+          }
+          // The chat is open now, whenever the host gets round to saying so: another press goes to it, not to a third chat.
+          if (!state.session) set({ session: { id: result.sessionId, title: topic.title, busy: false } });
+        }
+        try {
+          await host.compose({ text });
+          toast('success', open ? 'The request is on the chat. Nothing is sent until you send it.' : 'The request is on a new chat. Nothing is sent until you send it.');
+        } catch (thrown) {
+          const error = asRequestError(thrown);
+          // The request itself rides on Copy, so it can still be pasted into a chat by hand.
+          toast('error', `Couldn't put the request on the chat. ${error.message}`, text);
+        }
+      });
     },
     askWorktree(id) {
       if (state.busy) return;

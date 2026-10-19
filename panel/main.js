@@ -2674,6 +2674,7 @@ ${GUEST_UI_LOOK_CSS}`;
 
   // src/panel/agent.ts
   var SYNC_ITEM = ":sync";
+  var ASK_ITEM = ":ask";
   var HOST_SAID_SO = "Could not start that session.";
   function failedStart(result, wanted) {
     const name = result.worktree.name || folderName(result.worktree.directory);
@@ -2724,6 +2725,17 @@ ${GUEST_UI_LOOK_CSS}`;
         set({ busy: null });
       }
     }
+    function startRefused(thrown, worktree) {
+      const error = asRequestError(thrown);
+      if (error.code === "HOST_REJECTED" && error.detail === HOST_SAID_SO) return;
+      if (error.code === "HOST_TIMEOUT") {
+        const after = worktree ? "A worktree may already exist: check the sidebar before trying again." : "It may still appear in the sidebar.";
+        toast("error", `The session didn't start in time. ${after}`, error.detail);
+        return;
+      }
+      const lead = `The session couldn't be started. ${error.message}`;
+      toast("error", worktree ? `${lead} A worktree may already exist: check the sidebar before trying again.` : lead, error.detail);
+    }
     async function start(id, source, kind, worktree) {
       await run({ id, kind }, async () => {
         const payload = await chip(source);
@@ -2733,15 +2745,7 @@ ${GUEST_UI_LOOK_CSS}`;
         try {
           result = await host2.startSession({ ...linked, ...worktree ? { worktree } : {}, navigation: "open" });
         } catch (thrown) {
-          const error = asRequestError(thrown);
-          if (error.code === "HOST_REJECTED" && error.detail === HOST_SAID_SO) return;
-          if (error.code === "HOST_TIMEOUT") {
-            const after = worktree ? "A worktree may already exist: check the sidebar before trying again." : "It may still appear in the sidebar.";
-            toast("error", `The session didn't start in time. ${after}`, error.detail);
-            return;
-          }
-          const lead = `The session couldn't be started. ${error.message}`;
-          toast("error", worktree ? `${lead} A worktree may already exist: check the sidebar before trying again.` : lead, error.detail);
+          startRefused(thrown, worktree !== void 0);
           return;
         }
         if (result.sessionId === null) {
@@ -2786,6 +2790,32 @@ ${GUEST_UI_LOOK_CSS}`;
       },
       startSyncSession() {
         return start(SYNC_ITEM, syncSource, "session");
+      },
+      ask({ text: text2, topic }) {
+        const open = state.session !== null;
+        return run({ id: ASK_ITEM, kind: open ? "attach" : "session" }, async () => {
+          if (!open) {
+            let result;
+            try {
+              result = await host2.startSession({ providerId: PROVIDER_ID, id: topic.id, title: topic.title, url: topic.url, navigation: "open" });
+            } catch (thrown) {
+              startRefused(thrown, false);
+              return;
+            }
+            if (result.sessionId === null) {
+              toast("error", failedStart(result, false), result.worktree.directory);
+              return;
+            }
+            if (!state.session) set({ session: { id: result.sessionId, title: topic.title, busy: false } });
+          }
+          try {
+            await host2.compose({ text: text2 });
+            toast("success", open ? "The request is on the chat. Nothing is sent until you send it." : "The request is on a new chat. Nothing is sent until you send it.");
+          } catch (thrown) {
+            const error = asRequestError(thrown);
+            toast("error", `Couldn't put the request on the chat. ${error.message}`, text2);
+          }
+        });
       },
       askWorktree(id) {
         if (state.busy) return;
@@ -4132,18 +4162,15 @@ ${field}`;
       openUrl(url) {
         const offerCopy = () => host2.toast({ kind: "info", message: `The panel can't open this link: ${url}`.slice(0, TOAST_MAX), copy: { text: url } }).catch(() => {
         });
-        if (!/^(https?:|mailto:)/i.test(url)) {
-          void offerCopy();
-          return;
-        }
-        host2.openUrl(url).catch(offerCopy);
+        if (!/^(https?:|mailto:)/i.test(url)) return offerCopy();
+        return host2.openUrl(url).catch(offerCopy);
       },
       copyDetails(error) {
         host2.toast({ kind: "error", message: error.message.slice(0, TOAST_MAX), copy: { text: (error.detail ?? error.message).slice(0, COPY_MAX) } }).catch(() => {
         });
       },
       copyText(text2) {
-        host2.writeClipboard(text2).then(
+        return host2.writeClipboard(text2).then(
           () => host2.toast({ kind: "success", message: `Copied ${text2}` }),
           () => host2.toast({ kind: "info", message: text2, copy: { text: text2 } })
         ).catch(() => {
@@ -4372,6 +4399,93 @@ ${field}`;
     return l.vnode && l.vnode(l3), l3;
   }
 
+  // src/panel/ui/icons.tsx
+  function Icon({ size = 14, children }) {
+    return /* @__PURE__ */ u3("svg", { class: "bd-i", width: size, height: size, viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false", children });
+  }
+  var IconFolder = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2 4.5c0-.6.4-1 1-1h3.2l1.3 1.5H13c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" }) });
+  var IconSearch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("circle", { cx: "7", cy: "7", r: "4.3" }),
+    /* @__PURE__ */ u3("path", { d: "M10.2 10.2l3.3 3.3" })
+  ] });
+  var IconFilter = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z" }) });
+  var IconAlert = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
+    /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
+  ] });
+  var IconEpic = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
+    /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
+    /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
+  ] });
+  var IconChevron = (p3) => /* @__PURE__ */ u3(Icon, { size: 12, ...p3, children: /* @__PURE__ */ u3("path", { d: "M4 6l4 4 4-4" }) });
+  var IconMore = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M3.5 8h.1M8 8h.1M12.5 8h.1", "stroke-width": "2.2" }) });
+  var IconCopy = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
+    /* @__PURE__ */ u3("path", { d: "M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7" })
+  ] });
+  var IconChat = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 4.2c0-.9.7-1.7 1.7-1.7h7.6c.9 0 1.7.8 1.7 1.7v5c0 .9-.8 1.7-1.7 1.7H7l-3 2.6v-2.6h0c-.9 0-1.5-.8-1.5-1.7z" }) });
+  var IconSession = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
+    /* @__PURE__ */ u3("path", { d: "M8 5.5v5M5.5 8h5" })
+  ] });
+  var IconBranch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("circle", { cx: "4.5", cy: "3.5", r: "1.5" }),
+    /* @__PURE__ */ u3("circle", { cx: "4.5", cy: "12.5", r: "1.5" }),
+    /* @__PURE__ */ u3("circle", { cx: "11.5", cy: "5.5", r: "1.5" }),
+    /* @__PURE__ */ u3("path", { d: "M4.5 5v6M11.5 7c0 2.5-2 3.2-4.4 3.6-1.2.2-2.2.7-2.6 1.4" })
+  ] });
+  var IconSpinner = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { class: "bd-spin", d: "M8 2.5a5.5 5.5 0 1 1-5.5 5.5" }) });
+  var IconSync = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M13 6.5A5.2 5.2 0 0 0 3.6 5M3 9.5A5.2 5.2 0 0 0 12.4 11" }),
+    /* @__PURE__ */ u3("path", { d: "M3.4 2.6v2.6H6M12.6 13.4v-2.6H10" })
+  ] });
+  var IconPublish = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M8 10.5V2.8M5 5.6l3-3 3 3" }),
+    /* @__PURE__ */ u3("path", { d: "M2.8 9.5v2.7c0 .6.4 1 1 1h8.4c.6 0 1-.4 1-1V9.5" })
+  ] });
+  var IconBack = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M13 8H3.5M7.5 4l-4 4 4 4" }) });
+  var IconX = (p3) => /* @__PURE__ */ u3(Icon, { size: 12, ...p3, children: /* @__PURE__ */ u3("path", { d: "M4.5 4.5l7 7M11.5 4.5l-7 7" }) });
+  var IconWait = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M4.5 2.5h7M4.5 13.5h7M5.5 2.5c0 3 5 3.5 5 5.5s-5 2.5-5 5.5M10.5 2.5c0 3-5 3.5-5 5.5s5 2.5 5 5.5" }) });
+  var IconEdit = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M10.6 3.2l2.2 2.2-7.4 7.4-2.9.7.7-2.9zM9.4 4.4l2.2 2.2" }) });
+  var IconPlus = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M8 3.5v9M3.5 8h9" }) });
+  var IconLink = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.8.8M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.8-.8" }) });
+  var IconTrash = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.2c0 .5.4.8.9.8h4c.5 0 .9-.3.9-.8l.6-8.2" }) });
+  var IconClock = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("circle", { cx: "8", cy: "8", r: "5.5" }),
+    /* @__PURE__ */ u3("path", { d: "M8 5v3.2l2 1.3" })
+  ] });
+  var TYPE_PATHS = {
+    bug: /* @__PURE__ */ u3("path", { d: "M5.6 5.4a2.4 2.4 0 0 1 4.8 0M4.6 8.8a3.4 3.4 0 0 1 6.8 0v.8a3.4 3.4 0 0 1-6.8 0zM8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3" }),
+    feature: /* @__PURE__ */ u3("path", { d: "M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z" }),
+    task: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
+      /* @__PURE__ */ u3("path", { d: "M5.4 8.1l1.9 1.9 3.4-3.7" })
+    ] }),
+    epic: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
+      /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
+      /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
+    ] }),
+    chore: /* @__PURE__ */ u3("path", { d: "M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z" }),
+    decision: /* @__PURE__ */ u3("path", { d: "M8 2l6 6-6 6-6-6zM8 5.5v3M8 10.5v.1" }),
+    spike: /* @__PURE__ */ u3("path", { d: "M9 1.8L3.8 9H8l-1 5.2L12.2 7H8z" }),
+    story: /* @__PURE__ */ u3("path", { d: "M3 3.2c1.7-.6 3.4-.4 5 .8 1.6-1.2 3.3-1.4 5-.8v9.5c-1.7-.6-3.4-.4-5 .8-1.6-1.2-3.3-1.4-5-.8zM8 4v9.5" }),
+    milestone: /* @__PURE__ */ u3("path", { d: "M4 14V2.5M4 3h8.5l-2 3 2 3H4" }),
+    incident: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
+      /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
+    ] })
+  };
+  function TypeIcon({ type, size }) {
+    const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
+    return /* @__PURE__ */ u3(Icon, { size, children: known ? TYPE_PATHS[type] : /* @__PURE__ */ u3("rect", { x: "3", y: "3", width: "10", height: "10", rx: "2.2", "stroke-dasharray": "2 1.8" }) });
+  }
+  var IconRestore = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("path", { d: "M3.5 6.5h6.2a3.3 3.3 0 0 1 0 6.6H6" }),
+    /* @__PURE__ */ u3("path", { d: "M6 3.8L3.3 6.5 6 9.2" })
+  ] });
+
   // src/panel/ui/EmptyState.tsx
   function Thread({ tone: tone2 }) {
     return /* @__PURE__ */ u3("svg", { class: "bd-thread", "data-tone": tone2, width: "72", height: "20", viewBox: "0 0 72 20", "aria-hidden": "true", focusable: "false", children: [
@@ -4390,15 +4504,49 @@ ${field}`;
     ] });
   }
   var MIN_BD = "1.2.2";
-  function workspaceCopy(workspace) {
+  var fixIt = (verb, canAsk) => canAsk ? `Ask the agent to ${verb} it, or ${verb} it yourself, then press Retry.` : `${verb === "install" ? "Install" : "Update"} it, then press Retry. The Abacus panel can ask the agent to ${verb} it for you.`;
+  var INSTALL_GUIDE = "https://github.com/gastownhall/beads#-installation";
+  function installHelp(workspace) {
+    const confirm = "Then run `bd --version` to confirm it works.";
+    if (workspace.kind === "no-bd") {
+      return {
+        ask: "Ask the agent to install Beads",
+        copy: "Copy install command",
+        command: "brew install beads",
+        request: {
+          text: `Please install Beads (the \`bd\` command) on this computer. On macOS use \`brew install beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+          topic: { id: "install-beads", title: "Install Beads", url: INSTALL_GUIDE }
+        }
+      };
+    }
+    if (workspace.kind === "bd-too-old") {
+      const needed = workspace.lastOpenedWith ?? MIN_BD;
+      const who = workspace.lastOpenedWith ? "This project needs" : "The Beads panel needs";
+      return {
+        ask: "Ask the agent to update Beads",
+        copy: "Copy update command",
+        command: "brew upgrade beads",
+        request: {
+          text: `Please update Beads (the \`bd\` command) on this computer. ${who} version ${needed} or newer, and this computer has ${workspace.bdVersion}. On macOS use \`brew upgrade beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+          topic: { id: "update-beads", title: "Update Beads", url: INSTALL_GUIDE }
+        }
+      };
+    }
+    return null;
+  }
+  function workspaceCopy(workspace, canAsk = true) {
     switch (workspace.kind) {
       case "no-bd":
-        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
+        return {
+          tone: "missing",
+          title: "Beads isn't installed on this computer.",
+          body: `Abacus needs Beads to read this project's issues. ${fixIt("install", canAsk)}`
+        };
       case "bd-too-old":
         return {
           tone: "warning",
           title: "This version of Beads is too old.",
-          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
+          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. ${fixIt("update", canAsk)}` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. ${fixIt("update", canAsk)}`
         };
       case "no-workspace":
         return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
@@ -4454,6 +4602,46 @@ ${field}`;
       }
     );
   }
+  function useOneAtATime() {
+    const running = A2(false);
+    const [busy, setBusy] = d2(false);
+    const run = (work) => {
+      if (running.current) return;
+      running.current = true;
+      setBusy(true);
+      void work().finally(() => {
+        running.current = false;
+        setBusy(false);
+      });
+    };
+    return [busy, run];
+  }
+  function InstallActions({ help }) {
+    const store = useStoreApi();
+    const agent = useAgent();
+    const { session, busy } = useAgentState();
+    const asking = busy?.id === ASK_ITEM;
+    const [copying, copy] = useOneAtATime();
+    const [opening, open] = useOneAtATime();
+    return /* @__PURE__ */ u3(S, { children: [
+      agent && /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary bd-empty-ask", disabled: busy !== null, "aria-busy": asking, onClick: () => void agent.ask(help.request), children: [
+          asking ? /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }) : /* @__PURE__ */ u3(IconChat, { size: 13 }),
+          help.ask
+        ] }),
+        /* @__PURE__ */ u3("p", { class: "bd-empty-hint", children: session ? "Nothing is sent until you send it." : "Opens a new chat. Nothing is sent until you send it." })
+      ] }),
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn", "aria-disabled": copying, "aria-busy": copying, onClick: () => copy(() => store.copyText(help.command)), children: [
+        /* @__PURE__ */ u3(IconCopy, { size: 13 }),
+        help.copy
+      ] }),
+      /* @__PURE__ */ u3(RetryButton, { primary: !agent }),
+      /* @__PURE__ */ u3("p", { class: "bd-empty-more", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", "aria-disabled": opening, "aria-busy": opening, onClick: () => open(() => store.openUrl(INSTALL_GUIDE)), children: [
+        "Install guide",
+        /* @__PURE__ */ u3("span", { "aria-hidden": "true", children: " \u2197" })
+      ] }) })
+    ] });
+  }
   function CopyDetails({ error, always = false }) {
     const store = useStoreApi();
     if (!error.detail && !always) return null;
@@ -4462,7 +4650,12 @@ ${field}`;
   function WorkspaceEmpty({ workspace }) {
     const state = useStore();
     const store = useStoreApi();
-    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
+    const canAsk = useAgent() !== null;
+    const { title, body, tone: tone2, detail } = workspaceCopy(workspace, canAsk);
+    const help = installHelp(workspace);
+    if (help) {
+      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: /* @__PURE__ */ u3(InstallActions, { help }) });
+    }
     if (workspace.kind !== "needs-first-contact") {
       return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
         /* @__PURE__ */ u3(RetryButton, { primary: true }),
@@ -4700,93 +4893,6 @@ ${field}`;
       }
     );
   }
-
-  // src/panel/ui/icons.tsx
-  function Icon({ size = 14, children }) {
-    return /* @__PURE__ */ u3("svg", { class: "bd-i", width: size, height: size, viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false", children });
-  }
-  var IconFolder = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2 4.5c0-.6.4-1 1-1h3.2l1.3 1.5H13c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" }) });
-  var IconSearch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("circle", { cx: "7", cy: "7", r: "4.3" }),
-    /* @__PURE__ */ u3("path", { d: "M10.2 10.2l3.3 3.3" })
-  ] });
-  var IconFilter = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z" }) });
-  var IconAlert = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
-    /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
-  ] });
-  var IconEpic = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
-    /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
-    /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
-  ] });
-  var IconChevron = (p3) => /* @__PURE__ */ u3(Icon, { size: 12, ...p3, children: /* @__PURE__ */ u3("path", { d: "M4 6l4 4 4-4" }) });
-  var IconMore = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M3.5 8h.1M8 8h.1M12.5 8h.1", "stroke-width": "2.2" }) });
-  var IconCopy = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
-    /* @__PURE__ */ u3("path", { d: "M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7" })
-  ] });
-  var IconChat = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 4.2c0-.9.7-1.7 1.7-1.7h7.6c.9 0 1.7.8 1.7 1.7v5c0 .9-.8 1.7-1.7 1.7H7l-3 2.6v-2.6h0c-.9 0-1.5-.8-1.5-1.7z" }) });
-  var IconSession = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
-    /* @__PURE__ */ u3("path", { d: "M8 5.5v5M5.5 8h5" })
-  ] });
-  var IconBranch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("circle", { cx: "4.5", cy: "3.5", r: "1.5" }),
-    /* @__PURE__ */ u3("circle", { cx: "4.5", cy: "12.5", r: "1.5" }),
-    /* @__PURE__ */ u3("circle", { cx: "11.5", cy: "5.5", r: "1.5" }),
-    /* @__PURE__ */ u3("path", { d: "M4.5 5v6M11.5 7c0 2.5-2 3.2-4.4 3.6-1.2.2-2.2.7-2.6 1.4" })
-  ] });
-  var IconSpinner = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { class: "bd-spin", d: "M8 2.5a5.5 5.5 0 1 1-5.5 5.5" }) });
-  var IconSync = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("path", { d: "M13 6.5A5.2 5.2 0 0 0 3.6 5M3 9.5A5.2 5.2 0 0 0 12.4 11" }),
-    /* @__PURE__ */ u3("path", { d: "M3.4 2.6v2.6H6M12.6 13.4v-2.6H10" })
-  ] });
-  var IconPublish = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("path", { d: "M8 10.5V2.8M5 5.6l3-3 3 3" }),
-    /* @__PURE__ */ u3("path", { d: "M2.8 9.5v2.7c0 .6.4 1 1 1h8.4c.6 0 1-.4 1-1V9.5" })
-  ] });
-  var IconBack = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M13 8H3.5M7.5 4l-4 4 4 4" }) });
-  var IconX = (p3) => /* @__PURE__ */ u3(Icon, { size: 12, ...p3, children: /* @__PURE__ */ u3("path", { d: "M4.5 4.5l7 7M11.5 4.5l-7 7" }) });
-  var IconWait = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M4.5 2.5h7M4.5 13.5h7M5.5 2.5c0 3 5 3.5 5 5.5s-5 2.5-5 5.5M10.5 2.5c0 3-5 3.5-5 5.5s5 2.5 5 5.5" }) });
-  var IconEdit = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M10.6 3.2l2.2 2.2-7.4 7.4-2.9.7.7-2.9zM9.4 4.4l2.2 2.2" }) });
-  var IconPlus = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M8 3.5v9M3.5 8h9" }) });
-  var IconLink = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.8.8M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.8-.8" }) });
-  var IconTrash = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.2c0 .5.4.8.9.8h4c.5 0 .9-.3.9-.8l.6-8.2" }) });
-  var IconClock = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("circle", { cx: "8", cy: "8", r: "5.5" }),
-    /* @__PURE__ */ u3("path", { d: "M8 5v3.2l2 1.3" })
-  ] });
-  var TYPE_PATHS = {
-    bug: /* @__PURE__ */ u3("path", { d: "M5.6 5.4a2.4 2.4 0 0 1 4.8 0M4.6 8.8a3.4 3.4 0 0 1 6.8 0v.8a3.4 3.4 0 0 1-6.8 0zM8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3" }),
-    feature: /* @__PURE__ */ u3("path", { d: "M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z" }),
-    task: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
-      /* @__PURE__ */ u3("path", { d: "M5.4 8.1l1.9 1.9 3.4-3.7" })
-    ] }),
-    epic: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
-      /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
-      /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
-    ] }),
-    chore: /* @__PURE__ */ u3("path", { d: "M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z" }),
-    decision: /* @__PURE__ */ u3("path", { d: "M8 2l6 6-6 6-6-6zM8 5.5v3M8 10.5v.1" }),
-    spike: /* @__PURE__ */ u3("path", { d: "M9 1.8L3.8 9H8l-1 5.2L12.2 7H8z" }),
-    story: /* @__PURE__ */ u3("path", { d: "M3 3.2c1.7-.6 3.4-.4 5 .8 1.6-1.2 3.3-1.4 5-.8v9.5c-1.7-.6-3.4-.4-5 .8-1.6-1.2-3.3-1.4-5-.8zM8 4v9.5" }),
-    milestone: /* @__PURE__ */ u3("path", { d: "M4 14V2.5M4 3h8.5l-2 3 2 3H4" }),
-    incident: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
-      /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
-    ] })
-  };
-  function TypeIcon({ type, size }) {
-    const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
-    return /* @__PURE__ */ u3(Icon, { size, children: known ? TYPE_PATHS[type] : /* @__PURE__ */ u3("rect", { x: "3", y: "3", width: "10", height: "10", rx: "2.2", "stroke-dasharray": "2 1.8" }) });
-  }
-  var IconRestore = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("path", { d: "M3.5 6.5h6.2a3.3 3.3 0 0 1 0 6.6H6" }),
-    /* @__PURE__ */ u3("path", { d: "M6 3.8L3.3 6.5 6 9.2" })
-  ] });
 
   // src/panel/ui/AttachFooter.tsx
   function useRowActions() {
@@ -15296,6 +15402,43 @@ ${snapshot.cursor}` : null;
   margin: 2px 0 0;
   color: var(--bd-dim);
   font-size: 11.5px;
+}
+
+/* Beads missing or too old: asking the agent leads on its own line, its hint right under it; copy and Retry share the
+   next line, the guide sits last. The hint is read, not glanced at: muted, never dim. */
+/* A narrow rail wraps the label onto a second line rather than cutting it off. Text flow, not flex, so the icon stays
+   in front of the first word instead of standing apart at the edge. */
+.bd-empty-ask {
+  display: inline-block;
+  height: auto;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 6px 14px;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.bd-empty-ask > .bd-i,
+.bd-empty-ask > .bd-spin {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.bd-empty-hint {
+  flex-basis: 100%;
+  margin: -2px 0 6px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.bd-empty-more {
+  flex-basis: 100%;
+  margin: 2px 0 0;
 }
 
 .bd-empty-error {

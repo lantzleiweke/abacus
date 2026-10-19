@@ -3280,18 +3280,15 @@ ${field}`;
       openUrl(url) {
         const offerCopy = () => host2.toast({ kind: "info", message: `The panel can't open this link: ${url}`.slice(0, TOAST_MAX), copy: { text: url } }).catch(() => {
         });
-        if (!/^(https?:|mailto:)/i.test(url)) {
-          void offerCopy();
-          return;
-        }
-        host2.openUrl(url).catch(offerCopy);
+        if (!/^(https?:|mailto:)/i.test(url)) return offerCopy();
+        return host2.openUrl(url).catch(offerCopy);
       },
       copyDetails(error) {
         host2.toast({ kind: "error", message: error.message.slice(0, TOAST_MAX), copy: { text: (error.detail ?? error.message).slice(0, COPY_MAX) } }).catch(() => {
         });
       },
       copyText(text2) {
-        host2.writeClipboard(text2).then(
+        return host2.writeClipboard(text2).then(
           () => host2.toast({ kind: "success", message: `Copied ${text2}` }),
           () => host2.toast({ kind: "info", message: text2, copy: { text: text2 } })
         ).catch(() => {
@@ -3503,7 +3500,22 @@ ${field}`;
   }
 
   // src/panel/agent.ts
+  var ASK_ITEM = ":ask";
   var AgentContext = X(null);
+  var IDLE = { session: null, busy: null, sheet: null };
+  var useAgent = () => x2(AgentContext);
+  function useAgentState() {
+    const agent = useAgent();
+    const [, setVersion] = d2(0);
+    h2(() => {
+      if (!agent) return;
+      const bump = () => setVersion((v5) => v5 + 1);
+      const stop = agent.subscribe(bump);
+      bump();
+      return stop;
+    }, [agent]);
+    return agent?.get() ?? IDLE;
+  }
 
   // node_modules/preact/jsx-runtime/dist/jsxRuntime.module.js
   var f3 = 0;
@@ -3514,6 +3526,47 @@ ${field}`;
     var l3 = { type: e3, props: p3, key: n2, ref: a5, __k: null, __: null, __b: 0, __e: null, __c: null, constructor: void 0, __v: --f3, __i: -1, __u: 0, __source: i3, __self: u4 };
     if ("function" == typeof e3 && (a5 = e3.defaultProps)) for (c3 in a5) void 0 === p3[c3] && (p3[c3] = a5[c3]);
     return l.vnode && l.vnode(l3), l3;
+  }
+
+  // src/panel/ui/icons.tsx
+  function Icon({ size = 14, children }) {
+    return /* @__PURE__ */ u3("svg", { class: "bd-i", width: size, height: size, viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false", children });
+  }
+  var IconSearch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("circle", { cx: "7", cy: "7", r: "4.3" }),
+    /* @__PURE__ */ u3("path", { d: "M10.2 10.2l3.3 3.3" })
+  ] });
+  var IconCopy = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
+    /* @__PURE__ */ u3("rect", { x: "5.5", y: "5.5", width: "8", height: "8", rx: "1.5" }),
+    /* @__PURE__ */ u3("path", { d: "M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7" })
+  ] });
+  var IconChat = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { d: "M2.5 4.2c0-.9.7-1.7 1.7-1.7h7.6c.9 0 1.7.8 1.7 1.7v5c0 .9-.8 1.7-1.7 1.7H7l-3 2.6v-2.6h0c-.9 0-1.5-.8-1.5-1.7z" }) });
+  var IconSpinner = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { class: "bd-spin", d: "M8 2.5a5.5 5.5 0 1 1-5.5 5.5" }) });
+  var TYPE_PATHS = {
+    bug: /* @__PURE__ */ u3("path", { d: "M5.6 5.4a2.4 2.4 0 0 1 4.8 0M4.6 8.8a3.4 3.4 0 0 1 6.8 0v.8a3.4 3.4 0 0 1-6.8 0zM8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3" }),
+    feature: /* @__PURE__ */ u3("path", { d: "M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z" }),
+    task: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
+      /* @__PURE__ */ u3("path", { d: "M5.4 8.1l1.9 1.9 3.4-3.7" })
+    ] }),
+    epic: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
+      /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
+      /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
+    ] }),
+    chore: /* @__PURE__ */ u3("path", { d: "M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z" }),
+    decision: /* @__PURE__ */ u3("path", { d: "M8 2l6 6-6 6-6-6zM8 5.5v3M8 10.5v.1" }),
+    spike: /* @__PURE__ */ u3("path", { d: "M9 1.8L3.8 9H8l-1 5.2L12.2 7H8z" }),
+    story: /* @__PURE__ */ u3("path", { d: "M3 3.2c1.7-.6 3.4-.4 5 .8 1.6-1.2 3.3-1.4 5-.8v9.5c-1.7-.6-3.4-.4-5 .8-1.6-1.2-3.3-1.4-5-.8zM8 4v9.5" }),
+    milestone: /* @__PURE__ */ u3("path", { d: "M4 14V2.5M4 3h8.5l-2 3 2 3H4" }),
+    incident: /* @__PURE__ */ u3(S, { children: [
+      /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
+      /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
+    ] })
+  };
+  function TypeIcon({ type, size }) {
+    const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
+    return /* @__PURE__ */ u3(Icon, { size, children: known ? TYPE_PATHS[type] : /* @__PURE__ */ u3("rect", { x: "3", y: "3", width: "10", height: "10", rx: "2.2", "stroke-dasharray": "2 1.8" }) });
   }
 
   // src/panel/ui/EmptyState.tsx
@@ -3534,15 +3587,49 @@ ${field}`;
     ] });
   }
   var MIN_BD = "1.2.2";
-  function workspaceCopy(workspace) {
+  var fixIt = (verb, canAsk) => canAsk ? `Ask the agent to ${verb} it, or ${verb} it yourself, then press Retry.` : `${verb === "install" ? "Install" : "Update"} it, then press Retry. The Abacus panel can ask the agent to ${verb} it for you.`;
+  var INSTALL_GUIDE = "https://github.com/gastownhall/beads#-installation";
+  function installHelp(workspace) {
+    const confirm = "Then run `bd --version` to confirm it works.";
+    if (workspace.kind === "no-bd") {
+      return {
+        ask: "Ask the agent to install Beads",
+        copy: "Copy install command",
+        command: "brew install beads",
+        request: {
+          text: `Please install Beads (the \`bd\` command) on this computer. On macOS use \`brew install beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+          topic: { id: "install-beads", title: "Install Beads", url: INSTALL_GUIDE }
+        }
+      };
+    }
+    if (workspace.kind === "bd-too-old") {
+      const needed = workspace.lastOpenedWith ?? MIN_BD;
+      const who = workspace.lastOpenedWith ? "This project needs" : "The Beads panel needs";
+      return {
+        ask: "Ask the agent to update Beads",
+        copy: "Copy update command",
+        command: "brew upgrade beads",
+        request: {
+          text: `Please update Beads (the \`bd\` command) on this computer. ${who} version ${needed} or newer, and this computer has ${workspace.bdVersion}. On macOS use \`brew upgrade beads\`; otherwise follow ${INSTALL_GUIDE}. ${confirm}`,
+          topic: { id: "update-beads", title: "Update Beads", url: INSTALL_GUIDE }
+        }
+      };
+    }
+    return null;
+  }
+  function workspaceCopy(workspace, canAsk = true) {
     switch (workspace.kind) {
       case "no-bd":
-        return { tone: "missing", title: "Beads isn't installed on this computer.", body: "Install Beads, then retry. The panel finds it on its own." };
+        return {
+          tone: "missing",
+          title: "Beads isn't installed on this computer.",
+          body: `Abacus needs Beads to read this project's issues. ${fixIt("install", canAsk)}`
+        };
       case "bd-too-old":
         return {
           tone: "warning",
           title: "This version of Beads is too old.",
-          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. Update Beads to open it here.` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. Update Beads, then retry.`
+          body: workspace.lastOpenedWith ? `This project was last opened with Beads ${workspace.lastOpenedWith}. This panel uses ${workspace.bdVersion}, which is older. ${fixIt("update", canAsk)}` : `The panel needs Beads ${MIN_BD} or newer, and this computer has ${workspace.bdVersion}. ${fixIt("update", canAsk)}`
         };
       case "no-workspace":
         return { tone: "neutral", title: "This project doesn't use Beads.", body: "Beads keeps a project's issues next to its code. Ask your agent to set it up here, then retry." };
@@ -3598,6 +3685,46 @@ ${field}`;
       }
     );
   }
+  function useOneAtATime() {
+    const running = A2(false);
+    const [busy, setBusy] = d2(false);
+    const run = (work) => {
+      if (running.current) return;
+      running.current = true;
+      setBusy(true);
+      void work().finally(() => {
+        running.current = false;
+        setBusy(false);
+      });
+    };
+    return [busy, run];
+  }
+  function InstallActions({ help }) {
+    const store = useStoreApi();
+    const agent = useAgent();
+    const { session, busy } = useAgentState();
+    const asking = busy?.id === ASK_ITEM;
+    const [copying, copy] = useOneAtATime();
+    const [opening, open] = useOneAtATime();
+    return /* @__PURE__ */ u3(S, { children: [
+      agent && /* @__PURE__ */ u3(S, { children: [
+        /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn bd-btn-primary bd-empty-ask", disabled: busy !== null, "aria-busy": asking, onClick: () => void agent.ask(help.request), children: [
+          asking ? /* @__PURE__ */ u3("span", { class: "bd-spin", "aria-hidden": "true" }) : /* @__PURE__ */ u3(IconChat, { size: 13 }),
+          help.ask
+        ] }),
+        /* @__PURE__ */ u3("p", { class: "bd-empty-hint", children: session ? "Nothing is sent until you send it." : "Opens a new chat. Nothing is sent until you send it." })
+      ] }),
+      /* @__PURE__ */ u3("button", { type: "button", class: "bd-btn", "aria-disabled": copying, "aria-busy": copying, onClick: () => copy(() => store.copyText(help.command)), children: [
+        /* @__PURE__ */ u3(IconCopy, { size: 13 }),
+        help.copy
+      ] }),
+      /* @__PURE__ */ u3(RetryButton, { primary: !agent }),
+      /* @__PURE__ */ u3("p", { class: "bd-empty-more", children: /* @__PURE__ */ u3("button", { type: "button", class: "bd-link", "aria-disabled": opening, "aria-busy": opening, onClick: () => open(() => store.openUrl(INSTALL_GUIDE)), children: [
+        "Install guide",
+        /* @__PURE__ */ u3("span", { "aria-hidden": "true", children: " \u2197" })
+      ] }) })
+    ] });
+  }
   function CopyDetails({ error, always = false }) {
     const store = useStoreApi();
     if (!error.detail && !always) return null;
@@ -3606,7 +3733,12 @@ ${field}`;
   function WorkspaceEmpty({ workspace }) {
     const state = useStore();
     const store = useStoreApi();
-    const { title, body, tone: tone2, detail } = workspaceCopy(workspace);
+    const canAsk = useAgent() !== null;
+    const { title, body, tone: tone2, detail } = workspaceCopy(workspace, canAsk);
+    const help = installHelp(workspace);
+    if (help) {
+      return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: /* @__PURE__ */ u3(InstallActions, { help }) });
+    }
     if (workspace.kind !== "needs-first-contact") {
       return /* @__PURE__ */ u3(EmptyState, { tone: tone2, title, body, children: [
         /* @__PURE__ */ u3(RetryButton, { primary: true }),
@@ -3645,42 +3777,6 @@ ${field}`;
 
   // src/panel/ui/ProjectUpdate.tsx
   var UPDATE_TITLE = "This project needs a one-time update for the newer Beads.";
-
-  // src/panel/ui/icons.tsx
-  function Icon({ size = 14, children }) {
-    return /* @__PURE__ */ u3("svg", { class: "bd-i", width: size, height: size, viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false", children });
-  }
-  var IconSearch = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: [
-    /* @__PURE__ */ u3("circle", { cx: "7", cy: "7", r: "4.3" }),
-    /* @__PURE__ */ u3("path", { d: "M10.2 10.2l3.3 3.3" })
-  ] });
-  var IconSpinner = (p3) => /* @__PURE__ */ u3(Icon, { ...p3, children: /* @__PURE__ */ u3("path", { class: "bd-spin", d: "M8 2.5a5.5 5.5 0 1 1-5.5 5.5" }) });
-  var TYPE_PATHS = {
-    bug: /* @__PURE__ */ u3("path", { d: "M5.6 5.4a2.4 2.4 0 0 1 4.8 0M4.6 8.8a3.4 3.4 0 0 1 6.8 0v.8a3.4 3.4 0 0 1-6.8 0zM8 7.5V13M2.2 8.6h2.4M11.4 8.6h2.4M2.8 12.6l1.9-1M13.2 12.6l-1.9-1M3.2 4.6l1.7 1.3M12.8 4.6l-1.7 1.3" }),
-    feature: /* @__PURE__ */ u3("path", { d: "M8 1.8l1.7 3.9 4.1.4-3.1 2.8.9 4.1L8 10.9 4.4 13l.9-4.1-3.1-2.8 4.1-.4z" }),
-    task: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("rect", { x: "2.5", y: "2.5", width: "11", height: "11", rx: "2.2" }),
-      /* @__PURE__ */ u3("path", { d: "M5.4 8.1l1.9 1.9 3.4-3.7" })
-    ] }),
-    epic: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("path", { d: "M8 2l6 3-6 3-6-3z" }),
-      /* @__PURE__ */ u3("path", { d: "M2 8l6 3 6-3" }),
-      /* @__PURE__ */ u3("path", { d: "M2 11l6 3 6-3" })
-    ] }),
-    chore: /* @__PURE__ */ u3("path", { d: "M10.6 2.3a3.1 3.1 0 0 0-2.9 4.1L2.4 11.7l1.9 1.9 5.3-5.3a3.1 3.1 0 0 0 4.1-2.9l-1.9 1.9-1.8-.4-.4-1.8z" }),
-    decision: /* @__PURE__ */ u3("path", { d: "M8 2l6 6-6 6-6-6zM8 5.5v3M8 10.5v.1" }),
-    spike: /* @__PURE__ */ u3("path", { d: "M9 1.8L3.8 9H8l-1 5.2L12.2 7H8z" }),
-    story: /* @__PURE__ */ u3("path", { d: "M3 3.2c1.7-.6 3.4-.4 5 .8 1.6-1.2 3.3-1.4 5-.8v9.5c-1.7-.6-3.4-.4-5 .8-1.6-1.2-3.3-1.4-5-.8zM8 4v9.5" }),
-    milestone: /* @__PURE__ */ u3("path", { d: "M4 14V2.5M4 3h8.5l-2 3 2 3H4" }),
-    incident: /* @__PURE__ */ u3(S, { children: [
-      /* @__PURE__ */ u3("path", { d: "M8 2.2l6.2 11H1.8z" }),
-      /* @__PURE__ */ u3("path", { d: "M8 6.6v3M8 11.4v.1" })
-    ] })
-  };
-  function TypeIcon({ type, size }) {
-    const known = Object.prototype.hasOwnProperty.call(TYPE_PATHS, type);
-    return /* @__PURE__ */ u3(Icon, { size, children: known ? TYPE_PATHS[type] : /* @__PURE__ */ u3("rect", { x: "3", y: "3", width: "10", height: "10", rx: "2.2", "stroke-dasharray": "2 1.8" }) });
-  }
 
   // src/panel/sync.ts
   var SyncContext = X(null);
@@ -7772,6 +7868,43 @@ Please report this to https://github.com/markedjs/marked.`, e3) {
   margin: 2px 0 0;
   color: var(--bd-dim);
   font-size: 11.5px;
+}
+
+/* Beads missing or too old: asking the agent leads on its own line, its hint right under it; copy and Retry share the
+   next line, the guide sits last. The hint is read, not glanced at: muted, never dim. */
+/* A narrow rail wraps the label onto a second line rather than cutting it off. Text flow, not flex, so the icon stays
+   in front of the first word instead of standing apart at the edge. */
+.bd-empty-ask {
+  display: inline-block;
+  height: auto;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 6px 14px;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.bd-empty-ask > .bd-i,
+.bd-empty-ask > .bd-spin {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.bd-empty-hint {
+  flex-basis: 100%;
+  margin: -2px 0 6px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.bd-empty-more {
+  flex-basis: 100%;
+  margin: 2px 0 0;
 }
 
 .bd-empty-error {

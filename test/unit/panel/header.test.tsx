@@ -288,7 +288,8 @@ describe('Empty states', () => {
   it('says a project last opened with a newer Beads needs Beads updated here', async () => {
     const { wrap } = setup(() => json(snapshot()));
     const { container } = wrap(<WorkspaceEmpty workspace={{ kind: 'bd-too-old', bdVersion: '1.2.2', lastOpenedWith: '1.3.0' } as WorkspaceState} />);
-    expect(container.textContent).toContain('This project was last opened with Beads 1.3.0. This panel uses 1.2.2, which is older. Update Beads to open it here.');
+    // Rendered without an agent: the way forward is worded for that (see install-help.test.tsx for both).
+    expect(container.textContent).toContain('This project was last opened with Beads 1.3.0. This panel uses 1.2.2, which is older. Update it, then press Retry.');
     expect(container.textContent).not.toContain('or newer');
   });
 

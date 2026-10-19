@@ -625,6 +625,43 @@
   font-size: 11.5px;
 }
 
+/* Beads missing or too old: asking the agent leads on its own line, its hint right under it; copy and Retry share the
+   next line, the guide sits last. The hint is read, not glanced at: muted, never dim. */
+/* A narrow rail wraps the label onto a second line rather than cutting it off. Text flow, not flex, so the icon stays
+   in front of the first word instead of standing apart at the edge. */
+.bd-empty-ask {
+  display: inline-block;
+  height: auto;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 6px 14px;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.bd-empty-ask > .bd-i,
+.bd-empty-ask > .bd-spin {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.bd-empty-hint {
+  flex-basis: 100%;
+  margin: -2px 0 6px;
+  color: var(--bd-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.bd-empty-more {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+}
+
 .bd-empty-error {
   flex-basis: 100%;
   margin: 2px 0 0;
